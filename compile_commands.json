@@ -1,0 +1,15 @@
+[
+  {
+    "arguments": [
+      "/usr/bin/gcc",
+      "-c",
+      "-I/usr/include/libdrm",
+      "-o",
+      "vortex",
+      "vortex.c"
+    ],
+    "directory": "/home/luca/dev/vortex",
+    "file": "/home/luca/dev/vortex/vortex.c",
+    "output": "/home/luca/dev/vortex/vortex"
+  }
+]
