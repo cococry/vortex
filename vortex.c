@@ -12,7 +12,6 @@
 #include <gbm.h>
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
-#include <GLES2/gl2.h>
 #include <wayland-server-core.h>
 #include <wayland-server-protocol.h>
 #include <time.h>
@@ -30,7 +29,7 @@
 #include <linux/input-event-codes.h>
 
 #include <runara/runara.h>
-#include "/home/luca/dev/runara/vendor/glad/include/glad/glad.h"
+#include "glad.h" 
 
 
 #define _BRAND_NAME "vortex"
@@ -91,6 +90,8 @@ typedef struct {
   uint32_t pending_fb;
   uint32_t prev_fb;
   bool needs_modeset;
+
+  bool running;
 
 } vt_compositor_t;
 
@@ -746,6 +747,8 @@ static void page_flip_handler(int fd, unsigned int frame,
     c->pending_fb = 0;
 
     send_frame_callbacks(c, sec * 1000 + usec / 1000);
+
+  render_frame(c);
 }
 
 
@@ -759,6 +762,61 @@ static int drm_fd_ready(int fd, uint32_t mask, void *data) {
   return 0;
 }
 
+static int libinput_fd_ready(int fd, uint32_t mask, void *data) {
+  vt_compositor_t *c = data;
+  static bool alt_down = false, ctrl_down = false;
+  libinput_dispatch(c->input);
+
+  struct libinput_event *event;
+  while ((event = libinput_get_event(c->input)) != NULL) {
+    enum libinput_event_type type = libinput_event_get_type(event);
+
+    switch (type) {
+      case LIBINPUT_EVENT_KEYBOARD_KEY: {
+        struct libinput_event_keyboard *kbevent =
+          libinput_event_get_keyboard_event(event);
+        uint32_t key = libinput_event_keyboard_get_key(kbevent);
+        enum libinput_key_state state =
+          libinput_event_keyboard_get_key_state(kbevent);
+
+        if (state == LIBINPUT_KEY_STATE_PRESSED && key == KEY_LEFTCTRL)
+          ctrl_down = true;
+        else if (state == LIBINPUT_KEY_STATE_RELEASED && key == KEY_LEFTCTRL)
+          ctrl_down = false;
+
+        if (state == LIBINPUT_KEY_STATE_PRESSED && key == KEY_LEFTALT)
+          alt_down = true;
+        else if (state == LIBINPUT_KEY_STATE_RELEASED && key == KEY_LEFTALT)
+          alt_down = false;
+
+        if (state == LIBINPUT_KEY_STATE_PRESSED && key == 41) // ESC
+          comp.running = false;
+
+        bool mods = (alt_down && ctrl_down &&
+          state == LIBINPUT_KEY_STATE_PRESSED);
+        if (mods) {
+          if (key == KEY_F1) ioctl(c->tty_fd, VT_ACTIVATE, 1);
+          if (key == KEY_F2) ioctl(c->tty_fd, VT_ACTIVATE, 2);
+          if (key == KEY_F3) ioctl(c->tty_fd, VT_ACTIVATE, 3);
+          if (key == KEY_F4) ioctl(c->tty_fd, VT_ACTIVATE, 4);
+          if (key == KEY_F5) ioctl(c->tty_fd, VT_ACTIVATE, 5);
+          if (key == KEY_F6) ioctl(c->tty_fd, VT_ACTIVATE, 6);
+          if (key == KEY_F7) ioctl(c->tty_fd, VT_ACTIVATE, 7);
+          if (key == KEY_F8) ioctl(c->tty_fd, VT_ACTIVATE, 8);
+          if (key == KEY_F9) ioctl(c->tty_fd, VT_ACTIVATE, 9);
+        }
+        break;
+      }
+
+      default:
+        break;
+    }
+
+    libinput_event_destroy(event);
+  }
+
+  return 0;
+}
 
 
 void comp_bind(struct wl_client *client, void *data,
@@ -884,83 +942,32 @@ int main(int argc, char** argv) {
   libinput_udev_assign_seat(comp.input, "seat0");
   libinput_dispatch(comp.input);
 
-  bool running = true;
-  bool alt_down = false, ctrl_down = false;
+  comp.running = true;
 
   comp.needs_modeset = true;
   comp.current_bo = NULL;
-comp.pending_bo = NULL;
-comp.prev_bo = NULL;
-comp.current_fb = 0;
-comp.pending_fb = 0;
-comp.prev_fb = 0;
+  comp.pending_bo = NULL;
+  comp.prev_bo = NULL;
+  comp.current_fb = 0;
+  comp.pending_fb = 0;
+  comp.prev_fb = 0;
 
   wl_event_loop_add_fd(comp.wl.evloop, comp.drm.drm_fd,
                        WL_EVENT_READABLE, drm_fd_ready, &comp);
 
-  while (running) {
-    struct libinput_event *event;
-    libinput_dispatch(comp.input);
-    while ((event = libinput_get_event(comp.input)) != NULL) {
-      enum libinput_event_type type = libinput_event_get_type(event);
+  int li_fd = libinput_get_fd(comp.input);
+  wl_event_loop_add_fd(comp.wl.evloop, li_fd,
+                       WL_EVENT_READABLE, libinput_fd_ready, &comp);
 
-      switch (type) {
-        case LIBINPUT_EVENT_KEYBOARD_KEY: {
-          struct libinput_event_keyboard *kbevent =
-            libinput_event_get_keyboard_event(event);
-          uint32_t key = libinput_event_keyboard_get_key(kbevent);
-          enum libinput_key_state state =
-            libinput_event_keyboard_get_key_state(kbevent);
+  comp.needs_modeset = true;
+  render_frame(&comp);
 
-          if(state == LIBINPUT_KEY_STATE_PRESSED && key == KEY_LEFTCTRL) {
-            ctrl_down = true; 
-          }  else if(state == LIBINPUT_KEY_STATE_RELEASED && key == KEY_LEFTCTRL) {
-            ctrl_down = false; 
-          } 
-          if(state == LIBINPUT_KEY_STATE_PRESSED && key == KEY_LEFTALT) {
-            alt_down = true; 
-          }  else if(state == LIBINPUT_KEY_STATE_RELEASED && key == KEY_LEFTALT) {
-            alt_down = false; 
-          } 
-
-          if(state == LIBINPUT_KEY_STATE_PRESSED && key == 41) {
-            running = false;
-          }
-
-          bool mods = alt_down && ctrl_down && 
-          state == LIBINPUT_KEY_STATE_PRESSED;
-          bool switched = false;
-          if(mods && key == KEY_F1) ioctl(comp.tty_fd, VT_ACTIVATE, 1); break;
-          if(mods && key == KEY_F2) ioctl(comp.tty_fd, VT_ACTIVATE, 2); break;
-          if(mods && key == KEY_F3) ioctl(comp.tty_fd, VT_ACTIVATE, 3); break;
-          if(mods && key == KEY_F4) ioctl(comp.tty_fd, VT_ACTIVATE, 4); break;
-          if(mods && key == KEY_F5) ioctl(comp.tty_fd, VT_ACTIVATE, 5); break;
-          if(mods && key == KEY_F6) ioctl(comp.tty_fd, VT_ACTIVATE, 6); break;
-          if(mods && key == KEY_F7) ioctl(comp.tty_fd, VT_ACTIVATE, 7); break;
-          if(mods && key == KEY_F8) ioctl(comp.tty_fd, VT_ACTIVATE, 8); break;
-          if(mods && key == KEY_F9) ioctl(comp.tty_fd, VT_ACTIVATE, 9); break;
-
-          break;
-        }
-
-        case LIBINPUT_EVENT_DEVICE_ADDED:
-          // handle new device
-          break;
-
-        default:
-          // ignore other events for now
-          break;
-      }
-
-      libinput_event_destroy(event);
-    }
-
-
-    frame_handler(&comp);
+  while (comp.running) {
+    wl_event_loop_dispatch(comp.wl.evloop, -1); 
     wl_display_flush_clients(comp.wl.dsp);
-    wl_event_loop_dispatch(comp.wl.evloop, 0);
-    usleep(16000); // ~60 FPS
   }
+
+
   
   log_trace(comp.log, "shutting down...");
 
