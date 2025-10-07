@@ -1,0 +1,3 @@
+option('vt-werror', type: 'boolean', value: false, description: 'Treat warnings as errors')
+option('vt-buildtype', type: 'combo', choices: ['plain', 'debug', 'debugoptimized', 'release', 'minsize'], value: 'debugoptimized')
+
