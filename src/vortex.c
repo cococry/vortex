@@ -278,6 +278,8 @@ static void surface_offset(struct wl_client *client,
 static void surface_destroy(struct wl_client *client,
                             struct wl_resource *resource);
 
+static void surface_handle_resource_destroy(struct wl_resource* resource);
+
 static void comp_surface_create(
   struct wl_client *client,
   struct wl_resource *resource,
@@ -1458,6 +1460,23 @@ surface_offset(struct wl_client *client,
 void
 surface_destroy(struct wl_client *client,
                      struct wl_resource *resource) {
+  wl_resource_destroy(resource);
+  
+  log_trace(comp.log, 
+            "Got surface.destroy: Destroying surface resource.")
+}
+
+void 
+surface_handle_resource_destroy(struct wl_resource* resource) {
+  vt_surface_t* surf = wl_resource_get_user_data(resource);
+
+  wl_list_remove(&surf->link);
+  free(surf);
+
+  schedule_repaint(&comp);
+  
+  log_trace(comp.log, 
+            "Got surface.destroy handler: Unmanaging client.")
 }
 
 void
@@ -1477,10 +1496,10 @@ comp_surface_create(
 
   // Get the surface's wayland resource
   struct wl_resource* res = wl_resource_create(client, &wl_surface_interface, 4, id);
-  wl_resource_set_implementation(res, &surface_impl, surf, NULL);
+  wl_resource_set_implementation(res, &surface_impl, surf, surface_handle_resource_destroy);
   surf->surf_res = res;
 
-  log_trace(comp.log, "Got compositor.create_surface: Started managing surface %i", id)
+  log_trace(comp.log, "Got compositor.create_surface: Started managing surface.")
 }
 
 void 
@@ -1687,7 +1706,7 @@ render_frame(vt_compositor_t *c) {
   rn_begin(c->render);
 
   vt_surface_t *surf;
-  wl_list_for_each(surf, &c->surfaces, link) {
+  wl_list_for_each_reverse(surf, &c->surfaces, link) {
     if (surf->tex.id)
       rn_image_render(c->render, (vec2s){0,0}, RN_WHITE, surf->tex);
   }

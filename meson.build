@@ -53,7 +53,6 @@ xdg_server_code = custom_target(
   install: false
 )
 
-
 runara_sp  = subproject('runara')
 runara_dep = runara_sp.get_variable('runara_dep')
 
