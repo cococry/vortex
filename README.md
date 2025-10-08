@@ -1,7 +1,9 @@
 # vortex
 
-**Vortex** is a wayland compositor and renderer built on DRM, GBM,EGL, etc. using [Runara](https://github.com/cococry/runara) for its OpenGL abstraction and rendering layer.
-The compositor does not depend on any wayland abstraction library like libweston or wlroots, everything is self-implemented. 
+**Vortex** is a wayland compositor and renderer built from scratch depending
+only on the low level graphics stack composed of abstractions 
+such ad DRM, GBM and EGL. The compositor is using [Runara](https://github.com/cococry/runara) for its OpenGL abstraction and rendering layer.
+Due to the from-scratch nature of Vortex, it does not depend on any wayland abstraction library like libweston or wlroots, everything is self-implemented. 
 Vortex is the compositor of the Ragnar desktop ecosystem. 
 
 ---
