@@ -56,7 +56,7 @@ xdg_server_code = custom_target(
 runara_sp  = subproject('runara')
 runara_dep = runara_sp.get_variable('runara_dep')
 
-vortex_src = files('src/vortex.c')
+vortex_src = files('src/vortex.c', 'src/compositor.c', 'src/backends/drm.c', 'src/backends/wayland.c', 'src/renderers/egl_gl46.c', 'src/log.c')
 vortex_inc = include_directories('include')
 
 deps = [
