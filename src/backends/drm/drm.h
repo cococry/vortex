@@ -1,9 +1,11 @@
 #pragma once
 
-#include "../backend.h"
+#include "../../backend.h"
 
 bool backend_init_drm(vt_backend_t* backend);
   
+bool backend_implement_drm(vt_compositor_t* comp);
+
 bool backend_handle_event_drm(vt_backend_t* backend);
 
 bool backend_suspend_drm(vt_backend_t* backend);

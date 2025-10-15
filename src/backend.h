@@ -64,9 +64,11 @@ typedef struct {
   void* user_data;
 } vt_surface_t;
 
+typedef bool (*backend_implement_func_t)(vt_compositor_t* comp);
 
 typedef struct {
   bool (*init)(vt_backend_t* backend);
+  bool (*implement)(vt_compositor_t* comp);
   bool (*handle_event)(vt_backend_t* backend);
   bool (*suspend)(vt_backend_t* backend);
   bool (*resume)(vt_backend_t* backend);
@@ -178,6 +180,8 @@ struct vt_compositor_t {
   uint32_t n_virtual_outputs;
 
   vt_frame_clock frame_clock;
+
+  const char* _cmd_line_backend_path;
 };
 
 

@@ -1,0 +1,6 @@
+#pragma once
+
+#define VORTEX_PREFIX     "@prefix@"
+#define VORTEX_LIBDIR     "@libdir@"
+#define VORTEX_BACKEND_DIR "@libdir@/vortex/backends"
+

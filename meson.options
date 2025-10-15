@@ -1,3 +1,10 @@
-option('vt-werror', type: 'boolean', value: false, description: 'Treat warnings as errors')
-option('vt-buildtype', type: 'combo', choices: ['plain', 'debug', 'debugoptimized', 'release', 'minsize'], value: 'debugoptimized')
+option('vt_backend_drm',
+  type: 'boolean',
+  value: true,
+  description: 'Enable DRM backend')
+
+option('vt_backend_wl',
+  type: 'boolean',
+  value: true,
+  description: 'Enable Wayland backend')
 

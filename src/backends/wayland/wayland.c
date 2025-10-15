@@ -1,6 +1,6 @@
 #include "wayland.h"
-#include "../backend.h"
-#include "../log.h"
+#include "../../backend.h"
+#include "../../log.h"
 
 #include <wayland-client-core.h>
 #include <wayland-client.h>
@@ -189,6 +189,29 @@ backend_init_wl(vt_backend_t* backend) {
   return true;
 
 }
+
+bool 
+backend_implement_wl(vt_compositor_t* comp) {
+  if(!comp || !comp->backend) return false; 
+
+  log_trace(comp->log, "WL: Implementing backend...");
+
+  comp->backend->platform = VT_BACKEND_WAYLAND; 
+  comp->backend->impl = (vt_backend_interface_t){
+    .init = backend_init_wl,
+    .handle_event = backend_handle_event_wl,
+    .suspend = backend_suspend_wl,
+    .resume = backend_resume_wl,
+    .handle_frame = backend_handle_frame_wl,
+    .initialize_active_outputs = backend_initialize_active_outputs_wl, 
+    .terminate = backend_terminate_wl,
+    .create_output = backend_create_output_wl, 
+    .destroy_output = backend_destroy_output_wl, 
+    .prepare_output_frame = backend_prepare_output_frame_wl,
+    .__handle_input = backend___handle_input_wl
+  };
+}
+
 bool 
 backend_handle_event_wl(vt_backend_t* backend){
   // Ingored in wayland nested backend

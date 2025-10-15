@@ -1,9 +1,7 @@
+#include <linux/limits.h>
 #define _GNU_SOURCE
 #include "backend.h"
 #include "log.h"
-
-#include "backends/drm.h"
-#include "backends/wayland.h"
 #include "renderers/egl_gl46.h"
 
 #include <time.h>
@@ -14,20 +12,21 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <linux/input-event-codes.h>
+#include <dlfcn.h>
+#include <dirent.h>
 
 #include <wayland-server.h>
 
-#include "xdg-shell-protocol.h"
+#include "xdg-shell-protocol.h" 
+#include "config.h"
 
 static void _comp_frame_handler(void* data);
 
 static bool _comp_render_output(vt_compositor_t* c, vt_output_t* output);
 
-static void _comp_handle_cmd_flags(vt_compositor_t* c, int argc, char** argv);
+static const char* _comp_handle_cmd_flags(vt_compositor_t* c, int argc, char** argv);
 
 static void _comp_log_help();
-
-static void _comp_implement_backend(vt_compositor_t* c);
 
 static void _comp_implement_render(vt_compositor_t* c);
 
@@ -37,6 +36,8 @@ static bool _comp_wl_init(vt_compositor_t* c);
 
 static void  _comp_wl_bind(struct wl_client *client, void *data,
                uint32_t version, uint32_t id);
+
+static void _comp_load_backend(vt_compositor_t* c, const char* backend_name, const char* backend_path);
 
 static void _comp_associate_surface_with_output(vt_compositor_t* c, vt_surface_t* surf, vt_output_t* output);
 
@@ -330,6 +331,8 @@ static const struct wl_surface_interface surface_impl = {
   .damage_buffer = _comp_wl_surface_damage_buffer, 
 };
 
+static void* _comp_dl_handle = NULL;
+
 void 
 _comp_frame_handler(void *data) {
   vt_output_t* output = data;
@@ -453,7 +456,53 @@ static bool
 _flag_cmp(const char* flag, const char* lng, const char* shrt) {
   return strcmp(flag, lng) == 0 || strcmp(flag, shrt) == 0;
 }
-void 
+
+static char** _scan_valid_backends(size_t *count_out) {
+  char path[512];
+  snprintf(path, sizeof(path), "%s/%s", VORTEX_PREFIX, VORTEX_BACKEND_DIR);
+
+  DIR *dir = opendir(path);
+  if (!dir) {
+    perror("opendir");
+    return NULL;
+  }
+
+  struct dirent *entry;
+  char **list = NULL;
+  size_t count = 0;
+
+  while ((entry = readdir(dir)) != NULL) {
+    const char *name = entry->d_name;
+    const char *prefix = "lib";
+    const char *suffix = "-backend.so";
+
+    size_t len = strlen(name);
+    size_t prefix_len = strlen(prefix);
+    size_t suffix_len = strlen(suffix);
+
+    if (len > prefix_len + suffix_len &&
+      strncmp(name, prefix, prefix_len) == 0 &&
+      strcmp(name + len - suffix_len, suffix) == 0) {
+
+      // Extract <name> part between prefix and suffix
+      size_t core_len = len - prefix_len - suffix_len;
+      char *backend = malloc(core_len + 1);
+      if (!backend) continue;
+      memcpy(backend, name + prefix_len, core_len);
+      backend[core_len] = '\0';
+
+      list = realloc(list, (count + 2) * sizeof(char*));
+      list[count++] = backend;
+      list[count] = NULL;
+    }
+  }
+
+  closedir(dir);
+  if (count_out) *count_out = count;
+  return list;
+}
+
+const char*
 _comp_handle_cmd_flags(vt_compositor_t* c, int argc, char** argv) {
   if(argc > 1) {
     for(uint32_t i = 1; i < argc; i++) {
@@ -471,9 +520,37 @@ _comp_handle_cmd_flags(vt_compositor_t* c, int argc, char** argv) {
       } else if(_flag_cmp(flag, "-v", "--version")) {
         printf(_VERSION"\n");
         exit(0);
-      } else if(_flag_cmp(flag, "-n", "--nested")) {
-        c->backend->platform = VT_BACKEND_WAYLAND;
+      } else if(_flag_cmp(flag, "-b", "--backend")) {
+        if (i + 1 >= argc) {
+          log_error(c->log, "Missing value for %s", flag);
+          exit(1);
+        }
+        char* backend_str = argv[++i];
+        if(strlen(backend_str) > 31) exit(1);
+        size_t n;
+        char** valid_backends = _scan_valid_backends(&n);
+        bool valid = false;
+        for(uint32_t i = 0; i < n; i++)
+          if(strcmp(backend_str, valid_backends[i]) == 0) { valid = true; break; }
+        if(!valid) {
+          log_error(c->log, "Invalid compositor backend: '%s'", backend_str);
+          fprintf(stderr, "Valid backends are: [ "); 
+          for(uint32_t i = 0; i < n; i++)
+            fprintf(stderr, "%s %s", valid_backends[i], i != n - 1 ? "," : "");
+          fprintf(stderr, "]\n"); 
+          exit(1);
+        }
+        free(valid_backends);
+        return backend_str;
       } 
+      else if(_flag_cmp(flag, "-bp", "--backend-path")) {
+        if (i + 1 >= argc) {
+          log_error(c->log, "Missing value for %s", flag);
+          exit(1);
+        }
+        char* backend_path = argv[++i];
+        c->_cmd_line_backend_path = backend_path;
+      }
       else if(_flag_cmp(flag, "-vo", "--virtual-outputs")) {
         if (i + 1 >= argc) {
           log_error(c->log, "Missing value for %s", flag);
@@ -490,6 +567,7 @@ _comp_handle_cmd_flags(vt_compositor_t* c, int argc, char** argv) {
       }
     }
   }
+  return NULL;
 }
 
 void _comp_log_help() {
@@ -502,44 +580,16 @@ void _comp_log_help() {
          "Write logs to a logfile (~/.local/state/vortex/logs/ or if available $XDG_STATE_HOME/vortex/logs)");
   printf("%-30s %s\n", "-q, --quiet", "Run in quiet mode");
   printf("%-30s %s\n", "-vo, --virtual-outputs [val]", "Specify the number of virtual outputs (windows) in nested mode");
+  printf("%-30s %s", "-b, --backend [val]", "Specifies the sink backend of the compositor.");
+  printf("Valid backends are: [ "); 
+  size_t n;
+  char** valid_backends = _scan_valid_backends(&n);
+  for(uint32_t i = 0; i < n; i++)
+    printf("%s %s", valid_backends[i], i != n - 1 ? "," : "");
+  printf("]\n"); 
+  free(valid_backends);
+  printf("%-30s %s\n", "-bp, --backend-path [val]", "Specifies the path of the .so file to load as the compositor's sink backend");
   exit(0);
-}
-
-void 
-_comp_implement_backend(vt_compositor_t* c) {
-  if(!c || !c->backend) return;
-
-  if(c->backend->platform == VT_BACKEND_DRM_GBM) {
-    c->backend->impl = (vt_backend_interface_t){
-      .init = backend_init_drm,
-      .handle_event = backend_handle_event_drm,
-      .suspend = backend_suspend_drm,
-      .resume = backend_resume_drm,
-      .handle_frame = backend_handle_frame_drm,
-      .initialize_active_outputs = backend_initialize_active_outputs_drm, 
-      .terminate = backend_terminate_drm,
-      .create_output = backend_create_output_drm, 
-      .destroy_output = backend_destroy_output_drm, 
-      .prepare_output_frame = backend_prepare_output_frame_drm,
-      .__handle_input = backend___handle_input_drm
-    };
-  } else if(c->backend->platform == VT_BACKEND_WAYLAND) {
-    c->backend->impl = (vt_backend_interface_t){
-      .init = backend_init_wl,
-      .handle_event = backend_handle_event_wl,
-      .suspend = backend_suspend_wl,
-      .resume = backend_resume_wl,
-      .handle_frame = backend_handle_frame_wl,
-      .initialize_active_outputs = backend_initialize_active_outputs_wl, 
-      .terminate = backend_terminate_wl,
-      .create_output = backend_create_output_wl, 
-      .destroy_output = backend_destroy_output_wl, 
-      .prepare_output_frame = backend_prepare_output_frame_wl,
-      .__handle_input = backend___handle_input_wl
-    };
-  } else if(c->backend->platform == VT_BACKEND_SURFACELESS) {
-    log_fatal(c->log, "Surfaceless backend is not implemented yet.");
-  }
 }
 
 void 
@@ -586,6 +636,48 @@ _comp_wl_bind(struct wl_client *client, void *data,
                uint32_t version, uint32_t id) {
   struct wl_resource *res = wl_resource_create(client,&wl_compositor_interface,version,id);
   wl_resource_set_implementation(res,&compositor_impl, data, NULL);
+}
+
+
+void 
+_comp_load_backend(vt_compositor_t* c, const char* backend_name, const char* backend_path) {
+  if(_comp_dl_handle) {
+    log_warn(c->log, "Trying to reload backend during runtime, this is not supported.");
+    return;
+  }
+
+  char path[PATH_MAX];
+  if(backend_path) {
+    sprintf(path, "%s", backend_path);
+  } else {
+    sprintf(
+      path,
+      (VORTEX_PREFIX "/" VORTEX_BACKEND_DIR "/lib%s-backend.so"), 
+      backend_name);
+  }
+
+  _comp_dl_handle = dlopen(path, RTLD_NOW);
+  if(!_comp_dl_handle) {
+    const char *err = dlerror();
+    log_fatal(c->log, "%s (%s)", path, err ? err : "unknown error");
+    return;
+  }
+
+  char sym[64];
+  sprintf(sym, "backend_implement_%s", backend_name);
+  backend_implement_func_t sym_ptr = dlsym(_comp_dl_handle, sym);
+
+  if(!sym_ptr) {
+    log_fatal(c->log, "Backend %s does not export backend_implement_%s.", path, backend_name);
+    dlclose(_comp_dl_handle);
+    return;
+  }
+
+  if(!sym_ptr(c)) {
+    log_fatal(c->log, "Backend %s failed to initialize.", path);
+    dlclose(_comp_dl_handle);
+    return;
+  }
 }
 
 void _comp_associate_surface_with_output(vt_compositor_t* c, vt_surface_t* surf, vt_output_t* output) {
@@ -1201,14 +1293,21 @@ comp_init(vt_compositor_t* c, int argc, char** argv) {
   c->backend->comp = c;
   c->backend->renderer->comp = c;
 
-  c->backend->platform = VT_BACKEND_DRM_GBM; 
   c->backend->renderer->rendering_backend = VT_RENDERING_BACKEND_EGL_OPENGL;
 
-  c->n_virtual_outputs = 2;
 
-  _comp_handle_cmd_flags(c, argc, argv);
+  const char* backend_str = _comp_handle_cmd_flags(c, argc, argv);
+  if(!backend_str) {
+    if(getenv("WAYLAND_DISPLAY"))
+      backend_str = "wl";
+    else 
+      backend_str = "drm";
+  }
 
-  _comp_implement_backend(c);
+  if(strcmp(backend_str, "wl") == 0 && !c->n_virtual_outputs)
+    c->n_virtual_outputs = 1;
+
+  _comp_load_backend(c, backend_str, c->_cmd_line_backend_path);
   _comp_implement_render(c);
 
   if(!_comp_wl_init(c)) {
@@ -1307,6 +1406,8 @@ comp_terminate(vt_compositor_t *c) {
     fclose(c->log.stream);
     c->log.stream = NULL;
   }
+
+  dlclose(_comp_dl_handle);
 }
 
 void 

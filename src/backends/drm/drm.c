@@ -1,9 +1,8 @@
 #define _GNU_SOURCE
 
-#include <stdlib.h>
-#include <errno.h>
-#include <xf86drm.h>
+#include <drm.h>
 #include <xf86drmMode.h>
+#include <xf86drm.h>
 #include <fcntl.h>
 #include <linux/kd.h>
 #include <linux/vt.h>
@@ -17,12 +16,15 @@
 #include <drm/drm_fourcc.h>
 #include <linux/input-event-codes.h>
 
+#include <stdlib.h>
+#include <errno.h>
+
 #include <wayland-server-core.h>
 #include <wayland-util.h>
 
-#include "drm.h"
-#include "../log.h"
-#include "../backend.h"
+#include "./drm.h"
+#include "../../log.h"
+#include "../../backend.h"
 
 typedef struct {
   int drm_fd;
@@ -428,6 +430,31 @@ backend_init_drm(vt_backend_t* backend) {
 }
 
 bool 
+backend_implement_drm(vt_compositor_t* comp) {
+  if(!comp || !comp->backend) return false;
+
+  log_trace(comp->log, "DRM: Implementing backend...");
+
+  comp->backend->platform = VT_BACKEND_DRM_GBM; 
+
+  comp->backend->impl = (vt_backend_interface_t){
+    .init = backend_init_drm,
+    .handle_event = backend_handle_event_drm,
+    .suspend = backend_suspend_drm,
+    .resume = backend_resume_drm,
+    .handle_frame = backend_handle_frame_drm,
+    .initialize_active_outputs = backend_initialize_active_outputs_drm, 
+    .terminate = backend_terminate_drm,
+    .create_output = backend_create_output_drm, 
+    .destroy_output = backend_destroy_output_drm, 
+    .prepare_output_frame = backend_prepare_output_frame_drm,
+    .__handle_input = backend___handle_input_drm
+  };
+
+  return true;
+}
+
+  bool 
 backend_handle_event_drm(vt_backend_t* backend) {
   if (vt_release_pending) {
     vt_release_pending = 0;

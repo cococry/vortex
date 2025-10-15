@@ -11,15 +11,14 @@ project(
   ]
 )
 
+subdir('src')
+
 cc = meson.get_compiler('c')
 
 dep_wayland_server  = dependency('wayland-server', required: true)
-dep_wayland_client  = dependency('wayland-client', required: true)
 dep_wayland_egl     = dependency('wayland-egl',    required: true)
 dep_wayland_protos  = dependency('wayland-protocols', required: true)
 dep_egl             = dependency('egl',           required: true)
-dep_gbm             = dependency('gbm',           required: true)
-dep_drm             = dependency('libdrm',        required: true)
 dep_input           = dependency('libinput',      required: true)
 dep_udev            = dependency('libudev',       required: true)
 dep_gl              = dependency('gl',            required: true)
@@ -37,14 +36,6 @@ xdg_server_header = custom_target(
   install: false
 )
 
-xdg_client_header = custom_target(
-  'xdg-shell-client-header',
-  input: xdg_shell_xml,
-  output: 'xdg-shell-client-protocol.h',
-  command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@'],
-  install: false
-)
-
 xdg_server_code = custom_target(
   'xdg-shell-server-code',
   input: xdg_shell_xml,
@@ -56,17 +47,27 @@ xdg_server_code = custom_target(
 runara_sp  = subproject('runara')
 runara_dep = runara_sp.get_variable('runara_dep')
 
-vortex_src = files('src/vortex.c', 'src/compositor.c', 'src/backends/drm.c', 'src/backends/wayland.c', 'src/renderers/egl_gl46.c', 'src/log.c')
+vortex_src = files('src/vortex.c', 'src/compositor.c', 'src/renderers/egl_gl46.c', 'src/log.c')
 vortex_inc = include_directories('include')
 
 deps = [
-  dep_wayland_server, dep_wayland_client, dep_wayland_egl,
-  dep_egl, dep_gbm, dep_drm, dep_input, dep_udev, dep_gl,
+  dep_wayland_server, dep_wayland_egl,
+  dep_egl, dep_input, dep_udev, dep_gl,
   runara_dep
 ]
 if dep_xkbcommon.found()
   deps += dep_xkbcommon
 endif
+
+conf_data = configuration_data()
+conf_data.set('prefix', get_option('prefix'))
+conf_data.set('libdir', get_option('libdir'))
+
+configure_file(
+  input: 'src/config.h.in',
+  output: 'config.h',
+  configuration: conf_data,
+)
 
 # --- Executable ---
 vortex_exe = executable(
@@ -74,10 +75,10 @@ vortex_exe = executable(
   [
     vortex_src,
     xdg_server_header,
-    xdg_client_header,
     xdg_server_code,
   ],
   include_directories: vortex_inc,
+  link_args: ['-Wl,-E'], 
   dependencies: deps,
   install: true
 )
