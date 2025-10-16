@@ -496,6 +496,9 @@ backend_handle_frame_drm(vt_backend_t* backend, vt_output_t* output) {
 
   log_trace(comp->log, "DRM: Handling frame...");
 
+  // Render the compositor scene 
+  comp_repaint_scene(comp, output);
+
   if (!backend->renderer) {
     log_error(comp->log, "DRM: Renderer backend not initialized before handling frame.");
     return false;

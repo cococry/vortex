@@ -117,6 +117,7 @@ typedef struct vt_renderer_interface_t {
   bool (*import_buffer)(vt_renderer_t* r, vt_surface_t *surf,
       struct wl_resource* buffer_resource);
   bool (*drop_context)(vt_renderer_t* r);
+  void (*set_vsync)(vt_renderer_t* r, bool vsync);
   void (*begin_frame)(vt_renderer_t* r, vt_output_t* output);
   void (*draw_surface)(vt_renderer_t* r, vt_surface_t *surface, int32_t x, int32_t y);
   void (*end_frame)(vt_renderer_t* r, vt_output_t* output);
@@ -196,6 +197,8 @@ void comp_send_frame_callbacks_for_output(vt_compositor_t *c, vt_output_t* outpu
 void comp_send_frame_callbacks(vt_compositor_t *c, vt_output_t* output, uint32_t t);
 
 void comp_schedule_repaint(vt_compositor_t *c, vt_output_t* output);
+
+void comp_repaint_scene(vt_compositor_t *c, vt_output_t* output);
 
 uint32_t comp_get_time_msec(void);
 

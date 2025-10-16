@@ -388,6 +388,16 @@ renderer_drop_context_egl(vt_renderer_t* r) {
 }
 
 void 
+renderer_set_vsync(vt_renderer_t* r, bool vsync) {
+  if (!r || !r->impl.set_vsync || !r->user_data) {
+    log_error(r->comp->log, "EGL: Renderer backend not initialized before setting vsync.");
+    return;
+  }
+  egl_backend_state_t* egl = BACKEND_DATA(r, egl_backend_state_t);
+  eglSwapInterval(egl->egl_dsp, (EGLint)vsync);
+}
+
+void 
 renderer_begin_frame_egl(vt_renderer_t *r, vt_output_t *output) {
   if(!output);
   if (!r || !r->impl.begin_frame || !r->user_data) {

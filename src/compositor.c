@@ -421,30 +421,7 @@ comp_send_frame_callbacks(vt_compositor_t *c, vt_output_t* output, uint32_t t) {
 
 bool
 _comp_render_output(vt_compositor_t* c, vt_output_t* output) {
-  if(!c || !output || !c->backend || !c->backend->renderer || 
-    !c->backend->renderer->impl.begin_frame   || 
-    !c->backend->renderer->impl.draw_surface  || 
-    !c->backend->renderer->impl.end_frame     || 
-    !c->backend->impl.handle_frame 
-  ) return false;
-
-  vt_surface_t *surf;
-
-  c->backend->renderer->impl.begin_frame(c->backend->renderer, output);
-
-
-  wl_list_for_each_reverse(surf, &c->surfaces, link) {
-    // Skip if surface and output don’t intersect
-    if (surf->x + surf->width  <= output->x ||
-      surf->x >= output->x + output->width ||
-      surf->y + surf->height <= output->y ||
-      surf->y >= output->y + output->height)
-      continue;
-
-    c->backend->renderer->impl.draw_surface(c->backend->renderer, surf,
-                                            surf->x - output->x, surf->y - output->y);
-  }
-  c->backend->renderer->impl.end_frame(c->backend->renderer, output);
+  if(!c || !c->backend || !c->backend->impl.handle_frame || !output) return false;
 
   c->backend->impl.handle_frame(c->backend, output);
   output->repaint_pending = false;
@@ -604,6 +581,7 @@ _comp_implement_render(vt_compositor_t* c) {
       .destroy_renderable_output = renderer_destroy_renderable_output_egl,
       .import_buffer = renderer_import_buffer_egl,
       .drop_context = renderer_drop_context_egl, 
+      .set_vsync = renderer_set_vsync,
       .begin_frame = renderer_begin_frame_egl,
       .draw_surface = renderer_draw_surface_egl,
       .end_frame = renderer_end_frame_egl,
@@ -1428,6 +1406,33 @@ comp_schedule_repaint(vt_compositor_t *c, vt_output_t* output) {
   log_trace(c->log, "Scheduling repaint on output %p.", output);
 }
 
+void 
+comp_repaint_scene(vt_compositor_t *c, vt_output_t* output) {
+  if(!c || !output || !c->backend || !c->backend->renderer || 
+    !c->backend->renderer->impl.begin_frame   || 
+    !c->backend->renderer->impl.draw_surface  || 
+    !c->backend->renderer->impl.end_frame     || 
+    !c->backend->impl.handle_frame 
+  ) return;
+
+  c->backend->renderer->impl.begin_frame(c->backend->renderer, output);
+
+  vt_surface_t *surf;
+  wl_list_for_each_reverse(surf, &c->surfaces, link) {
+    // Skip if surface and output don’t intersect
+    if (surf->x + surf->width  <= output->x ||
+      surf->x >= output->x + output->width ||
+      surf->y + surf->height <= output->y ||
+      surf->y >= output->y + output->height)
+      continue;
+
+    c->backend->renderer->impl.draw_surface(c->backend->renderer, surf,
+                                            surf->x - output->x, surf->y - output->y);
+  }
+  c->backend->renderer->impl.end_frame(c->backend->renderer, output);
+  output->needs_repaint = false;
+
+}
 
 uint32_t 
 comp_get_time_msec(void) {

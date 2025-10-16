@@ -15,6 +15,8 @@ bool renderer_import_buffer_egl(vt_renderer_t *r, vt_surface_t *surf,
     struct wl_resource *buffer_resource);
 
 bool renderer_drop_context_egl(vt_renderer_t* r);
+  
+void renderer_set_vsync(vt_renderer_t* r, bool vsync);
 
 void renderer_begin_frame_egl(vt_renderer_t *r, vt_output_t *output);
   

@@ -1,11 +1,16 @@
+#define _GNU_SOURCE
 #include "wayland.h"
 #include "../../backend.h"
 #include "../../log.h"
 
+#include <stdlib.h>
+#include <unistd.h>
 #include <wayland-client-core.h>
+#include <wayland-client-protocol.h>
 #include <wayland-client.h>
 #include <wayland-server-core.h>
 #include <wayland-util.h>
+#include <sys/mman.h>
 #include <string.h>
 #include "xdg-shell-client-protocol.h"
 
@@ -17,7 +22,6 @@ typedef struct {
   struct wl_display *parent_display;
   struct wl_compositor *parent_compositor;
   struct xdg_wm_base *parent_xdg_wm_base;
-
   vt_compositor_t* comp;
 } wayland_backend_state_t;
 
@@ -25,7 +29,10 @@ typedef struct {
   struct wl_surface *parent_surface;
   struct xdg_surface *parent_xdg_surface;
   struct xdg_toplevel *parent_xdg_toplevel;
+  struct wl_callback* parent_frame_cb;
+
 } wayland_output_state_t;
+
 
 static void _wl_parent_registry_add(
   void *data, struct wl_registry *reg,
@@ -46,9 +53,15 @@ static void _wl_parent_xdg_toplevel_configure(
 
 static void  _wl_parent_xdg_toplevel_close(void *data, struct xdg_toplevel *toplevel);
 
-
 static int _wl_parent_dispatch(int fd, uint32_t mask, void *data);
 
+static void _wl_parent_frame_done(void *data,
+		     struct wl_callback *wl_callback,
+		     uint32_t time);
+
+static struct wl_callback_listener parent_surface_frame_listener = {
+  .done = _wl_parent_frame_done 
+};
 
 static const struct wl_registry_listener parent_registry_listener = {
   .global = _wl_parent_registry_add,
@@ -74,15 +87,16 @@ _wl_parent_registry_add(
   void *data, struct wl_registry *reg,
   uint32_t id, const char *iface, uint32_t ver) {
   wayland_backend_state_t* wl = data;
-  if (strcmp(iface, "wl_compositor") == 0) {
+  if (strcmp(iface, wl_compositor_interface.name) == 0) {
     wl->parent_compositor = wl_registry_bind(reg, id, &wl_compositor_interface, 4);
-  } else if (strcmp(iface, "xdg_wm_base") == 0) {
+  } else if (strcmp(iface, xdg_wm_base_interface.name) == 0) {
     wl->parent_xdg_wm_base = wl_registry_bind(reg, id, &xdg_wm_base_interface, 1);
-  }
+  } 
 }
 
 void 
 _wl_parent_registry_remove(void *data, struct wl_registry *reg, uint32_t id) {
+  // who cares xd
   (void)data; (void)reg; (void)id;
 }
 
@@ -150,14 +164,39 @@ _wl_parent_dispatch(int fd, uint32_t mask, void *data) {
   return 0;
 }
 
+void 
+_wl_parent_frame_done(void *data,
+		     struct wl_callback *wl_callback,
+		     uint32_t time) {
+  if(!wl_callback || !data) return;
+  vt_output_t* output = (vt_output_t*)data;
 
+  wayland_backend_state_t* wl = BACKEND_DATA(output->backend, wayland_backend_state_t); 
+  wayland_output_state_t* wl_output = BACKEND_DATA(output, wayland_output_state_t); 
+  vt_compositor_t* comp = output->backend->comp;
+  if(!wl || !comp) return;
+
+  // first clean up the previously used data
+  wl_callback_destroy(wl_callback);
+  wl_output->parent_frame_cb = NULL;
+
+  comp_send_frame_callbacks_for_output(comp, output, time); 
+
+  comp_repaint_scene(comp, output);
+
+  wl_output->parent_frame_cb = wl_surface_frame(wl_output->parent_surface);
+  wl_callback_add_listener(wl_output->parent_frame_cb, &parent_surface_frame_listener, output);
+  
+  wl_surface_commit(wl_output->parent_surface);
+
+}
 
 bool 
 backend_init_wl(vt_backend_t* backend) {
   if(!backend) return false;
   if(!(backend->user_data = COMP_ALLOC(backend->comp, sizeof(wayland_backend_state_t)))) return false;
   vt_compositor_t* c = backend->comp;
-  wayland_backend_state_t * wl = BACKEND_DATA(backend, wayland_backend_state_t); 
+  wayland_backend_state_t* wl = BACKEND_DATA(backend, wayland_backend_state_t); 
   wl->comp = backend->comp;
 
   // Connect to lé display
@@ -233,17 +272,18 @@ backend_resume_wl(vt_backend_t* backend){
   return true;
 }
 
+static bool kicked_off = false;
 bool 
 backend_handle_frame_wl(vt_backend_t* backend, vt_output_t* output){
-  if(!backend || !backend->user_data || !output) return false;
-  
-  wayland_backend_state_t* wl = BACKEND_DATA(backend, wayland_backend_state_t);
-
-  wl_display_flush(wl->parent_display);
-  uint32_t t = comp_get_time_msec();
-  comp_send_frame_callbacks_for_output(backend->comp, output, t);
-  output->needs_repaint = false;
-
+  // Fully driven by the parent surface's .done event (see _wl_parent_frame_done)
+  if(!kicked_off) {
+    vt_output_t* output;
+    wl_list_for_each(output, &backend->outputs, link) {
+      comp_repaint_scene(backend->comp, output);
+      printf("repainting.\n");
+    }
+    kicked_off = true;
+  }
   return true;
 } 
 
@@ -286,6 +326,10 @@ backend_initialize_active_outputs_wl(vt_backend_t* backend){
     return false;
   }
 
+  // Nested backend must not wait for the vblank of the compositor for 
+  // frame pacing, as the parent compositor already waits.
+  backend->renderer->impl.set_vsync(backend->renderer, false);
+
   return true;
 }
 
@@ -313,6 +357,7 @@ backend_terminate_wl(vt_backend_t* backend){
   return true;
 }
 
+
 bool 
 backend_create_output_wl(vt_backend_t* backend, vt_output_t* output, void* data){
   if(!backend || !output) return false;
@@ -337,6 +382,9 @@ backend_create_output_wl(vt_backend_t* backend, vt_output_t* output, void* data)
   
   log_trace(backend->comp->log, "WL: Created virtual nested output %s.", name);
 
+  wl_output->parent_frame_cb = wl_surface_frame(wl_output->parent_surface);
+  wl_callback_add_listener(wl_output->parent_frame_cb, &parent_surface_frame_listener, output);
+ 
   // Trigger initial configure
   wl_surface_commit(wl_output->parent_surface);
   // Get the initial configure immidiately
