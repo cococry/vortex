@@ -14,7 +14,7 @@ bool backend_resume_drm(vt_backend_t* backend);
  
 bool backend_handle_frame_drm(vt_backend_t* backend, vt_output_t* output);
   
-bool backend_handle_surface_frame_drm(vt_backend_t* backend, vt_surface_t* surf);
+bool backend_handle_repaint_drm(vt_backend_t* backend, vt_output_t* output);
 
 bool backend_initialize_active_outputs_drm(vt_backend_t* backend);
 

@@ -614,12 +614,12 @@ backend_handle_frame_drm(vt_backend_t* backend, vt_output_t* output) {
   output->needs_repaint = false;
 }
 
+
 bool 
-backend_handle_surface_frame_drm(vt_backend_t* backend, vt_surface_t* surf) {
-  // Ingored in DRM
+backend_handle_repaint_drm(vt_backend_t* backend, vt_output_t* output) {
+  // ingored in DMR
   (void)backend;
-  (void)surf;
-  return true;
+  (void)output;
 }
 
 
@@ -649,6 +649,7 @@ backend_initialize_active_outputs_drm(vt_backend_t* backend) {
     if (!conn) continue;
     if (conn->connection == DRM_MODE_CONNECTED && conn->count_modes > 0) {
       vt_output_t* output = COMP_ALLOC(comp, sizeof(vt_output_t));
+      pixman_region32_init(&output->damage);
       output->backend = backend;
       if (!output) {
         log_error(comp->log, "DRM: allocation failed for output.");

@@ -14,8 +14,6 @@ bool backend_resume_wl(vt_backend_t* backend);
  
 bool backend_handle_frame_wl(vt_backend_t* backend, vt_output_t* output);
   
-bool backend_handle_surface_frame_wl(vt_backend_t* backend, vt_surface_t* surf);
-
 bool backend_initialize_active_outputs_wl(vt_backend_t* backend);
 
 bool backend_terminate_wl(vt_backend_t* backend);

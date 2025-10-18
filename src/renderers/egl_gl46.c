@@ -1,3 +1,5 @@
+#include <EGL/eglplatform.h>
+#include <wayland-util.h>
 #define EGL_NO_X11
 #define MESA_EGL_NO_X11_HEADERS
 #define EGL_PLATFORM_GBM_KHR 1
@@ -23,6 +25,8 @@
 
 #define _VT_GBM_FORMAT_XRGB8888	__vt_gbm_fourcc_code('X', 'R', '2', '4') /* [31:0] x:R:G:B 8:8:8:8 little endian */
 
+static PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC eglSwapBuffersWithDamageEXT_ptr = NULL;
+static PFNEGLSWAPBUFFERSWITHDAMAGEKHRPROC eglSwapBuffersWithDamageKHR_ptr = NULL;
 
 typedef struct {
   EGLDisplay egl_dsp;
@@ -35,8 +39,9 @@ typedef struct {
 
 static const char*  _egl_err_str(EGLint error);
 static bool         _egl_gl_import_buffer_shm(vt_renderer_t* r, vt_surface_t *surf, struct wl_shm_buffer *shm_buf);
-static bool _egl_pick_config_from_format(vt_compositor_t* c, egl_backend_state_t* egl, uint32_t format);
-static bool _egl_pick_config(vt_compositor_t *comp, egl_backend_state_t *egl, vt_backend_t *backend);
+static bool         _egl_pick_config_from_format(vt_compositor_t* c, egl_backend_state_t* egl, uint32_t format);
+static bool         _egl_pick_config(vt_compositor_t *comp, egl_backend_state_t *egl, vt_backend_t *backend);
+static void         _egl_apply_damage_mask(vt_output_t *output); 
 
 const char*
 _egl_err_str(EGLint error) {
@@ -89,6 +94,8 @@ _egl_gl_import_buffer_shm(vt_renderer_t* r, vt_surface_t *surf,
       glGenTextures(1, &surf->tex.id);
 
     glBindTexture(GL_TEXTURE_2D, surf->tex.id);
+    if (fmt == WL_SHM_FORMAT_XRGB8888)
+      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_ONE);
     glTexImage2D(GL_TEXTURE_2D, 0, internal_format, width, height, 0, format, type, NULL);
     surf->tex.width  = width;
     surf->tex.height = height;
@@ -106,8 +113,6 @@ _egl_gl_import_buffer_shm(vt_renderer_t* r, vt_surface_t *surf,
 
   wl_shm_buffer_end_access(shm_buf);
 
-  if (fmt == WL_SHM_FORMAT_XRGB8888)
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_ONE);
 
   glBindTexture(GL_TEXTURE_2D, 0);
 
@@ -211,6 +216,7 @@ _egl_pick_config(vt_compositor_t *comp, egl_backend_state_t *egl, vt_backend_t *
 }
 
 
+
 bool
 renderer_init_egl(vt_backend_t* backend, vt_renderer_t *r, void* native_handle) {
   if (!r || !native_handle) return false;
@@ -269,11 +275,25 @@ renderer_init_egl(vt_backend_t* backend, vt_renderer_t *r, void* native_handle) 
     log_error(r->comp->log, "eglCreateContext failed: 0x%04x (%s)", err, _egl_err_str(err));
     return false;
   }
-  
+
 
   const char *vendor  = eglQueryString(egl->egl_dsp, EGL_VENDOR);
   const char *version = eglQueryString(egl->egl_dsp, EGL_VERSION);
+
+  const char *exts = eglQueryString(egl->egl_dsp, EGL_EXTENSIONS);
+  if(strstr(exts, "EGL_EXT_swap_buffers_with_damage")) {
+    eglSwapBuffersWithDamageEXT_ptr =
+      (PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC)
+      eglGetProcAddress("eglSwapBuffersWithDamageEXT");
+  }
+  if(strstr(exts, "EGL_KHR_swap_buffers_with_damage")) {
+    eglSwapBuffersWithDamageKHR_ptr =
+      (PFNEGLSWAPBUFFERSWITHDAMAGEKHRPROC)
+      eglGetProcAddress("eglSwapBuffersWithDamageKHR");
+  }
+
   log_trace(r->comp->log, "EGL: initialized (vendor=%s, version=%s)", vendor, version);
+
   return true;
 }
 
@@ -282,7 +302,8 @@ bool
 renderer_setup_renderable_output_egl(vt_renderer_t *r, vt_output_t* output) {
   if (!r || !output || !r->user_data || !output->native_window) return false;
   egl_backend_state_t* egl = BACKEND_DATA(r, egl_backend_state_t);
-
+  EGLint fbo_id, fbo_tex_id; 
+  
   if(r->backend->platform == VT_BACKEND_WAYLAND) {
     struct wl_egl_window* egl_win = wl_egl_window_create(output->native_window, output->width, output->height);
     if(!egl_win) {
@@ -308,7 +329,7 @@ renderer_setup_renderable_output_egl(vt_renderer_t *r, vt_output_t* output) {
   }
 
   if (!egl->render) {
-    egl->render = rn_init(output->width, output->height, (RnGLLoader)eglGetProcAddress);
+    egl->render = rn_init(0, 0, (RnGLLoader)eglGetProcAddress);
     if (!egl->render) {
       log_error(r->comp->log, "EGL: Failed to initialize runara rendering backend.");
       return false;
@@ -317,7 +338,13 @@ renderer_setup_renderable_output_egl(vt_renderer_t *r, vt_output_t* output) {
     }
   }
 
+
   output->render_surface = (void*)egl_surf;
+
+  pixman_region32_union_rect(
+    &output->damage, &output->damage,
+    0, 0, output->width, output->height);
+
   log_trace(r->comp->log, "EGL: Created surface %p (%ux%u)", egl_surf, output->width, output->height);
   return true;
 }
@@ -331,6 +358,10 @@ renderer_resize_renderable_output_egl(vt_renderer_t* r, vt_output_t* output, int
   if(!egl_win) return false;
 
   wl_egl_window_resize(egl_win, w, h, 0, 0);
+
+  pixman_region32_union_rect(
+    &output->damage, &output->damage,
+    0, 0, w, h);
 
   return true;
 }
@@ -398,7 +429,15 @@ renderer_set_vsync(vt_renderer_t* r, bool vsync) {
 }
 
 void 
-renderer_begin_frame_egl(vt_renderer_t *r, vt_output_t *output) {
+renderer_set_scissor(vt_renderer_t* r, vt_output_t* output, int32_t x, int32_t y, int32_t w, int32_t h) {
+  (void)r;
+  if(!output) return;
+  glScissor(x, output->height - (y + h), w, h);
+  rn_clear_color((RnColor){255, 255, 255, 255});
+}
+
+void 
+renderer_begin_scene_egl(vt_renderer_t *r, vt_output_t *output) {
   if(!output);
   if (!r || !r->impl.begin_frame || !r->user_data) {
     log_error(r->comp->log, "EGL: Renderer backend not initialized before beginning frame.");
@@ -408,8 +447,16 @@ renderer_begin_frame_egl(vt_renderer_t *r, vt_output_t *output) {
     log_warn(r->comp->log, "EGL: Trying to render on invalid output region (%ix%i).", output->width, output->height);
     return;
   }
+
   egl_backend_state_t* egl = BACKEND_DATA(r, egl_backend_state_t);
 
+  rn_begin(egl->render);
+
+}
+
+void 
+renderer_begin_frame_egl(vt_renderer_t *r, vt_output_t *output) {
+  egl_backend_state_t* egl = BACKEND_DATA(r, egl_backend_state_t);
 
   EGLSurface surface = (EGLSurface)output->render_surface;
   if (!eglMakeCurrent(egl->egl_dsp, surface, surface, egl->egl_ctx)) {
@@ -419,15 +466,14 @@ renderer_begin_frame_egl(vt_renderer_t *r, vt_output_t *output) {
     return;
   }
 
-  // Resize the runara display if the display size changed
+  // Resize the render display if the output size changed
   if(egl->render->render.render_w != output->width || egl->render->render.render_h != output->height) {
     rn_resize_display(egl->render, output->width, output->height);
   }
 
-  rn_clear_color((RnColor){255, 255, 255, 255});
-
-  rn_begin(egl->render);
+  glEnable(GL_SCISSOR_BIT);
 }
+
 
 void 
 renderer_draw_surface_egl(vt_renderer_t* r, vt_surface_t* surface, int x, int y) {
@@ -439,21 +485,63 @@ renderer_draw_surface_egl(vt_renderer_t* r, vt_surface_t* surface, int x, int y)
   }
   egl_backend_state_t* egl = BACKEND_DATA(r, egl_backend_state_t);
 
+  //if(!egl->skip_stencil && !surface->_current_damage.valid) return;
+
   rn_image_render(egl->render, (vec2s){x,y}, RN_WHITE, surface->tex);
 }
 
 void 
-renderer_end_frame_egl(vt_renderer_t* r, vt_output_t* output) {
+renderer_end_scene_egl(vt_renderer_t *r, vt_output_t *output) {
+  if (!r || !r->impl.end_scene || !r->user_data) {
+    log_error(r->comp->log, "EGL: Renderer backend not initialized before ending frame.");
+    return;
+  }
+  
+  egl_backend_state_t* egl = BACKEND_DATA(r, egl_backend_state_t);
+
+  rn_end(egl->render);
+
+}
+
+void
+renderer_end_frame_egl(vt_renderer_t *r, vt_output_t *output,  const pixman_box32_t* damaged, int32_t n_damaged) {
   if (!r || !r->impl.end_frame || !r->user_data) {
     log_error(r->comp->log, "EGL: Renderer backend not initialized before ending frame.");
     return;
   }
   egl_backend_state_t* egl = BACKEND_DATA(r, egl_backend_state_t);
-  rn_end(egl->render);
 
-  if (!eglSwapBuffers(egl->egl_dsp, (EGLSurface)output->render_surface)) {
-    log_error(r->comp->log, "EGL: eglSwapBuffers() failed: %s", _egl_err_str(eglGetError()));
-    return;
+  if(!egl) return;
+
+  glDisable(GL_SCISSOR_BIT);
+  
+  // Prepare EGL rects
+  EGLint egl_rects[n_damaged * 4];
+  for (int i = 0; i < n_damaged; i++) {
+    egl_rects[i*4 + 0] = damaged[i].x1;
+    egl_rects[i*4 + 1] = output->height - damaged[i].y2;
+    egl_rects[i*4 + 2] = damaged[i].x2 - damaged[i].x1;
+    egl_rects[i*4 + 3] = damaged[i].y2 - damaged[i].y1;
+  }
+
+
+  // Swap only damaged areas
+  if (eglSwapBuffersWithDamageEXT_ptr) {
+    if(!eglSwapBuffersWithDamageEXT_ptr(egl->egl_dsp,
+                                output->render_surface,
+                                egl_rects, n_damaged)) {
+    log_error(r->comp->log, "EGL: eglSwapBuffersWithDamageEXT() failed: %s", _egl_err_str(eglGetError()));
+    }
+  } else if (eglSwapBuffersWithDamageKHR_ptr) {
+    if(!eglSwapBuffersWithDamageKHR_ptr(egl->egl_dsp,
+                                output->render_surface,
+                                egl_rects, n_damaged)) {
+      log_error(r->comp->log, "EGL: eglSwapBuffersWithDamageKHR() failed: %s", _egl_err_str(eglGetError()));
+    }
+  } else {
+    if(!eglSwapBuffers(egl->egl_dsp, output->render_surface)) {
+      log_error(r->comp->log, "EGL: eglSwapBuffers() failed: %s", _egl_err_str(eglGetError()));
+    }
   }
 }
 

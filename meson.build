@@ -23,6 +23,7 @@ dep_input           = dependency('libinput',      required: true)
 dep_udev            = dependency('libudev',       required: true)
 dep_gl              = dependency('gl',            required: true)
 dep_xkbcommon       = dependency('xkbcommon',     required: false)
+dep_pixman          = dependency('pixman-1', required: true)
 
 wayland_scanner = find_program('wayland-scanner', required: true)
 protocols_dir = dep_wayland_protos.get_variable(pkgconfig: 'pkgdatadir')
@@ -48,12 +49,12 @@ runara_sp  = subproject('runara')
 runara_dep = runara_sp.get_variable('runara_dep')
 
 vortex_src = files('src/vortex.c', 'src/compositor.c', 'src/renderers/egl_gl46.c', 'src/log.c')
-vortex_inc = include_directories('include')
+vortex_inc = include_directories('include', '/usr/include/pixman-1/')
 
 deps = [
   dep_wayland_server, dep_wayland_egl,
   dep_egl, dep_input, dep_udev, dep_gl,
-  runara_dep
+  runara_dep, dep_pixman 
 ]
 if dep_xkbcommon.found()
   deps += dep_xkbcommon

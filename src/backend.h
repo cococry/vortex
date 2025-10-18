@@ -5,6 +5,7 @@
 #include <libinput.h>
 #include <runara/runara.h>
 #include <wayland-util.h>
+#include <pixman.h>
 
 #define BACKEND_DATA(b, type) ((type *)((b)->user_data))
 
@@ -62,6 +63,9 @@ typedef struct {
   uint32_t _mask_outputs_presented_on;
 
   void* user_data;
+
+  pixman_region32_t pending_damage, current_damage;  
+  bool damaged;
 } vt_surface_t;
 
 typedef bool (*backend_implement_func_t)(vt_compositor_t* comp);
@@ -73,7 +77,6 @@ typedef struct {
   bool (*suspend)(vt_backend_t* backend);
   bool (*resume)(vt_backend_t* backend);
   bool (*handle_frame)(vt_backend_t* backend, vt_output_t* output);
-  bool (*handle_surface_frame)(vt_backend_t* backend, vt_surface_t* surf);
   bool (*create_output)(vt_backend_t* backend, vt_output_t* output, void* data);
   bool (*destroy_output)(vt_backend_t* backend, vt_output_t* output);
   bool (*initialize_active_outputs)(vt_backend_t* backend);
@@ -118,9 +121,12 @@ typedef struct vt_renderer_interface_t {
       struct wl_resource* buffer_resource);
   bool (*drop_context)(vt_renderer_t* r);
   void (*set_vsync)(vt_renderer_t* r, bool vsync);
+  void (*set_scissor)(vt_renderer_t* r, vt_output_t* output, int32_t x, int32_t y, int32_t w, int32_t h);
+  void (*begin_scene)(vt_renderer_t* r, vt_output_t* output);
   void (*begin_frame)(vt_renderer_t* r, vt_output_t* output);
   void (*draw_surface)(vt_renderer_t* r, vt_surface_t *surface, int32_t x, int32_t y);
-  void (*end_frame)(vt_renderer_t* r, vt_output_t* output);
+  void (*end_scene)(vt_renderer_t* r, vt_output_t* output);
+  void (*end_frame)(vt_renderer_t* r, vt_output_t* output, const pixman_box32_t* damaged, int32_t n_damaged);
   bool (*destroy)(vt_renderer_t* r);
 } vt_renderer_interface_t;
 
@@ -149,9 +155,11 @@ struct vt_output_t {
 
   bool needs_repaint, repaint_pending;
 
-  void* user_data;
+  void* user_data, *user_data_render;
 
   struct wl_event_source* repaint_source;
+
+  pixman_region32_t damage; 
 }; 
 
 typedef struct {
@@ -176,7 +184,7 @@ struct vt_compositor_t {
   struct wl_list surfaces; 
 
   bool running, suspended;
-  bool sent_frame_cbs;
+  bool sent_frame_cbs, any_frame_cb_pending;
 
   uint32_t n_virtual_outputs;
 

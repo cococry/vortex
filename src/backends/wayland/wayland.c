@@ -119,13 +119,15 @@ _wl_parent_xdg_toplevel_configure(void *data,
 
   // Set the size of our nested window to the size the parent comp wants
   if (w > 0 && h > 0) {
+    if(output->width != w || output->height != h) {
+      vt_renderer_t* r = output->backend->renderer;
+      if (r && r->impl.resize_renderable_output && output->native_window)
+        r->impl.resize_renderable_output(r, output, w, h);
+      comp_schedule_repaint(r->comp, output);
+    }
     output->width = w;
     output->height = h;
     // Handle resize output in renderer
-    vt_renderer_t* r = output->backend->renderer;
-    if (r && r->impl.resize_renderable_output && output->native_window)
-      r->impl.resize_renderable_output(r, output, w, h);
-    comp_schedule_repaint(r->comp, output);
   }
 }
 
@@ -169,7 +171,7 @@ _wl_parent_frame_done(void *data,
 		     struct wl_callback *wl_callback,
 		     uint32_t time) {
   if(!wl_callback || !data) return;
-  vt_output_t* output = (vt_output_t*)data;
+  vt_output_t* output = (vt_output_t*)data; 
 
   wayland_backend_state_t* wl = BACKEND_DATA(output->backend, wayland_backend_state_t); 
   wayland_output_state_t* wl_output = BACKEND_DATA(output, wayland_output_state_t); 
@@ -180,14 +182,8 @@ _wl_parent_frame_done(void *data,
   wl_callback_destroy(wl_callback);
   wl_output->parent_frame_cb = NULL;
 
+
   comp_send_frame_callbacks_for_output(comp, output, time); 
-
-  comp_repaint_scene(comp, output);
-
-  wl_output->parent_frame_cb = wl_surface_frame(wl_output->parent_surface);
-  wl_callback_add_listener(wl_output->parent_frame_cb, &parent_surface_frame_listener, output);
-  
-  wl_surface_commit(wl_output->parent_surface);
 
 }
 
@@ -280,10 +276,19 @@ backend_handle_frame_wl(vt_backend_t* backend, vt_output_t* output){
     vt_output_t* output;
     wl_list_for_each(output, &backend->outputs, link) {
       comp_repaint_scene(backend->comp, output);
-      printf("repainting.\n");
     }
     kicked_off = true;
   }
+  if(output->needs_repaint) {
+    wayland_output_state_t* wl_output = BACKEND_DATA(output, wayland_output_state_t); 
+    comp_repaint_scene(output->backend->comp, output);
+
+    wl_output->parent_frame_cb = wl_surface_frame(wl_output->parent_surface);
+    wl_callback_add_listener(wl_output->parent_frame_cb, &parent_surface_frame_listener, output);
+
+    wl_surface_commit(wl_output->parent_surface);
+  }
+  
   return true;
 } 
 
@@ -305,6 +310,7 @@ backend_initialize_active_outputs_wl(vt_backend_t* backend){
 
   for (uint32_t i = 0; i < backend->comp->n_virtual_outputs; i++) {
     vt_output_t* output = COMP_ALLOC(backend->comp, sizeof(vt_output_t));
+    pixman_region32_init(&output->damage);
     output->backend = backend;
     if (!backend->impl.create_output(backend, output, NULL)) {
       log_error(backend->comp->log, "WL: Failed to setup internal WL output.");
@@ -384,7 +390,7 @@ backend_create_output_wl(vt_backend_t* backend, vt_output_t* output, void* data)
 
   wl_output->parent_frame_cb = wl_surface_frame(wl_output->parent_surface);
   wl_callback_add_listener(wl_output->parent_frame_cb, &parent_surface_frame_listener, output);
- 
+
   // Trigger initial configure
   wl_surface_commit(wl_output->parent_surface);
   // Get the initial configure immidiately
