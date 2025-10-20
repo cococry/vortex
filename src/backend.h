@@ -4,6 +4,7 @@
 
 #include <libinput.h>
 #include <runara/runara.h>
+#include <wayland-server.h>
 #include <wayland-util.h>
 #include <pixman.h>
 
@@ -12,6 +13,7 @@
 #define COMP_MAX_FRAME_CBS 8 
 
 #define COMP_ALLOC(c, size) comp_alloc(&(c)->arena, (size))
+#define COMP_ALLOC_FRAME(c, size) comp_alloc(&(c)->arena, (size))
 
 typedef struct vt_backend_t vt_backend_t; 
 typedef struct vt_renderer_t vt_renderer_t; 
@@ -32,13 +34,9 @@ typedef struct {
 typedef struct vt_compositor_t vt_compositor_t;
 
 
-typedef struct {
-  struct wl_resource *res;
-  struct wl_list link;
-} vt_frame_cb;
 
 typedef struct {
-  vt_frame_cb* cbs[COMP_MAX_FRAME_CBS];
+  struct wl_resource* cbs[COMP_MAX_FRAME_CBS];
   uint32_t n_cbs;
 } vt_frame_cb_pool;
 

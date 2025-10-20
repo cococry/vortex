@@ -415,10 +415,9 @@ comp_send_frame_callbacks_for_output(vt_compositor_t *c, vt_output_t* output, ui
 
     if((surf->_mask_outputs_presented_on & surf->_mask_outputs_visible_on) == surf->_mask_outputs_visible_on) {
       for (uint32_t i = 0; i < surf->cb_pool.n_cbs; i++) {
-        vt_frame_cb* cb = surf->cb_pool.cbs[i];
-        if(!cb || !cb->res) continue;
-        wl_callback_send_done(cb->res, t);
-        wl_resource_destroy(cb->res);
+        if(!surf->cb_pool.cbs[i]) continue;
+        wl_callback_send_done(surf->cb_pool.cbs[i], t);
+        wl_resource_destroy(surf->cb_pool.cbs[i]);
         if(!c->sent_frame_cbs) c->sent_frame_cbs = true;
       }
       surf->needs_frame_done = false;
@@ -442,15 +441,13 @@ comp_send_frame_callbacks(vt_compositor_t *c, vt_output_t* output, uint32_t t) {
     if(!surf->needs_frame_done) continue; 
 
     for (uint32_t i = 0; i < surf->cb_pool.n_cbs; i++) {
-      vt_frame_cb* cb = surf->cb_pool.cbs[i];
-      if(!cb || !cb->res) continue;
-      wl_callback_send_done(cb->res, t);
-      wl_resource_destroy(cb->res);
+      if(!surf->cb_pool.cbs[i]) continue;
+      wl_callback_send_done(surf->cb_pool.cbs[i], t);
+      wl_resource_destroy(surf->cb_pool.cbs[i]);
       if(!c->sent_frame_cbs) c->sent_frame_cbs = true;
-      free(cb);
     }
     surf->needs_frame_done = false;
-  surf->cb_pool.n_cbs = 0;
+    surf->cb_pool.n_cbs = 0;
     log_trace(surf->comp->log, "Sent wl_callback.done() for all pending frame callbacks on output %p.", output)
   }
   c->any_frame_cb_pending = false;
@@ -1117,8 +1114,7 @@ _comp_wl_surface_frame(
   }
 
   log_trace(surf->comp->log, "Got compositor.surface_frame.")
-  vt_frame_cb* node = COMP_ALLOC(surf->comp, sizeof(*node));
-  node->res = wl_resource_create(client, &wl_callback_interface, 1, callback);
+  struct wl_resource* res = wl_resource_create(client, &wl_callback_interface, 1, callback);
 
   // Store the frame callback in the list of pending frame callbacks.
   // wl_callback_send_done must be called for each of the pending callbacks
@@ -1128,7 +1124,7 @@ _comp_wl_surface_frame(
     log_warn(surf->comp->log, "Surface %p already has %i frame callbacks queued - dropping new one.", surf->cb_pool.n_cbs);
     return;
   }
-  surf->cb_pool.cbs[surf->cb_pool.n_cbs++] = node;
+  surf->cb_pool.cbs[surf->cb_pool.n_cbs++] = res;
 
   log_trace(surf->comp->log, "compositor.surface_frame: Inserting frame callback into list of surface %p.", surf)
 
@@ -1407,6 +1403,7 @@ static const struct libinput_interface input_interface = {
 
 bool
 comp_init(vt_compositor_t* c, int argc, char** argv) {
+  comp_arena_init(&c->arena, 1024 * 1024 * 2);
   c->log.stream = stdout;
   c->log.verbose = false;
   c->log.quiet = false;
@@ -1483,7 +1480,6 @@ comp_init(vt_compositor_t* c, int argc, char** argv) {
     output->repaint_pending = false;
     comp_schedule_repaint(c, output);
   }
-  comp_arena_init(&c->arena, 1024 * 1024 * 2);
   return true;
 }
 
@@ -1498,6 +1494,7 @@ comp_run(vt_compositor_t *c) {
     if(!(c->backend->impl.handle_event(c->backend))) {
       log_warn(c->log, "Failed to handle backend event.");
     }
+
   }
 }
 
@@ -1619,7 +1616,8 @@ void*
 comp_alloc(vt_arena_t* a, size_t size)  {
   size = (size + 7u) & ~7u;
   if (a->offset + size > a->capacity) {
-    return calloc(1, size);
+    fprintf(stderr, "arena violated.\n");
+    exit(1);
   }
   void *ptr = a->base + a->offset;
   a->offset += size;
