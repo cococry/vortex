@@ -37,11 +37,15 @@ typedef struct {
   RnState* render;
 } egl_backend_state_t; 
 
+typedef struct {
+  GLint fbo_id, fbo_tex_id; 
+} egl_output_state_t;
+
 static const char*  _egl_err_str(EGLint error);
 static bool         _egl_gl_import_buffer_shm(vt_renderer_t* r, vt_surface_t *surf, struct wl_shm_buffer *shm_buf);
 static bool         _egl_pick_config_from_format(vt_compositor_t* c, egl_backend_state_t* egl, uint32_t format);
 static bool         _egl_pick_config(vt_compositor_t *comp, egl_backend_state_t *egl, vt_backend_t *backend);
-static void         _egl_apply_damage_mask(vt_output_t *output); 
+static bool         _egl_gl_create_output_fbo(vt_output_t *output); 
 
 const char*
 _egl_err_str(EGLint error) {
@@ -94,11 +98,16 @@ _egl_gl_import_buffer_shm(vt_renderer_t* r, vt_surface_t *surf,
       glGenTextures(1, &surf->tex.id);
 
     glBindTexture(GL_TEXTURE_2D, surf->tex.id);
+
     if (fmt == WL_SHM_FORMAT_XRGB8888)
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_ONE);
-    glTexImage2D(GL_TEXTURE_2D, 0, internal_format, width, height, 0, format, type, NULL);
-    surf->tex.width  = width;
+
+    glTexImage2D(GL_TEXTURE_2D, 0, internal_format,
+                 width, height, 0, format, type, data);
+
+    surf->tex.width = width;
     surf->tex.height = height;
+
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -106,9 +115,16 @@ _egl_gl_import_buffer_shm(vt_renderer_t* r, vt_surface_t *surf,
   }
 
   glBindTexture(GL_TEXTURE_2D, surf->tex.id);
+
+  pixman_box32_t damage_boxes[COMP_MAX_DAMAGE_RECTS];
+  int32_t n_damage = comp_merge_damaged_regions(damage_boxes, &surf->current_damage);
+
   glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
   glPixelStorei(GL_UNPACK_ROW_LENGTH, stride / 4);
-  glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, format, type, data);
+
+  pixman_box32_t ext = *pixman_region32_extents(&surf->current_damage);
+  glTexSubImage2D(GL_TEXTURE_2D, 0, ext.x1, ext.y1, ext.x2 - ext.x1, ext.y2 - ext.y1, format, type, data + ext.y1 * stride + ext.x1 * 4);
+
   glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
 
   wl_shm_buffer_end_access(shm_buf);
@@ -215,6 +231,42 @@ _egl_pick_config(vt_compositor_t *comp, egl_backend_state_t *egl, vt_backend_t *
   }
 }
 
+bool
+_egl_gl_create_output_fbo(vt_output_t *output) {
+  if(!output || !output->user_data_render) return false;
+
+  egl_output_state_t* egl_output =  (egl_output_state_t*)output->user_data_render; 
+
+  if (egl_output->fbo_tex_id) glDeleteTextures(1, &egl_output->fbo_tex_id);
+  if (egl_output->fbo_id) glDeleteFramebuffers(1, &egl_output->fbo_id);
+
+  glGenFramebuffers(1, &egl_output->fbo_id);
+  glBindFramebuffer(GL_FRAMEBUFFER, egl_output->fbo_id);
+
+  glGenTextures(1, &egl_output->fbo_tex_id);
+  glBindTexture(GL_TEXTURE_2D, egl_output->fbo_tex_id);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, output->width, output->height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+
+  // For crisp image during resize
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+  glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, egl_output->fbo_tex_id, 0);
+
+  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+    log_error(output->backend->comp->log, "EGL: FBO creation for output %p (%u%u) failed.\n", output, output->width, output->height);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    return false;
+  }
+
+  // clean up
+  glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+  return true;
+}
+
 
 
 bool
@@ -302,8 +354,15 @@ bool
 renderer_setup_renderable_output_egl(vt_renderer_t *r, vt_output_t* output) {
   if (!r || !output || !r->user_data || !output->native_window) return false;
   egl_backend_state_t* egl = BACKEND_DATA(r, egl_backend_state_t);
+
+  output->user_data_render = COMP_ALLOC(r->comp, sizeof(*output->user_data_render));
+
   EGLint fbo_id, fbo_tex_id; 
-  
+
+ 
+  // If we're running the wayland sink backend, we create the egl_window 
+  // handle and use it as the native window handle to create the EGL 
+  // surface as the wayland sink backend does not assign output->native_window.
   if(r->backend->platform == VT_BACKEND_WAYLAND) {
     struct wl_egl_window* egl_win = wl_egl_window_create(output->native_window, output->width, output->height);
     if(!egl_win) {
@@ -312,6 +371,7 @@ renderer_setup_renderable_output_egl(vt_renderer_t *r, vt_output_t* output) {
     output->native_window = egl_win; 
   }
 
+  // Creating the EGL surface for the output
   EGLSurface egl_surf =
     eglCreateWindowSurface(egl->egl_dsp, egl->egl_conf,
                            (EGLNativeWindowType)output->native_window, NULL);
@@ -321,6 +381,7 @@ renderer_setup_renderable_output_egl(vt_renderer_t *r, vt_output_t* output) {
     return false;
   }
 
+  // Set the EGL context to correctly initialize resources for the batch renderer (runara)
   if (!eglMakeCurrent(egl->egl_dsp, egl_surf, egl_surf, egl->egl_ctx)) {
     EGLint err = eglGetError();
     log_error(r->comp->log, "eglMakeCurrent failed: 0x%04x (%s)", err, _egl_err_str(err));
@@ -344,6 +405,10 @@ renderer_setup_renderable_output_egl(vt_renderer_t *r, vt_output_t* output) {
   pixman_region32_union_rect(
     &output->damage, &output->damage,
     0, 0, output->width, output->height);
+  
+  // Create EGL FBO for output
+  _egl_gl_create_output_fbo(output);
+  glEnable(GL_STENCIL_TEST);
 
   log_trace(r->comp->log, "EGL: Created surface %p (%ux%u)", egl_surf, output->width, output->height);
   return true;
@@ -358,6 +423,7 @@ renderer_resize_renderable_output_egl(vt_renderer_t* r, vt_output_t* output, int
   if(!egl_win) return false;
 
   wl_egl_window_resize(egl_win, w, h, 0, 0);
+  _egl_gl_create_output_fbo(output);
 
   pixman_region32_union_rect(
     &output->damage, &output->damage,
@@ -419,7 +485,7 @@ renderer_drop_context_egl(vt_renderer_t* r) {
 }
 
 void 
-renderer_set_vsync(vt_renderer_t* r, bool vsync) {
+renderer_set_vsync_egl(vt_renderer_t* r, bool vsync) {
   if (!r || !r->impl.set_vsync || !r->user_data) {
     log_error(r->comp->log, "EGL: Renderer backend not initialized before setting vsync.");
     return;
@@ -429,17 +495,33 @@ renderer_set_vsync(vt_renderer_t* r, bool vsync) {
 }
 
 void 
-renderer_set_scissor(vt_renderer_t* r, vt_output_t* output, int32_t x, int32_t y, int32_t w, int32_t h) {
-  (void)r;
-  if(!output) return;
-  glScissor(x, output->height - (y + h), w, h);
-  rn_clear_color((RnColor){255, 255, 255, 255});
+renderer_set_clear_color_egl(vt_renderer_t* r, vt_output_t* output, uint32_t col) {
+  egl_backend_state_t* egl = BACKEND_DATA(r, egl_backend_state_t);
+  rn_rect_render(egl->render, (vec2s){0, 0}, (vec2s){output->width, output->height}, RN_WHITE);
+}
+
+void 
+renderer_stencil_damage_pass_egl(vt_renderer_t* r, vt_output_t* output) {
+  glClear(GL_STENCIL_BUFFER_BIT);
+  glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+  glDepthMask(GL_FALSE);
+  glStencilOp(GL_REPLACE, GL_REPLACE, GL_REPLACE);
+  glStencilFunc(GL_ALWAYS, 1, 0xFF);
+
+}
+
+void 
+renderer_composite_pass_egl(vt_renderer_t* r, vt_output_t* output) {
+  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  glStencilFunc(GL_EQUAL, 1, 0xFF);
+  glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+
 }
 
 void 
 renderer_begin_scene_egl(vt_renderer_t *r, vt_output_t *output) {
   if(!output);
-  if (!r || !r->impl.begin_frame || !r->user_data) {
+  if (!r || !r->impl.begin_scene || !r->user_data) {
     log_error(r->comp->log, "EGL: Renderer backend not initialized before beginning frame.");
     return;
   }
@@ -456,14 +538,24 @@ renderer_begin_scene_egl(vt_renderer_t *r, vt_output_t *output) {
 
 void 
 renderer_begin_frame_egl(vt_renderer_t *r, vt_output_t *output) {
-  egl_backend_state_t* egl = BACKEND_DATA(r, egl_backend_state_t);
-
-  EGLSurface surface = (EGLSurface)output->render_surface;
-  if (!eglMakeCurrent(egl->egl_dsp, surface, surface, egl->egl_ctx)) {
-    EGLint err = eglGetError();
-    log_error(r->comp->log, "eglMakeCurrent() failed (renderer_begin_frame_egl): 0x%04x (%s)",
-              err, _egl_err_str(err));
+  if(!output);
+  if (!r || !r->impl.begin_frame|| !r->user_data) {
+    log_error(r->comp->log, "EGL: Renderer backend not initialized before beginning frame.");
     return;
+  }
+
+  egl_backend_state_t* egl = BACKEND_DATA(r, egl_backend_state_t);
+ 
+  static bool init = false;
+  if(!init) {
+    EGLSurface surface = (EGLSurface)output->render_surface;
+    if (!eglMakeCurrent(egl->egl_dsp, surface, surface, egl->egl_ctx)) {
+      EGLint err = eglGetError();
+      log_error(r->comp->log, "eglMakeCurrent() failed (renderer_begin_frame_egl): 0x%04x (%s)",
+                err, _egl_err_str(err));
+      return;
+    }
+    init = true;
   }
 
   // Resize the render display if the output size changed
@@ -471,12 +563,13 @@ renderer_begin_frame_egl(vt_renderer_t *r, vt_output_t *output) {
     rn_resize_display(egl->render, output->width, output->height);
   }
 
-  glEnable(GL_SCISSOR_BIT);
+  // Bind the persistently managed framebuffer of the output
+  glBindFramebuffer(GL_FRAMEBUFFER, ((egl_output_state_t*)output->user_data_render)->fbo_id);
 }
 
 
 void 
-renderer_draw_surface_egl(vt_renderer_t* r, vt_surface_t* surface, int x, int y) {
+renderer_draw_surface_egl(vt_renderer_t* r, vt_surface_t* surface, float x, float y) {
   if(!surface) return;
   if(!surface->tex.id) return;
   if (!r || !r->impl.draw_surface || !r->user_data) {
@@ -485,9 +578,18 @@ renderer_draw_surface_egl(vt_renderer_t* r, vt_surface_t* surface, int x, int y)
   }
   egl_backend_state_t* egl = BACKEND_DATA(r, egl_backend_state_t);
 
-  //if(!egl->skip_stencil && !surface->_current_damage.valid) return;
-
   rn_image_render(egl->render, (vec2s){x,y}, RN_WHITE, surface->tex);
+}
+
+void 
+renderer_draw_rect_egl(vt_renderer_t* r, float x, float y, float w, float h, uint32_t col) {
+  if (!r || !r->impl.draw_rect || !r->user_data) {
+    log_error(r->comp->log, "EGL: Renderer backend not initialized before rendering rectangle.");
+    return;
+  }
+
+  egl_backend_state_t* egl = BACKEND_DATA(r, egl_backend_state_t);
+  rn_rect_render(egl->render, (vec2s){x,y}, (vec2s){w,h}, rn_color_from_hex(col)); 
 }
 
 void 
@@ -510,39 +612,43 @@ renderer_end_frame_egl(vt_renderer_t *r, vt_output_t *output,  const pixman_box3
     return;
   }
   egl_backend_state_t* egl = BACKEND_DATA(r, egl_backend_state_t);
+  egl_output_state_t* egl_output = (egl_output_state_t*)output->user_data_render; 
 
-  if(!egl) return;
+  if(!egl || !egl_output) return;
 
-  glDisable(GL_SCISSOR_BIT);
-  
-  // Prepare EGL rects
-  EGLint egl_rects[n_damaged * 4];
-  for (int i = 0; i < n_damaged; i++) {
-    egl_rects[i*4 + 0] = damaged[i].x1;
-    egl_rects[i*4 + 1] = output->height - damaged[i].y2;
-    egl_rects[i*4 + 2] = damaged[i].x2 - damaged[i].x1;
-    egl_rects[i*4 + 3] = damaged[i].y2 - damaged[i].y1;
-  }
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, egl_output->fbo_id);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+  glBlitFramebuffer(0, 0, output->width, output->height,
+                    0, 0, output->width, output->height, 
+                    GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
 
-  // Swap only damaged areas
-  if (eglSwapBuffersWithDamageEXT_ptr) {
-    if(!eglSwapBuffersWithDamageEXT_ptr(egl->egl_dsp,
-                                output->render_surface,
-                                egl_rects, n_damaged)) {
-    log_error(r->comp->log, "EGL: eglSwapBuffersWithDamageEXT() failed: %s", _egl_err_str(eglGetError()));
+  if (n_damaged > 0 && eglSwapBuffersWithDamageEXT_ptr) {
+    EGLint egl_rects[n_damaged * 4];
+    for (int i = 0; i < n_damaged; i++) {
+      egl_rects[i * 4 + 0] = damaged[i].x1;
+      egl_rects[i * 4 + 1] = output->height - damaged[i].y2;
+      egl_rects[i * 4 + 2] = damaged[i].x2 - damaged[i].x1;
+      egl_rects[i * 4 + 3] = damaged[i].y2 - damaged[i].y1;
     }
-  } else if (eglSwapBuffersWithDamageKHR_ptr) {
-    if(!eglSwapBuffersWithDamageKHR_ptr(egl->egl_dsp,
-                                output->render_surface,
-                                egl_rects, n_damaged)) {
-      log_error(r->comp->log, "EGL: eglSwapBuffersWithDamageKHR() failed: %s", _egl_err_str(eglGetError()));
+
+    eglSwapBuffersWithDamageEXT_ptr(
+      egl->egl_dsp, output->render_surface, egl_rects, n_damaged);
+  } else if (n_damaged > 0 && eglSwapBuffersWithDamageKHR_ptr) {
+    EGLint egl_rects[n_damaged * 4];
+    for (int i = 0; i < n_damaged; i++) {
+      egl_rects[i * 4 + 0] = damaged[i].x1;
+      egl_rects[i * 4 + 1] = output->height - damaged[i].y2;
+      egl_rects[i * 4 + 2] = damaged[i].x2 - damaged[i].x1;
+      egl_rects[i * 4 + 3] = damaged[i].y2 - damaged[i].y1;
     }
+    eglSwapBuffersWithDamageKHR_ptr(
+      egl->egl_dsp, output->render_surface, egl_rects, n_damaged);
   } else {
-    if(!eglSwapBuffers(egl->egl_dsp, output->render_surface)) {
-      log_error(r->comp->log, "EGL: eglSwapBuffers() failed: %s", _egl_err_str(eglGetError()));
-    }
+    eglSwapBuffers(egl->egl_dsp, output->render_surface);
   }
+
+
 }
 
 bool

@@ -16,9 +16,13 @@ bool renderer_import_buffer_egl(vt_renderer_t *r, vt_surface_t *surf,
 
 bool renderer_drop_context_egl(vt_renderer_t* r);
   
-void renderer_set_vsync(vt_renderer_t* r, bool vsync);
+void renderer_set_vsync_egl(vt_renderer_t* r, bool vsync);
   
-void renderer_set_scissor(vt_renderer_t* r, vt_output_t* output, int32_t x, int32_t y, int32_t w, int32_t h);
+void renderer_set_clear_color_egl(vt_renderer_t* r, vt_output_t* output, uint32_t col);
+  
+void renderer_stencil_damage_pass_egl(vt_renderer_t* r, vt_output_t* output); 
+
+void renderer_composite_pass_egl(vt_renderer_t* r, vt_output_t* output); 
 
 void renderer_begin_frame_egl(vt_renderer_t *r, vt_output_t *output);
 
@@ -26,7 +30,9 @@ void renderer_begin_scene_egl(vt_renderer_t *r, vt_output_t *output);
   
 void renderer_init_surface_egl(vt_renderer_t* r, vt_surface_t *surface);
 
-void renderer_draw_surface_egl(vt_renderer_t *r, vt_surface_t *surface, int32_t x, int32_t y);
+void renderer_draw_surface_egl(vt_renderer_t *r, vt_surface_t *surface, float x, float y);
+  
+void renderer_draw_rect_egl(vt_renderer_t* r, float x, float y, float w, float h, uint32_t col);
 
 void renderer_end_scene_egl(vt_renderer_t *r, vt_output_t *output);
 

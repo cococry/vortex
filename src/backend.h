@@ -8,20 +8,10 @@
 #include <pixman.h>
 
 #define BACKEND_DATA(b, type) ((type *)((b)->user_data))
+#define COMP_MAX_DAMAGE_RECTS 4
+#define COMP_MAX_FRAME_CBS 8 
 
-#define COMP_ALLOC(c, size) \
-    ({ \
-        void *__output = NULL; \
-        if ((c) && (size) != 0) { \
-            __output = calloc(1, (size)); \
-            if (!(__output)) { \
-                log_error((c)->log, "[%s] out of memory.", __func__); \
-            } \
-        } else { \
-            __output = NULL; \
-        } \
-        __output; \
-    })
+#define COMP_ALLOC(c, size) comp_alloc(&(c)->arena, (size))
 
 typedef struct vt_backend_t vt_backend_t; 
 typedef struct vt_renderer_t vt_renderer_t; 
@@ -41,11 +31,21 @@ typedef struct {
 
 typedef struct vt_compositor_t vt_compositor_t;
 
+
+typedef struct {
+  struct wl_resource *res;
+  struct wl_list link;
+} vt_frame_cb;
+
+typedef struct {
+  vt_frame_cb* cbs[COMP_MAX_FRAME_CBS];
+  uint32_t n_cbs;
+} vt_frame_cb_pool;
+
 typedef struct {
   struct wl_resource* surf_res, *buf_res, 
     *xdg_surf_res, *xdg_toplevel_res; 
   RnTexture tex; 
-  struct wl_list frame_cbs;
   struct wl_list link;
 
   uint32_t last_configure_serial;
@@ -64,8 +64,10 @@ typedef struct {
 
   void* user_data;
 
-  pixman_region32_t pending_damage, current_damage;  
+  pixman_region32_t pending_damage, current_damage, _scratch_damage;  
   bool damaged;
+
+  vt_frame_cb_pool cb_pool;
 } vt_surface_t;
 
 typedef bool (*backend_implement_func_t)(vt_compositor_t* comp);
@@ -121,10 +123,13 @@ typedef struct vt_renderer_interface_t {
       struct wl_resource* buffer_resource);
   bool (*drop_context)(vt_renderer_t* r);
   void (*set_vsync)(vt_renderer_t* r, bool vsync);
-  void (*set_scissor)(vt_renderer_t* r, vt_output_t* output, int32_t x, int32_t y, int32_t w, int32_t h);
+  void (*set_clear_color)(vt_renderer_t* r, vt_output_t* output, uint32_t col);
+  void (*stencil_damage_pass)(vt_renderer_t* r, vt_output_t* output); 
+  void (*composite_pass)(vt_renderer_t* r, vt_output_t* output); 
   void (*begin_scene)(vt_renderer_t* r, vt_output_t* output);
   void (*begin_frame)(vt_renderer_t* r, vt_output_t* output);
-  void (*draw_surface)(vt_renderer_t* r, vt_surface_t *surface, int32_t x, int32_t y);
+  void (*draw_surface)(vt_renderer_t* r, vt_surface_t *surface, float x, float y);
+  void (*draw_rect)(vt_renderer_t* r, float x, float y, float w, float h, uint32_t col);
   void (*end_scene)(vt_renderer_t* r, vt_output_t* output);
   void (*end_frame)(vt_renderer_t* r, vt_output_t* output, const pixman_box32_t* damaged, int32_t n_damaged);
   bool (*destroy)(vt_renderer_t* r);
@@ -162,17 +167,12 @@ struct vt_output_t {
   pixman_region32_t damage; 
 }; 
 
-typedef struct {
-  struct wl_resource *res;
-  struct wl_list link;
-} vt_frame_cb;
 
-typedef struct {
-  struct wl_event_source *timer; 
-  uint32_t refresh_interval;
-  bool armed;
-  uint32_t last_flip_time; 
-} vt_frame_clock;
+typedef struct vt_arena {
+    uint8_t *base;
+    size_t   offset;
+    size_t   capacity;
+} vt_arena_t;
 
 struct vt_compositor_t {
   wl_state_t  wl;
@@ -188,15 +188,18 @@ struct vt_compositor_t {
 
   uint32_t n_virtual_outputs;
 
-  vt_frame_clock frame_clock;
 
   const char* _cmd_line_backend_path;
+
+  vt_arena_t arena;
 };
 
 
 bool comp_init(vt_compositor_t *c, int argc, char** argv);
 
 void comp_run(vt_compositor_t *c);
+
+uint32_t comp_merge_damaged_regions(pixman_box32_t *merged, pixman_region32_t *region);
 
 bool comp_terminate(vt_compositor_t *c);
 
@@ -210,3 +213,10 @@ void comp_repaint_scene(vt_compositor_t *c, vt_output_t* output);
 
 uint32_t comp_get_time_msec(void);
 
+void comp_arena_init(vt_arena_t *a, size_t capacity);
+
+void* comp_alloc(vt_arena_t *a, size_t size);
+
+void comp_arena_reset(vt_arena_t *a);
+
+void comp_arena_destroy(vt_arena_t *a);

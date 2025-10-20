@@ -1,3 +1,4 @@
+
 project(
   'vortex',
   'c',
@@ -6,10 +7,13 @@ project(
     'c_std=c11',
     'warning_level=3',
     'optimization=3',
+    'default_library=static',
     'werror=false',
     'c_args=-w'
   ]
 )
+
+add_project_arguments('-Ddefault_library=static', language: 'c')
 
 subdir('src')
 
@@ -23,7 +27,7 @@ dep_input           = dependency('libinput',      required: true)
 dep_udev            = dependency('libudev',       required: true)
 dep_gl              = dependency('gl',            required: true)
 dep_xkbcommon       = dependency('xkbcommon',     required: false)
-dep_pixman          = dependency('pixman-1', required: true)
+dep_pixman          = dependency('pixman-1',     required: false)
 
 wayland_scanner = find_program('wayland-scanner', required: true)
 protocols_dir = dep_wayland_protos.get_variable(pkgconfig: 'pkgdatadir')
@@ -47,6 +51,7 @@ xdg_server_code = custom_target(
 
 runara_sp  = subproject('runara')
 runara_dep = runara_sp.get_variable('runara_dep')
+
 
 vortex_src = files('src/vortex.c', 'src/compositor.c', 'src/renderers/egl_gl46.c', 'src/log.c')
 vortex_inc = include_directories('include', '/usr/include/pixman-1/')

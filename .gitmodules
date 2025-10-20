@@ -1,3 +1,9 @@
 [submodule "subprojects/runara"]
 	path = subprojects/runara
 	url = https://github.com/cococry/runara.git
+[submodule "pixman"]
+	path = pixman
+	url = https://gitlab.freedesktop.org/pixman/pixman.git
+[submodule "subprojects/pixman"]
+	path = subprojects/pixman
+	url = https://gitlab.freedesktop.org/pixman/pixman.git

@@ -44,6 +44,8 @@ typedef struct {
   struct gbm_bo *current_bo;
   struct gbm_bo *pending_bo;
   struct gbm_bo *prev_bo;
+  struct gbm_bo *older_bo;
+  uint32_t older_fb;   
   uint32_t current_fb;
   uint32_t pending_fb;
   uint32_t prev_fb;
@@ -93,10 +95,14 @@ _drm_page_flip_handler(int fd, unsigned int frame,
   log_trace(comp->log, "DRM: _drm_page_flip_handler(): Handling page flip event.")
 
   // Release the old, unused backbuffer
-  if (drm_output->prev_bo) {
-    drmModeRmFB(fd, drm_output->prev_fb);
-    gbm_surface_release_buffer(drm_output->gbm_surf, drm_output->prev_bo);
+  if (drm_output->older_bo) {
+    drmModeRmFB(fd, drm_output->older_fb);
+    gbm_surface_release_buffer(drm_output->gbm_surf, drm_output->older_bo);
+    drm_output->older_bo = NULL;
   }
+
+  drm_output->older_bo = drm_output->prev_bo;
+  drm_output->older_fb = drm_output->prev_fb;
 
   // Swap buffers, the previous buffer becomes the currently displayed buffer 
   // and the currently displayed buffer becomes the new, pending frame buffer 
@@ -112,16 +118,14 @@ _drm_page_flip_handler(int fd, unsigned int frame,
   drm_output->pending_fb = 0;
 
   drm_output->flip_inflight = false;
-  uint32_t t = sec * 1000u + usec / 1000u;
+  uint32_t t = comp_get_time_msec(); 
 
   // Send the frame callbacks to all clients, establishing correct frame pacing
   comp_send_frame_callbacks_for_output(comp, output, t);
 
-  // If a client requested a repaint during the waiting time between 
-  // drmModePageFlip() in render_frame and the execution of this handler, 
-  // schedule a repaint 
-  if(output->needs_repaint)
+  if(output->needs_repaint) {
     comp_schedule_repaint(comp, output);
+  }
 }
 
 void 

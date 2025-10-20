@@ -116,19 +116,17 @@ _wl_parent_xdg_toplevel_configure(void *data,
   if(!output || !output->user_data) return;
   wayland_output_state_t* wl_output = BACKEND_DATA(output, wayland_output_state_t);
   if(!wl_output) return;
+  
+  if(w != output->width || h != output->height) {
+    vt_renderer_t* r = output->backend->renderer;
+    if (r && r->impl.resize_renderable_output && output->native_window)
+      r->impl.resize_renderable_output(r, output, w, h);
 
-  // Set the size of our nested window to the size the parent comp wants
-  if (w > 0 && h > 0) {
-    if(output->width != w || output->height != h) {
-      vt_renderer_t* r = output->backend->renderer;
-      if (r && r->impl.resize_renderable_output && output->native_window)
-        r->impl.resize_renderable_output(r, output, w, h);
-      comp_schedule_repaint(r->comp, output);
-    }
     output->width = w;
     output->height = h;
-    // Handle resize output in renderer
+    comp_schedule_repaint(r->comp, output);
   }
+
 }
 
 void 
@@ -141,12 +139,13 @@ _wl_parent_xdg_surface_configure(void *data,
   // If we already got a toplevel size, resize now.
   int w = output->width > 0 ? output->width : _WL_DEFAULT_OUTPUT_WIDTH;
   int h = output->height > 0 ? output->height : _WL_DEFAULT_OUTPUT_HEIGHT;
-  output->width = w;
-  output->height = h;
+  
   // Handle resize output in renderer
   vt_renderer_t* r = output->backend->renderer;
   if (r && r->impl.resize_renderable_output && output->native_window)
     r->impl.resize_renderable_output(r, output, w, h);
+  output->width = w;
+  output->height = h;
   comp_schedule_repaint(r->comp, output);
 }
 

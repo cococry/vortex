@@ -14,12 +14,12 @@
 #include <dlfcn.h>
 #include <dirent.h>
 
+#include <glad.h>
 #include <wayland-server.h>
 
 #include "xdg-shell-protocol.h" 
 #include "config.h"
 
-#define _COMP_MAX_DAMAGE_RECTS 8
 
 static void _comp_frame_handler(void* data);
 
@@ -36,7 +36,7 @@ static void _comp_implement_render(vt_compositor_t* c);
 static bool _comp_wl_init(vt_compositor_t* c);
 
 static void  _comp_wl_bind(struct wl_client *client, void *data,
-               uint32_t version, uint32_t id);
+                           uint32_t version, uint32_t id);
 
 static void _comp_load_backend(vt_compositor_t* c, const char* backend_name, const char* backend_path);
 
@@ -55,7 +55,6 @@ static void _comp_wl_surface_create_region(
   struct wl_client *client,
   struct wl_resource *resource,
   uint32_t id);
-
 
 
 static void _comp_wl_xdg_wm_base_destroy(struct wl_client *client, struct wl_resource *resource);
@@ -266,12 +265,12 @@ static void _comp_wl_surface_damage_buffer(
   int32_t height);
 
 static void _comp_wl_surface_offset(struct wl_client *client,
-                           struct wl_resource *resource,
-                           int32_t x,
-                           int32_t y);
+                                    struct wl_resource *resource,
+                                    int32_t x,
+                                    int32_t y);
 
 static void _comp_wl_surface_destroy(struct wl_client *client,
-                            struct wl_resource *resource);
+                                     struct wl_resource *resource);
 
 static void _comp_wl_surface_handle_resource_destroy(struct wl_resource* resource);
 
@@ -295,7 +294,6 @@ static void _comp_wl_region_subtract(
   int32_t width,
   int32_t height);
 
-static uint32_t _comp_merge_damaged_regions(pixman_box32_t* merged, pixman_region32_t* region);
 
 static const struct wl_compositor_interface compositor_impl = {
   .create_surface = _comp_wl_surface_create,
@@ -410,27 +408,27 @@ comp_send_frame_callbacks_for_output(vt_compositor_t *c, vt_output_t* output, ui
   vt_surface_t *surf;
   wl_list_for_each(surf, &c->surfaces, link) {
     if(!surf->needs_frame_done) continue; 
-    
+
     surf->_mask_outputs_presented_on |= (1u << output->id);
 
     if(!(surf->_mask_outputs_visible_on & (1u << output->id))) continue;
 
     if((surf->_mask_outputs_presented_on & surf->_mask_outputs_visible_on) == surf->_mask_outputs_visible_on) {
-      vt_frame_cb *cb, *tmp;
-      wl_list_for_each_safe(cb, tmp, &surf->frame_cbs, link) {
+      for (uint32_t i = 0; i < surf->cb_pool.n_cbs; i++) {
+        vt_frame_cb* cb = surf->cb_pool.cbs[i];
+        if(!cb || !cb->res) continue;
         wl_callback_send_done(cb->res, t);
-        if(!c->sent_frame_cbs) c->sent_frame_cbs = true;
         wl_resource_destroy(cb->res);
-        wl_list_remove(&cb->link);
-        free(cb);
+        if(!c->sent_frame_cbs) c->sent_frame_cbs = true;
       }
       surf->needs_frame_done = false;
+      surf->cb_pool.n_cbs = 0;
       surf->_mask_outputs_presented_on = 0;
       log_trace(surf->comp->log, "Sent wl_callback.done() for all pending frame callbacks on output %p.", output)
     }
   }
   c->any_frame_cb_pending = false;
-  
+
 }
 
 void 
@@ -443,15 +441,16 @@ comp_send_frame_callbacks(vt_compositor_t *c, vt_output_t* output, uint32_t t) {
   wl_list_for_each(surf, &c->surfaces, link) {
     if(!surf->needs_frame_done) continue; 
 
-    vt_frame_cb *cb, *tmp;
-    wl_list_for_each_safe(cb, tmp, &surf->frame_cbs, link) {
+    for (uint32_t i = 0; i < surf->cb_pool.n_cbs; i++) {
+      vt_frame_cb* cb = surf->cb_pool.cbs[i];
+      if(!cb || !cb->res) continue;
       wl_callback_send_done(cb->res, t);
-      if(!c->sent_frame_cbs) c->sent_frame_cbs = true;
       wl_resource_destroy(cb->res);
-      wl_list_remove(&cb->link);
+      if(!c->sent_frame_cbs) c->sent_frame_cbs = true;
       free(cb);
     }
     surf->needs_frame_done = false;
+  surf->cb_pool.n_cbs = 0;
     log_trace(surf->comp->log, "Sent wl_callback.done() for all pending frame callbacks on output %p.", output)
   }
   c->any_frame_cb_pending = false;
@@ -467,38 +466,6 @@ _comp_render_output(vt_compositor_t* c, vt_output_t* output) {
   return true;
 }
 
-void
-_comp_render_scene_for_damage(vt_compositor_t* c, vt_output_t* output, pixman_box32_t damage) {
-  c->backend->renderer->impl.begin_scene(c->backend->renderer, output);
-    c->backend->renderer->impl.set_scissor(
-      c->backend->renderer, output,
-      damage.x1, damage.y1,
-      damage.x2 - damage.x1,
-      damage.y2 - damage.y1
-    );
-  vt_surface_t *surf;
-  wl_list_for_each_reverse(surf, &c->surfaces, link) {
-    // Skip if surface and output don’t intersect or the surface is not 
-    // inside the damaged region.
-    if (
-      (surf->x + surf->width  <= output->x ||
-      surf->x >= output->x + output->width ||
-      surf->y + surf->height <= output->y ||
-      surf->y >= output->y + output->height) 
-      ||
-      (surf->x + surf->width  <= damage.x1 ||
-      surf->x >= damage.x2 ||
-      surf->y + surf->height <= damage.y1 ||
-      surf->y >= damage.y2) 
-    ) continue;
-
-
-    c->backend->renderer->impl.draw_surface(
-      c->backend->renderer, surf,
-      surf->x - output->x, surf->y - output->y);
-  }
-  c->backend->renderer->impl.end_scene(c->backend->renderer, output);
-}
 
 static bool 
 _flag_cmp(const char* flag, const char* lng, const char* shrt) {
@@ -652,11 +619,14 @@ _comp_implement_render(vt_compositor_t* c) {
       .destroy_renderable_output = renderer_destroy_renderable_output_egl,
       .import_buffer = renderer_import_buffer_egl,
       .drop_context = renderer_drop_context_egl, 
-      .set_vsync = renderer_set_vsync,
-      .set_scissor = renderer_set_scissor,
+      .set_vsync = renderer_set_vsync_egl,
+      .composite_pass = renderer_composite_pass_egl,
+      .stencil_damage_pass = renderer_stencil_damage_pass_egl,
+      .set_clear_color = renderer_set_clear_color_egl,
       .begin_frame = renderer_begin_frame_egl,
       .begin_scene = renderer_begin_scene_egl,
       .draw_surface = renderer_draw_surface_egl,
+      .draw_rect = renderer_draw_rect_egl,
       .end_frame = renderer_end_frame_egl,
       .end_scene = renderer_end_scene_egl,
       .destroy = renderer_destroy_egl
@@ -666,7 +636,7 @@ _comp_implement_render(vt_compositor_t* c) {
 
 void 
 _comp_wl_bind(struct wl_client *client, void *data,
-               uint32_t version, uint32_t id) {
+              uint32_t version, uint32_t id) {
   struct wl_resource *res = wl_resource_create(client,&wl_compositor_interface,version,id);
   wl_resource_set_implementation(res,&compositor_impl, data, NULL);
 }
@@ -743,13 +713,12 @@ _comp_wl_surface_create(
   static int ptr = 0;
   surf->x = 20;
   surf->y = 20;
+  surf->cb_pool.n_cbs = 0;
   surf->title  = NULL;
   surf->app_id = NULL;
   surf->comp = c;
   pixman_region32_init(&surf->current_damage);
   pixman_region32_init(&surf->pending_damage);
-    
-  wl_list_init(&surf->frame_cbs);
 
   // Add the surface to list of surfaces in the compositor
   wl_list_insert(&c->surfaces, &surf->link);
@@ -759,7 +728,7 @@ _comp_wl_surface_create(
   struct wl_resource* res = wl_resource_create(client, &wl_surface_interface, 4, id);
   wl_resource_set_implementation(res, &surface_impl, surf, _comp_wl_surface_handle_resource_destroy);
   surf->surf_res = res;
-  
+
   log_trace(c->log, "compositor.surface_create: Setting surface implementation.")
 }
 
@@ -782,7 +751,7 @@ _comp_wl_xdg_wm_base_destroy(struct wl_client *client, struct wl_resource *resou
 
 void 
 _comp_wl_xdg_wm_base_create_positioner(struct wl_client *client,
-                                             struct wl_resource *resource, uint32_t id)
+                                       struct wl_resource *resource, uint32_t id)
 {
   struct wl_resource *pos = wl_resource_create(client, &xdg_positioner_interface,
                                                wl_resource_get_version(resource), id);
@@ -791,8 +760,8 @@ _comp_wl_xdg_wm_base_create_positioner(struct wl_client *client,
 
 void 
 _comp_wl_xdg_wm_base_get_xdg_surface(struct wl_client *client,
-                                           struct wl_resource *resource,
-                                           uint32_t id, struct wl_resource *surface_res)
+                                     struct wl_resource *resource,
+                                     uint32_t id, struct wl_resource *surface_res)
 {
   struct wl_resource *xdg_surf = wl_resource_create(client, &xdg_surface_interface,
                                                     wl_resource_get_version(resource), id);
@@ -803,63 +772,63 @@ _comp_wl_xdg_wm_base_get_xdg_surface(struct wl_client *client,
 
 void 
 _comp_wl_xdg_wm_base_pong(struct wl_client *client,
-                                struct wl_resource *resource, uint32_t serial)
+                          struct wl_resource *resource, uint32_t serial)
 {
 }
 
 void 
 _comp_wl_xdg_positioner_destroy(struct wl_client *client,
-                                      struct wl_resource *resource)
+                                struct wl_resource *resource)
 {
   wl_resource_destroy(resource);
 }
 
 void 
 _comp_wl_xdg_positioner_set_size(struct wl_client *client,
-                                       struct wl_resource *resource,
-                                       int32_t width, int32_t height)
+                                 struct wl_resource *resource,
+                                 int32_t width, int32_t height)
 {
 }
 
 void 
 _comp_wl_xdg_positioner_set_anchor_rect(struct wl_client *client,
-                                              struct wl_resource *resource,
-                                              int32_t x, int32_t y,
-                                              int32_t width, int32_t height)
+                                        struct wl_resource *resource,
+                                        int32_t x, int32_t y,
+                                        int32_t width, int32_t height)
 {
 }
 
 void 
 _comp_wl_xdg_positioner_set_anchor(struct wl_client *client,
-                                         struct wl_resource *resource,
-                                         uint32_t anchor)
+                                   struct wl_resource *resource,
+                                   uint32_t anchor)
 {
 }
 
 void 
 _comp_wl_xdg_positioner_set_gravity(struct wl_client *client,
-                                          struct wl_resource *resource,
-                                          uint32_t gravity)
+                                    struct wl_resource *resource,
+                                    uint32_t gravity)
 {
 }
 
 void 
 _comp_wl_xdg_positioner_set_constraint_adjustment(struct wl_client *client,
-                                                        struct wl_resource *resource,
-                                                        uint32_t constraint_adjustment)
+                                                  struct wl_resource *resource,
+                                                  uint32_t constraint_adjustment)
 {
 }
 
 void 
 _comp_wl_xdg_positioner_set_offset(struct wl_client *client,
-                                         struct wl_resource *resource,
-                                         int32_t x, int32_t y)
+                                   struct wl_resource *resource,
+                                   int32_t x, int32_t y)
 {
 }
 
 void 
 _comp_wl_xdg_surface_destroy(struct wl_client *client,
-                                   struct wl_resource *resource)
+                             struct wl_resource *resource)
 {
   wl_resource_destroy(resource);
 }
@@ -882,8 +851,8 @@ send_initial_configure(vt_surface_t* surf)
 
 void 
 _comp_wl_xdg_surface_get_toplevel(struct wl_client *client,
-                                        struct wl_resource *resource,
-                                        uint32_t id)
+                                  struct wl_resource *resource,
+                                  uint32_t id)
 {
   vt_surface_t* surf = wl_resource_get_user_data(resource);
 
@@ -898,17 +867,17 @@ _comp_wl_xdg_surface_get_toplevel(struct wl_client *client,
 
 void 
 _comp_wl_xdg_surface_get_popup(struct wl_client *client,
-                                     struct wl_resource *resource,
-                                     uint32_t id,
-                                     struct wl_resource *parent_surface,
-                                     struct wl_resource *positioner)
+                               struct wl_resource *resource,
+                               uint32_t id,
+                               struct wl_resource *parent_surface,
+                               struct wl_resource *positioner)
 {
 }
 
 void 
 _comp_wl_xdg_surface_ack_configure(struct wl_client *client,
-                                         struct wl_resource *resource,
-                                         uint32_t serial)
+                                   struct wl_resource *resource,
+                                   uint32_t serial)
 {
   vt_surface_t* surf = wl_resource_get_user_data(resource);
   surf->last_configure_serial = serial;
@@ -916,9 +885,9 @@ _comp_wl_xdg_surface_ack_configure(struct wl_client *client,
 
 void 
 _comp_wl_xdg_surface_set_window_geometry(struct wl_client *client,
-                                               struct wl_resource *resource,
-                                               int32_t x, int32_t y,
-                                               int32_t width, int32_t height)
+                                         struct wl_resource *resource,
+                                         int32_t x, int32_t y,
+                                         int32_t width, int32_t height)
 {
 }
 
@@ -932,15 +901,15 @@ _comp_wl_xdg_toplevel_destroy(struct wl_client *client, struct wl_resource *reso
 
 void
 _comp_wl_xdg_toplevel_set_parent(struct wl_client *client,
-                           struct wl_resource *resource,
-                           struct wl_resource *parent_resource)
+                                 struct wl_resource *resource,
+                                 struct wl_resource *parent_resource)
 {
 }
 
 void
 _comp_wl_xdg_toplevel_set_title(struct wl_client *client,
-                          struct wl_resource *resource,
-                          const char *title)
+                                struct wl_resource *resource,
+                                const char *title)
 {
   vt_surface_t* surf = wl_resource_get_user_data(resource);
   if (surf->title)
@@ -950,8 +919,8 @@ _comp_wl_xdg_toplevel_set_title(struct wl_client *client,
 
 void
 _comp_wl_xdg_toplevel_set_app_id(struct wl_client *client,
-                           struct wl_resource *resource,
-                           const char *app_id)
+                                 struct wl_resource *resource,
+                                 const char *app_id)
 {
   vt_surface_t* surf = wl_resource_get_user_data(resource);
   if (surf->app_id)
@@ -961,78 +930,78 @@ _comp_wl_xdg_toplevel_set_app_id(struct wl_client *client,
 
 void
 _comp_wl_xdg_toplevel_show_window_menu(struct wl_client *client,
-                                 struct wl_resource *resource,
-                                 struct wl_resource *seat,
-                                 uint32_t serial,
-                                 int32_t x, int32_t y)
+                                       struct wl_resource *resource,
+                                       struct wl_resource *seat,
+                                       uint32_t serial,
+                                       int32_t x, int32_t y)
 {
   // optional: ignore
 }
 
 void
 _comp_wl_xdg_toplevel_move(struct wl_client *client,
-                     struct wl_resource *resource,
-                     struct wl_resource *seat,
-                     uint32_t serial)
+                           struct wl_resource *resource,
+                           struct wl_resource *seat,
+                           uint32_t serial)
 {
   // optional: ignore
 }
 
 void
 _comp_wl_xdg_toplevel_resize(struct wl_client *client,
-                       struct wl_resource *resource,
-                       struct wl_resource *seat,
-                       uint32_t serial,
-                       uint32_t edges)
+                             struct wl_resource *resource,
+                             struct wl_resource *seat,
+                             uint32_t serial,
+                             uint32_t edges)
 {
   // optional: ignore
 }
 
 void
 _comp_wl_xdg_toplevel_set_max_size(struct wl_client *client,
-                             struct wl_resource *resource,
-                             int32_t width, int32_t height)
+                                   struct wl_resource *resource,
+                                   int32_t width, int32_t height)
 {
   // optional: ignore
 }
 
 void
 _comp_wl_xdg_toplevel_set_min_size(struct wl_client *client,
-                             struct wl_resource *resource,
-                             int32_t width, int32_t height)
+                                   struct wl_resource *resource,
+                                   int32_t width, int32_t height)
 {
   // optional: ignore
 }
 
 void
 _comp_wl_xdg_toplevel_set_maximized(struct wl_client *client,
-                              struct wl_resource *resource)
+                                    struct wl_resource *resource)
 {
   // optional: ignore
 }
 
 void
 _comp_wl_xdg_toplevel_unset_maximized(struct wl_client *client,
-                                struct wl_resource *resource)
+                                      struct wl_resource *resource)
 {
 }
 
 void
 _comp_wl_xdg_toplevel_set_fullscreen(struct wl_client *client,
-                               struct wl_resource *resource,
-                               struct wl_resource *output)
+                                     struct wl_resource *resource,
+                                     struct wl_resource *output)
 {
 }
 
 void
 _comp_wl_xdg_toplevel_unset_fullscreen(struct wl_client *client,
-                                 struct wl_resource *resource)
+                                       struct wl_resource *resource)
 {
 }
 
 void
 _comp_wl_xdg_toplevel_set_minimized(struct wl_client *client,
-                              struct wl_resource *resource)
+                                    struct wl_resource *resource)
 {
 }
 
@@ -1051,7 +1020,7 @@ _comp_wl_surface_attach(
     return;
   }
   log_trace(surf->comp->log, "Got compositor.surface_attach.")
-  surf->buf_res = buffer;
+    surf->buf_res = buffer;
 }
 
 void 
@@ -1073,6 +1042,29 @@ _comp_wl_surface_commit(
     log_warn(surf->comp->log, "compositor.surface_commit: Got commit request without attached buffer.")
     return;
   }
+
+  if (!surf->current_damage.data) {
+    pixman_region32_init(&surf->current_damage);
+  }
+
+  if(pixman_region32_empty(&surf->pending_damage)) return;
+
+
+  pixman_box32_t extents = *pixman_region32_extents(&surf->pending_damage);
+
+  if (surf->current_damage.data && surf->current_damage.data->numRects == 0)
+    pixman_region32_copy(&surf->current_damage, &surf->pending_damage);
+  else
+    pixman_region32_union_rect(&surf->current_damage, &surf->current_damage,
+                               extents.x1, extents.y1,
+                               extents.x2 - extents.x1,
+                               extents.y2 - extents.y1);
+
+  pixman_region32_clear(&surf->pending_damage);
+
+  pixman_region32_intersect_rect(&surf->current_damage,
+                                 &surf->current_damage,
+                                 0, 0, surf->width, surf->height);
 
   if(surf->comp->backend->renderer->impl.import_buffer)
     surf->comp->backend->renderer->impl.import_buffer(surf->comp->backend->renderer, surf, surf->buf_res);
@@ -1097,44 +1089,22 @@ _comp_wl_surface_commit(
 
   log_trace(surf->comp->log, "compositor.surface_commit: Scheduling repaint to render commited buffer.");
 
-if (!surf->current_damage.data) {
-    pixman_region32_init(&surf->current_damage);
-  }
-
-  pixman_region32_union(&surf->current_damage, &surf->current_damage, &surf->pending_damage);
-  pixman_region32_clear(&surf->pending_damage);
-pixman_region32_intersect_rect(&surf->current_damage,
-                               &surf->current_damage,
-                               0, 0, surf->width, surf->height);
-  pixman_box32_t* box = pixman_region32_extents(&surf->current_damage);
 
   // Schedule a repaint for all outputs that the surface intersects with
   vt_output_t* output;
   wl_list_for_each(output, &surf->comp->backend->outputs, link) {
     if(!(surf->_mask_outputs_visible_on & (1u << output->id))) continue;
-    pixman_region32_t absolute;
-    pixman_region32_init(&absolute);
-    pixman_region32_copy(&absolute, &surf->current_damage);
-    pixman_box32_t* box = pixman_region32_extents(&surf->current_damage);
-    pixman_region32_translate(&absolute, surf->x, surf->y);
-    box = pixman_region32_extents(&absolute);
-
-    pixman_region32_union(&output->damage, &output->damage, &absolute);
-    pixman_region32_fini(&absolute);
-
-    pixman_region32_clear(&surf->current_damage);
-    
-
+    pixman_box32_t ext = *pixman_region32_extents(&surf->current_damage);
+    pixman_region32_union_rect(&output->damage, &output->damage,
+                               surf->x + ext.x1, surf->y + ext.y1,
+                               ext.x2 - ext.x1, ext.y2 - ext.y1); 
     comp_schedule_repaint(surf->comp, output);
-  
   }
+
+  pixman_region32_clear(&surf->current_damage);
 }
 
 
-struct vt_frame_cb {
-  struct wl_resource *res;
-  struct wl_list link;
-};
 void
 _comp_wl_surface_frame(
   struct wl_client *client,
@@ -1147,18 +1117,22 @@ _comp_wl_surface_frame(
   }
 
   log_trace(surf->comp->log, "Got compositor.surface_frame.")
-  struct vt_frame_cb *node = COMP_ALLOC(surf->comp, sizeof(*node));
+  vt_frame_cb* node = COMP_ALLOC(surf->comp, sizeof(*node));
   node->res = wl_resource_create(client, &wl_callback_interface, 1, callback);
 
   // Store the frame callback in the list of pending frame callbacks.
   // wl_callback_send_done must be called for each of the pending callbacks
   // after the next page flip event completes in order to correctly handle 
   // frame pacing ( see send_frame_callbacks() ).
-  wl_list_insert(&surf->frame_cbs, &node->link);
-  
+  if(surf->cb_pool.n_cbs >= COMP_MAX_FRAME_CBS) {
+    log_warn(surf->comp->log, "Surface %p already has %i frame callbacks queued - dropping new one.", surf->cb_pool.n_cbs);
+    return;
+  }
+  surf->cb_pool.cbs[surf->cb_pool.n_cbs++] = node;
+
   log_trace(surf->comp->log, "compositor.surface_frame: Inserting frame callback into list of surface %p.", surf)
 
-  surf->needs_frame_done = true;
+    surf->needs_frame_done = true;
   surf->comp->any_frame_cb_pending = true;
 }
 
@@ -1185,21 +1159,21 @@ _comp_wl_surface_damage(
 }
 void 
 _comp_wl_surface_damage_buffer(struct wl_client *client,
-                           struct wl_resource *resource,
-                           int32_t x,
-                           int32_t y,
-                           int32_t width,
-                           int32_t height) {
+                               struct wl_resource *resource,
+                               int32_t x,
+                               int32_t y,
+                               int32_t width,
+                               int32_t height) {
   vt_surface_t* surf = wl_resource_get_user_data(resource);
   if(!surf) {
     log_error(surf->comp->log, "compositor.surface_damage: No internal surface data allocated.")
     return;
   }
-  
+
   pixman_region32_union_rect(
     &surf->pending_damage, &surf->pending_damage,
     x, y, width, height);
-  
+
   surf->damaged = true;
 }
 
@@ -1214,41 +1188,41 @@ _comp_wl_surface_set_opaque_region(
 
 void 
 _comp_wl_surface_set_input_region(struct wl_client *client,
-                              struct wl_resource *resource,
-                              struct wl_resource *region) {
+                                  struct wl_resource *resource,
+                                  struct wl_resource *region) {
 
 }
 
 void
 _comp_wl_surface_set_buffer_transform(struct wl_client *client,
-                                  struct wl_resource *resource,
-                                  int32_t transform) {
+                                      struct wl_resource *resource,
+                                      int32_t transform) {
 
 }
 
 void
 _comp_wl_surface_set_buffer_scale(struct wl_client *client,
-                              struct wl_resource *resource,
-                              int32_t scale) {
+                                  struct wl_resource *resource,
+                                  int32_t scale) {
 
 }
 
 void
 _comp_wl_surface_offset(struct wl_client *client,
-                    struct wl_resource *resource,
-                    int32_t x,
-                    int32_t y) {
+                        struct wl_resource *resource,
+                        int32_t x,
+                        int32_t y) {
 
 }
 
 void
 _comp_wl_surface_destroy(struct wl_client *client,
-                     struct wl_resource *resource) {
+                         struct wl_resource *resource) {
   vt_compositor_t* comp = ((vt_surface_t*)wl_resource_get_user_data(resource))->comp;
   log_trace(comp->log, 
             "Got surface.destroy: Destroying surface resource.")
   wl_resource_destroy(resource);
-  
+
 }
 
 void 
@@ -1262,6 +1236,11 @@ _comp_wl_surface_handle_resource_destroy(struct wl_resource* resource) {
             "Got surface.destroy handler: Unmanaging client.")
 
   wl_list_remove(&surf->link);
+
+  pixman_region32_fini(&surf->_scratch_damage);
+  pixman_region32_fini(&surf->pending_damage);
+  pixman_region32_fini(&surf->current_damage);
+
   free(surf);
 
   // Schedule a repaint for all outputs that the surface intersects with
@@ -1304,38 +1283,22 @@ _comp_wl_region_subtract(
 
 }
 
-uint32_t _comp_merge_damaged_regions(pixman_box32_t *merged,
-                                     pixman_region32_t *region)
-{
-    if (!pixman_region32_not_empty(region)) {
-        printf("No damage to merge (empty region)\n");
-        return 0;
-    }
+uint32_t comp_merge_damaged_regions(pixman_box32_t *merged,
+                                    pixman_region32_t *region) {
+  if (pixman_region32_empty(region)) return 0;
 
-    // Pixman can union the region’s rectangles into a single clean region.
-    pixman_region32_t merged_region;
-    pixman_region32_init(&merged_region);
+  uint32_t n_rects = 0;
+  pixman_box32_t *rects = pixman_region32_rectangles(region, &n_rects);
+  if(!n_rects) return 0;
 
-    // Just union the incoming region with itself to force coalescing.
-    pixman_region32_union(&merged_region, &merged_region, region);
-
-    // Now get the coalesced rectangles.
-    int n_rects = 0;
-    pixman_box32_t *rects = pixman_region32_rectangles(&merged_region, &n_rects);
-
-  if (n_rects > _COMP_MAX_DAMAGE_RECTS) {
+  if (n_rects > COMP_MAX_DAMAGE_RECTS) {
     merged[0] = *pixman_region32_extents(region);
-    pixman_region32_fini(&merged_region);
-    return 1; // one big "screw it" rectangle
+    return 1; 
   }
 
-    for (int i = 0; i < n_rects; i++) {
-        merged[i] = rects[i];
-  }
+  memcpy(merged, rects, sizeof(pixman_box32_t) * n_rects);
 
-    pixman_region32_fini(&merged_region);
-
-    return n_rects;
+  return n_rects;
 }
 
 bool 
@@ -1370,7 +1333,7 @@ _comp_wl_init(vt_compositor_t* c) {
   } else {
     log_trace(c->log, "Wayland display ready on socket '%s'.", socket_name);
   }
-  
+
 
   return true;
 }
@@ -1520,6 +1483,7 @@ comp_init(vt_compositor_t* c, int argc, char** argv) {
     output->repaint_pending = false;
     comp_schedule_repaint(c, output);
   }
+  comp_arena_init(&c->arena, 1024 * 1024 * 2);
   return true;
 }
 
@@ -1579,8 +1543,9 @@ comp_schedule_repaint(vt_compositor_t *c, vt_output_t* output) {
   }
   if (output->repaint_pending) {
     return;
-}
+  }
   output->needs_repaint = true;
+  if(!c->backend->impl.prepare_output_frame(c->backend, output)) return;
   if(!output->repaint_pending) {
     output->repaint_pending = true;
     output->repaint_source = wl_event_loop_add_idle(c->wl.evloop, _comp_frame_handler, output);
@@ -1590,30 +1555,50 @@ comp_schedule_repaint(vt_compositor_t *c, vt_output_t* output) {
 
 }
 
-void 
-comp_repaint_scene(vt_compositor_t *c, vt_output_t* output) {
-  if(!c || !output || !c->backend || !c->backend->renderer || 
-    !c->backend->renderer->impl.begin_frame   || 
-    !c->backend->renderer->impl.draw_surface  || 
-    !c->backend->renderer->impl.end_frame     || 
-    !c->backend->impl.handle_frame 
-  ) return;
+void comp_repaint_scene(vt_compositor_t *c, vt_output_t* output) {
+  if (!c || !output || !c->backend || !c->backend->renderer) return;
 
-  c->backend->renderer->impl.begin_frame(c->backend->renderer, output);
-  pixman_box32_t damaged[_COMP_MAX_DAMAGE_RECTS];
-  uint32_t n_damaged = _comp_merge_damaged_regions(damaged, &output->damage);
+  vt_renderer_t *r = c->backend->renderer;
+  r->impl.begin_frame(r, output);
 
-  if (pixman_region32_not_empty(&output->damage)) { 
-    for(uint32_t i = 0; i < n_damaged; i++) {
-      _comp_render_scene_for_damage(c, output, damaged[i]);
-    }
-  } 
+  pixman_box32_t damage_boxes[COMP_MAX_DAMAGE_RECTS];
+  int32_t n_damage = comp_merge_damaged_regions(damage_boxes, &output->damage);
 
-  c->backend->renderer->impl.end_frame(c->backend->renderer, output, damaged, n_damaged);
+
+  // Damage Pass
+  r->impl.stencil_damage_pass(r, output);
+  r->impl.begin_scene(r, output);
+  for(uint32_t i = 0; i < n_damage; i++) {
+    const pixman_box32_t b = damage_boxes[i];
+    r->impl.draw_rect(r, b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1, 0xFFFFFF);
+  }
+  r->impl.end_scene(r, output);
+
+
+  //Composite pass
+  r->impl.composite_pass(r, output);
+  r->impl.begin_scene(r, output);
+  r->impl.set_clear_color(r, output, 0xffffff);
+
+  vt_surface_t* surf;
+  wl_list_for_each_reverse(surf, &c->surfaces, link) {
+    if(!surf->damaged) continue;
+    if (surf->x + surf->width  <= output->x ||
+      surf->x >= output->x + output->width ||
+      surf->y + surf->height <= output->y ||
+      surf->y >= output->y + output->height) continue;
+
+    if(!pixman_region32_intersect_rect(&output->damage, &output->damage, surf->x, surf->y, surf->width, surf->height)) continue;
+
+    r->impl.draw_surface(r, surf, surf->x - output->x, surf->y - output->y);
+  }
+
+  r->impl.end_scene(r, output);
+
+  r->impl.end_frame(r, output, damage_boxes, n_damage);
 
   pixman_region32_clear(&output->damage);
   output->needs_repaint = false;
-
 }
 
 uint32_t 
@@ -1623,3 +1608,33 @@ comp_get_time_msec(void) {
   return (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
 }
 
+void 
+comp_arena_init(vt_arena_t* a, size_t capacity) {
+  a->base = (uint8_t*)malloc(capacity);
+  a->offset = 0;
+  a->capacity = capacity;
+}
+
+void*
+comp_alloc(vt_arena_t* a, size_t size)  {
+  size = (size + 7u) & ~7u;
+  if (a->offset + size > a->capacity) {
+    return calloc(1, size);
+  }
+  void *ptr = a->base + a->offset;
+  a->offset += size;
+  memset(ptr, 0, size);
+  return ptr;
+}
+
+void
+comp_arena_reset(vt_arena_t* a) {
+  a->offset = 0;
+}
+
+void 
+comp_arena_destroy(vt_arena_t* a) {
+  free(a->base);
+  a->base = NULL;
+  a->capacity = a->offset = 0;
+}
