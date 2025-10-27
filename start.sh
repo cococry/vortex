@@ -1,6 +1,7 @@
-./build/vortex &
-
-sleep 1s
-WAYLAND_DISPLAY=wayland-1 weston-simple-damage &
-sleep 3s
-WAYLAND_DISPLAY=wayland-1 weston-simple-damage &
+./build/vortex --verbose -lf &
+sleep 2s 
+WAYLAND_DISPLAY=wayland-2 weston-simple-egl &
+sleep 2s 
+WAYLAND_DISPLAY=wayland-2 weston-simple-egl &
+sleep 2s 
+WAYLAND_DISPLAY=wayland-2 weston-simple-egl &

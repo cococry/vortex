@@ -6,8 +6,6 @@
 #define EGL_EGLEXT_PROTOTYPES
 #include "egl_gl46.h"
 
-#include "../log.h"
-#include "../backend.h"
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -42,10 +40,10 @@ typedef struct {
 } egl_output_state_t;
 
 static const char*  _egl_err_str(EGLint error);
-static bool         _egl_gl_import_buffer_shm(vt_renderer_t* r, vt_surface_t *surf, struct wl_shm_buffer *shm_buf);
-static bool         _egl_pick_config_from_format(vt_compositor_t* c, egl_backend_state_t* egl, uint32_t format);
-static bool         _egl_pick_config(vt_compositor_t *comp, egl_backend_state_t *egl, vt_backend_t *backend);
-static bool         _egl_gl_create_output_fbo(vt_output_t *output); 
+static bool         _egl_gl_import_buffer_shm(struct vt_renderer_t* r, vt_surface_t *surf, struct wl_shm_buffer *shm_buf);
+static bool         _egl_pick_config_from_format(struct vt_compositor_t* c, egl_backend_state_t* egl, uint32_t format);
+static bool         _egl_pick_config(struct vt_compositor_t *comp, egl_backend_state_t *egl, struct vt_backend_t *backend);
+static bool         _egl_gl_create_output_fbo(struct vt_output_t *output); 
 
 const char*
 _egl_err_str(EGLint error) {
@@ -70,7 +68,7 @@ _egl_err_str(EGLint error) {
 }
 
 bool
-_egl_gl_import_buffer_shm(vt_renderer_t* r, vt_surface_t *surf,
+_egl_gl_import_buffer_shm(struct vt_renderer_t* r, vt_surface_t *surf,
                           struct wl_shm_buffer *shm_buf) {
   int width = wl_shm_buffer_get_width(shm_buf);
   int height = wl_shm_buffer_get_height(shm_buf);
@@ -86,7 +84,7 @@ _egl_gl_import_buffer_shm(vt_renderer_t* r, vt_surface_t *surf,
     case WL_SHM_FORMAT_XRGB8888:
       break;
     default:
-      log_warn(r->comp->log, "Unsupported wl_shm format %u", fmt);
+      VT_WARN(r->comp->log, "Unsupported wl_shm format %u", fmt);
       return false;
   }
 
@@ -116,9 +114,6 @@ _egl_gl_import_buffer_shm(vt_renderer_t* r, vt_surface_t *surf,
 
   glBindTexture(GL_TEXTURE_2D, surf->tex.id);
 
-  pixman_box32_t damage_boxes[COMP_MAX_DAMAGE_RECTS];
-  int32_t n_damage = comp_merge_damaged_regions(damage_boxes, &surf->current_damage);
-
   glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
   glPixelStorei(GL_UNPACK_ROW_LENGTH, stride / 4);
 
@@ -136,16 +131,16 @@ _egl_gl_import_buffer_shm(vt_renderer_t* r, vt_surface_t *surf,
 }
 
 
-bool _egl_pick_config_from_format(vt_compositor_t* c,
+bool _egl_pick_config_from_format(struct vt_compositor_t* c,
                                   egl_backend_state_t* egl,
                                   uint32_t format) {
   EGLint num = 0;
   if (!eglGetConfigs(egl->egl_dsp, NULL, 0, &num) || num <= 0) {
-    log_error(c->log, "EGL: eglGetConfigs() failed or returned no configs");
+    VT_ERROR(c->log, "EGL: eglGetConfigs() failed or returned no configs");
     return false;
   }
 
-  EGLConfig *configs = COMP_ALLOC(c, sizeof(EGLConfig) * num);
+  EGLConfig *configs = VT_ALLOC(c, sizeof(EGLConfig) * num);
   eglGetConfigs(egl->egl_dsp, configs, num, &num);
 
   EGLConfig match = NULL;
@@ -159,7 +154,7 @@ bool _egl_pick_config_from_format(vt_compositor_t* c,
   }
 
   if (!match) {
-    log_error(
+    VT_ERROR(
       c->log,
       "EGL: could not find config for GBM format 0x%x, falling back to first config", format);
     match = configs[0];
@@ -168,24 +163,22 @@ bool _egl_pick_config_from_format(vt_compositor_t* c,
   egl->egl_conf = match;
   eglGetConfigAttrib(egl->egl_dsp, match, EGL_NATIVE_VISUAL_ID, &vis);
   if(match) {
-    log_trace(c->log, "EGL: picked config with visual 0x%x", vis);
+    VT_TRACE(c->log, "EGL: picked config with visual 0x%x", vis);
   }
   egl->egl_native_vis = vis;
 
-  free(configs);
   return true;
 }
 
 bool 
-_egl_pick_config(vt_compositor_t *comp, egl_backend_state_t *egl, vt_backend_t *backend) {
+_egl_pick_config(struct vt_compositor_t *comp, egl_backend_state_t *egl, struct vt_backend_t *backend) {
   EGLint attribs[32];
   int i = 0;
 
   switch (backend->platform) {
     case VT_BACKEND_DRM_GBM: {
       // DRM/GBM backend: use DRM fourcc to pick config
-      uint32_t fmt = backend->_desired_render_buffer_format ? 
-        backend->_desired_render_buffer_format : _VT_GBM_FORMAT_XRGB8888;
+      uint32_t fmt = _VT_GBM_FORMAT_XRGB8888;
       return _egl_pick_config_from_format(comp, egl, fmt);
     }
 
@@ -202,7 +195,7 @@ _egl_pick_config(vt_compositor_t *comp, egl_backend_state_t *egl, vt_backend_t *
       };
       EGLint n = 0;
       if (!eglChooseConfig(egl->egl_dsp, attrs, &egl->egl_conf, 1, &n) || n == 0) {
-        log_error(comp->log, "EGL: no valid configs for Wayland backend");
+        VT_ERROR(comp->log, "EGL: no valid configs for Wayland backend");
         return false;
       }
       eglGetConfigAttrib(egl->egl_dsp, egl->egl_conf, EGL_NATIVE_VISUAL_ID, &egl->egl_native_vis);
@@ -226,13 +219,16 @@ _egl_pick_config(vt_compositor_t *comp, egl_backend_state_t *egl, vt_backend_t *
     }
 
     default:
-      log_error(comp->log, "EGL: unsupported backend platform");
+      VT_ERROR(comp->log, "EGL: unsupported backend platform");
       return false;
   }
 }
 
+// ===================================================
+// =================== PUBLIC API ====================
+// ===================================================
 bool
-_egl_gl_create_output_fbo(vt_output_t *output) {
+_egl_gl_create_output_fbo(struct vt_output_t *output) {
   if(!output || !output->user_data_render) return false;
 
   egl_output_state_t* egl_output =  (egl_output_state_t*)output->user_data_render; 
@@ -256,7 +252,7 @@ _egl_gl_create_output_fbo(vt_output_t *output) {
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, egl_output->fbo_tex_id, 0);
 
   if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-    log_error(output->backend->comp->log, "EGL: FBO creation for output %p (%u%u) failed.\n", output, output->width, output->height);
+    VT_ERROR(output->backend->comp->log, "EGL: FBO creation for output %p (%u%u) failed.\n", output, output->width, output->height);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     return false;
   }
@@ -270,18 +266,18 @@ _egl_gl_create_output_fbo(vt_output_t *output) {
 
 
 bool
-renderer_init_egl(vt_backend_t* backend, vt_renderer_t *r, void* native_handle) {
+renderer_init_egl(struct vt_backend_t* backend, struct vt_renderer_t *r, void* native_handle) {
   if (!r || !native_handle) return false;
 
   r->backend = backend;
   r->rendering_backend = VT_RENDERING_BACKEND_EGL_OPENGL;
-  r->user_data = COMP_ALLOC(backend->comp, sizeof(egl_backend_state_t));
+  r->user_data = VT_ALLOC(backend->comp, sizeof(egl_backend_state_t));
   egl_backend_state_t* egl = BACKEND_DATA(r, egl_backend_state_t);
 
   PFNEGLGETPLATFORMDISPLAYEXTPROC eglGetPlatformDisplayEXT =
     (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress("eglGetPlatformDisplayEXT");
   if (!eglGetPlatformDisplayEXT) {
-    log_error(r->comp->log, "EGL_EXT_platform_base not supported.");
+    VT_ERROR(r->comp->log, "EGL_EXT_platform_base not supported.");
     return false;
   }
 
@@ -298,13 +294,13 @@ renderer_init_egl(vt_backend_t* backend, vt_renderer_t *r, void* native_handle) 
   egl->egl_dsp = eglGetPlatformDisplayEXT(platform, native_handle, NULL);
   if (egl->egl_dsp == EGL_NO_DISPLAY) {
     EGLint err = eglGetError();
-    log_error(r->comp->log, "eglGetPlatformDisplayEXT failed: 0x%04x (%s)", err, _egl_err_str(err));
+    VT_ERROR(r->comp->log, "eglGetPlatformDisplayEXT failed: 0x%04x (%s)", err, _egl_err_str(err));
     return false;
   }
 
   if (!eglInitialize(egl->egl_dsp, NULL, NULL)) {
     EGLint err = eglGetError();
-    log_error(r->comp->log, "eglInitialize failed: 0x%04x (%s)", err, _egl_err_str(err));
+    VT_ERROR(r->comp->log, "eglInitialize failed: 0x%04x (%s)", err, _egl_err_str(err));
     return false;
   }
 
@@ -324,7 +320,7 @@ renderer_init_egl(vt_backend_t* backend, vt_renderer_t *r, void* native_handle) 
   egl->egl_ctx = eglCreateContext(egl->egl_dsp, egl->egl_conf, EGL_NO_CONTEXT, ctx_attr);
   if (egl->egl_ctx == EGL_NO_CONTEXT) {
     EGLint err = eglGetError();
-    log_error(r->comp->log, "eglCreateContext failed: 0x%04x (%s)", err, _egl_err_str(err));
+    VT_ERROR(r->comp->log, "eglCreateContext failed: 0x%04x (%s)", err, _egl_err_str(err));
     return false;
   }
 
@@ -344,18 +340,18 @@ renderer_init_egl(vt_backend_t* backend, vt_renderer_t *r, void* native_handle) 
       eglGetProcAddress("eglSwapBuffersWithDamageKHR");
   }
 
-  log_trace(r->comp->log, "EGL: initialized (vendor=%s, version=%s)", vendor, version);
+  VT_TRACE(r->comp->log, "EGL: initialized (vendor=%s, version=%s)", vendor, version);
 
   return true;
 }
 
 
 bool
-renderer_setup_renderable_output_egl(vt_renderer_t *r, vt_output_t* output) {
+renderer_setup_renderable_output_egl(struct vt_renderer_t *r, struct vt_output_t* output) {
   if (!r || !output || !r->user_data || !output->native_window) return false;
   egl_backend_state_t* egl = BACKEND_DATA(r, egl_backend_state_t);
 
-  output->user_data_render = COMP_ALLOC(r->comp, sizeof(*output->user_data_render));
+  output->user_data_render = VT_ALLOC(r->comp, sizeof(*output->user_data_render));
 
   EGLint fbo_id, fbo_tex_id; 
 
@@ -366,7 +362,7 @@ renderer_setup_renderable_output_egl(vt_renderer_t *r, vt_output_t* output) {
   if(r->backend->platform == VT_BACKEND_WAYLAND) {
     struct wl_egl_window* egl_win = wl_egl_window_create(output->native_window, output->width, output->height);
     if(!egl_win) {
-      log_error(r->backend->comp->log, "EGL: Wayland Backend: Failed to create EGL window.");
+      VT_ERROR(r->backend->comp->log, "EGL: Wayland Backend: Failed to create EGL window.");
     }
     output->native_window = egl_win; 
   }
@@ -377,14 +373,14 @@ renderer_setup_renderable_output_egl(vt_renderer_t *r, vt_output_t* output) {
                            (EGLNativeWindowType)output->native_window, NULL);
   if (egl_surf == EGL_NO_SURFACE) {
     EGLint err = eglGetError();
-    log_error(r->comp->log, "EGL: eglCreateWindowSurface failed: 0x%04x (%s)", err, _egl_err_str(err));
+    VT_ERROR(r->comp->log, "EGL: eglCreateWindowSurface failed: 0x%04x (%s)", err, _egl_err_str(err));
     return false;
   }
 
   // Set the EGL context to correctly initialize resources for the batch renderer (runara)
   if (!eglMakeCurrent(egl->egl_dsp, egl_surf, egl_surf, egl->egl_ctx)) {
     EGLint err = eglGetError();
-    log_error(r->comp->log, "eglMakeCurrent failed: 0x%04x (%s)", err, _egl_err_str(err));
+    VT_ERROR(r->comp->log, "eglMakeCurrent failed: 0x%04x (%s)", err, _egl_err_str(err));
     eglDestroySurface(egl->egl_dsp, egl_surf);
     return false;
   }
@@ -392,10 +388,10 @@ renderer_setup_renderable_output_egl(vt_renderer_t *r, vt_output_t* output) {
   if (!egl->render) {
     egl->render = rn_init(0, 0, (RnGLLoader)eglGetProcAddress);
     if (!egl->render) {
-      log_error(r->comp->log, "EGL: Failed to initialize runara rendering backend.");
+      VT_ERROR(r->comp->log, "EGL: Failed to initialize runara rendering backend.");
       return false;
     } else {
-      log_trace(r->comp->log, "EGL: Initialized runara rendering backend.");
+      VT_TRACE(r->comp->log, "EGL: Initialized runara rendering backend.");
     }
   }
 
@@ -410,12 +406,14 @@ renderer_setup_renderable_output_egl(vt_renderer_t *r, vt_output_t* output) {
   _egl_gl_create_output_fbo(output);
   glEnable(GL_STENCIL_TEST);
 
-  log_trace(r->comp->log, "EGL: Created surface %p (%ux%u)", egl_surf, output->width, output->height);
+  vt_comp_schedule_repaint(r->comp, output);
+
+  VT_TRACE(r->comp->log, "EGL: Created surface %p (%ux%u)", egl_surf, output->width, output->height);
   return true;
 }
 
 bool 
-renderer_resize_renderable_output_egl(vt_renderer_t* r, vt_output_t* output, int32_t w, int32_t h) {
+renderer_resize_renderable_output_egl(struct vt_renderer_t* r, struct vt_output_t* output, int32_t w, int32_t h) {
   if(r->backend->platform != VT_BACKEND_WAYLAND) return true;
   if(!r || !output || !output->native_window || w == 0 || h == 0) return false;
 
@@ -434,7 +432,7 @@ renderer_resize_renderable_output_egl(vt_renderer_t* r, vt_output_t* output, int
 
 
 bool 
-renderer_destroy_renderable_output_egl(vt_renderer_t *r, vt_output_t* output) {
+renderer_destroy_renderable_output_egl(struct vt_renderer_t *r, struct vt_output_t* output) {
   if (!r || !r->user_data || !output->render_surface ||
     r->backend->platform == VT_BACKEND_SURFACELESS) return false;
 
@@ -450,44 +448,54 @@ renderer_destroy_renderable_output_egl(vt_renderer_t *r, vt_output_t* output) {
 
   if(!eglDestroySurface(egl->egl_dsp, (EGLSurface)output->render_surface)) {
     int32_t err = eglGetError();
-    log_error(r->comp->log, "eglDestroySurface() failed: 0x%04x (%s)\n", err, _egl_err_str(err));
+    VT_ERROR(r->comp->log, "eglDestroySurface() failed: 0x%04x (%s)\n", err, _egl_err_str(err));
     return false;
   }
   output->render_surface = NULL;
 
-  log_trace(r->comp->log, "EGL: destroyed render surface."); 
+  VT_TRACE(r->comp->log, "EGL: destroyed render surface."); 
   return true;
 }
 
 bool renderer_import_buffer_egl(
-  vt_renderer_t *r, vt_surface_t *surf,
+  struct vt_renderer_t *r, vt_surface_t *surf,
   struct wl_resource *buffer_resource) {
   struct wl_shm_buffer* shmbuf = wl_shm_buffer_get(buffer_resource);
   if(shmbuf) {
     return _egl_gl_import_buffer_shm(r, surf, shmbuf); 
   }
-  log_warn(r->comp->log, "Unknown buffer type for surface %p", surf);
+  VT_WARN(r->comp->log, "Unknown buffer type for surface %p", surf);
   return false;
+}
+  
+bool renderer_destroy_surface_texture_egl(struct vt_renderer_t* r, struct vt_surface_t* surf) {
+  if(!surf || !r) return false;
+  if(surf->tex.id)
+    glDeleteTextures(1, &surf->tex.id);
+  surf->tex.id = 0;
+  surf->tex.width = 0;
+  surf->tex.height = 0;
+  return true;
 }
 
 bool 
-renderer_drop_context_egl(vt_renderer_t* r) {
+renderer_drop_context_egl(struct vt_renderer_t* r) {
   if (!r || !r->impl.drop_context || !r->user_data) {
-    log_error(r->comp->log, "EGL: Renderer backend not initialized before dropping context.");
+    VT_ERROR(r->comp->log, "EGL: Renderer backend not initialized before dropping context.");
     return false;
   }
   egl_backend_state_t* egl = BACKEND_DATA(r, egl_backend_state_t);
   if(!eglMakeCurrent(egl->egl_dsp, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT)) {
-    log_error(r->comp->log, "EGL: Cannot drop context: eglMakeCurrent() failed: %s", _egl_err_str(eglGetError()));
+    VT_ERROR(r->comp->log, "EGL: Cannot drop context: eglMakeCurrent() failed: %s", _egl_err_str(eglGetError()));
     return false;
   }
   return true;
 }
 
 void 
-renderer_set_vsync_egl(vt_renderer_t* r, bool vsync) {
+renderer_set_vsync_egl(struct vt_renderer_t* r, bool vsync) {
   if (!r || !r->impl.set_vsync || !r->user_data) {
-    log_error(r->comp->log, "EGL: Renderer backend not initialized before setting vsync.");
+    VT_ERROR(r->comp->log, "EGL: Renderer backend not initialized before setting vsync.");
     return;
   }
   egl_backend_state_t* egl = BACKEND_DATA(r, egl_backend_state_t);
@@ -495,13 +503,13 @@ renderer_set_vsync_egl(vt_renderer_t* r, bool vsync) {
 }
 
 void 
-renderer_set_clear_color_egl(vt_renderer_t* r, vt_output_t* output, uint32_t col) {
+renderer_set_clear_color_egl(struct vt_renderer_t* r, struct vt_output_t* output, uint32_t col) {
   egl_backend_state_t* egl = BACKEND_DATA(r, egl_backend_state_t);
   rn_rect_render(egl->render, (vec2s){0, 0}, (vec2s){output->width, output->height}, RN_WHITE);
 }
 
 void 
-renderer_stencil_damage_pass_egl(vt_renderer_t* r, vt_output_t* output) {
+renderer_stencil_damage_pass_egl(struct vt_renderer_t* r, struct vt_output_t* output) {
   glClear(GL_STENCIL_BUFFER_BIT);
   glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
   glDepthMask(GL_FALSE);
@@ -511,7 +519,7 @@ renderer_stencil_damage_pass_egl(vt_renderer_t* r, vt_output_t* output) {
 }
 
 void 
-renderer_composite_pass_egl(vt_renderer_t* r, vt_output_t* output) {
+renderer_composite_pass_egl(struct vt_renderer_t* r, struct vt_output_t* output) {
   glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
   glStencilFunc(GL_EQUAL, 1, 0xFF);
   glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
@@ -519,14 +527,14 @@ renderer_composite_pass_egl(vt_renderer_t* r, vt_output_t* output) {
 }
 
 void 
-renderer_begin_scene_egl(vt_renderer_t *r, vt_output_t *output) {
+renderer_begin_scene_egl(struct vt_renderer_t *r, struct vt_output_t *output) {
   if(!output);
   if (!r || !r->impl.begin_scene || !r->user_data) {
-    log_error(r->comp->log, "EGL: Renderer backend not initialized before beginning frame.");
+    VT_ERROR(r->comp->log, "EGL: Renderer backend not initialized before beginning frame.");
     return;
   }
   if(!output->width || !output->height) {
-    log_warn(r->comp->log, "EGL: Trying to render on invalid output region (%ix%i).", output->width, output->height);
+    VT_WARN(r->comp->log, "EGL: Trying to render on invalid output region (%ix%i).", output->width, output->height);
     return;
   }
 
@@ -537,43 +545,39 @@ renderer_begin_scene_egl(vt_renderer_t *r, vt_output_t *output) {
 }
 
 void 
-renderer_begin_frame_egl(vt_renderer_t *r, vt_output_t *output) {
+renderer_begin_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output) {
   if(!output);
   if (!r || !r->impl.begin_frame|| !r->user_data) {
-    log_error(r->comp->log, "EGL: Renderer backend not initialized before beginning frame.");
+    VT_ERROR(r->comp->log, "EGL: Renderer backend not initialized before beginning frame.");
     return;
   }
 
   egl_backend_state_t* egl = BACKEND_DATA(r, egl_backend_state_t);
- 
-  static bool init = false;
-  if(!init) {
-    EGLSurface surface = (EGLSurface)output->render_surface;
-    if (!eglMakeCurrent(egl->egl_dsp, surface, surface, egl->egl_ctx)) {
-      EGLint err = eglGetError();
-      log_error(r->comp->log, "eglMakeCurrent() failed (renderer_begin_frame_egl): 0x%04x (%s)",
-                err, _egl_err_str(err));
-      return;
-    }
-    init = true;
+
+  EGLSurface surface = (EGLSurface)output->render_surface;
+  if (!eglMakeCurrent(egl->egl_dsp, surface, surface, egl->egl_ctx)) {
+    EGLint err = eglGetError();
+    VT_ERROR(r->comp->log, "eglMakeCurrent() failed (renderer_begin_frame_egl): 0x%04x (%s)",
+             err, _egl_err_str(err));
+    return;
   }
 
   // Resize the render display if the output size changed
   if(egl->render->render.render_w != output->width || egl->render->render.render_h != output->height) {
     rn_resize_display(egl->render, output->width, output->height);
   }
-
-  // Bind the persistently managed framebuffer of the output
-  glBindFramebuffer(GL_FRAMEBUFFER, ((egl_output_state_t*)output->user_data_render)->fbo_id);
+  
+  egl_output_state_t* egl_output = (egl_output_state_t*)output->user_data_render; 
+  glBindFramebuffer(GL_FRAMEBUFFER, egl_output->fbo_id);
 }
 
 
 void 
-renderer_draw_surface_egl(vt_renderer_t* r, vt_surface_t* surface, float x, float y) {
+renderer_draw_surface_egl(struct vt_renderer_t* r, vt_surface_t* surface, float x, float y) {
   if(!surface) return;
   if(!surface->tex.id) return;
   if (!r || !r->impl.draw_surface || !r->user_data) {
-    log_error(r->comp->log, "EGL: Renderer backend not initialized before rendering surface.");
+    VT_ERROR(r->comp->log, "EGL: Renderer backend not initialized before rendering surface.");
     return;
   }
   egl_backend_state_t* egl = BACKEND_DATA(r, egl_backend_state_t);
@@ -582,9 +586,9 @@ renderer_draw_surface_egl(vt_renderer_t* r, vt_surface_t* surface, float x, floa
 }
 
 void 
-renderer_draw_rect_egl(vt_renderer_t* r, float x, float y, float w, float h, uint32_t col) {
+renderer_draw_rect_egl(struct vt_renderer_t* r, float x, float y, float w, float h, uint32_t col) {
   if (!r || !r->impl.draw_rect || !r->user_data) {
-    log_error(r->comp->log, "EGL: Renderer backend not initialized before rendering rectangle.");
+    VT_ERROR(r->comp->log, "EGL: Renderer backend not initialized before rendering rectangle.");
     return;
   }
 
@@ -593,9 +597,9 @@ renderer_draw_rect_egl(vt_renderer_t* r, float x, float y, float w, float h, uin
 }
 
 void 
-renderer_end_scene_egl(vt_renderer_t *r, vt_output_t *output) {
+renderer_end_scene_egl(struct vt_renderer_t *r, struct vt_output_t *output) {
   if (!r || !r->impl.end_scene || !r->user_data) {
-    log_error(r->comp->log, "EGL: Renderer backend not initialized before ending frame.");
+    VT_ERROR(r->comp->log, "EGL: Renderer backend not initialized before ending frame.");
     return;
   }
   
@@ -606,11 +610,17 @@ renderer_end_scene_egl(vt_renderer_t *r, vt_output_t *output) {
 }
 
 void
-renderer_end_frame_egl(vt_renderer_t *r, vt_output_t *output,  const pixman_box32_t* damaged, int32_t n_damaged) {
+renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,  const pixman_box32_t* damaged, int32_t n_damaged) {
   if (!r || !r->impl.end_frame || !r->user_data) {
-    log_error(r->comp->log, "EGL: Renderer backend not initialized before ending frame.");
+    VT_ERROR(r->comp->log, "EGL: Renderer backend not initialized before ending frame.");
     return;
   }
+
+  if (!r || !r->impl.end_frame || !r->user_data) {
+    VT_ERROR(r->comp->log, "EGL: Renderer backend not initialized before ending frame.");
+    return;
+  }
+  
   egl_backend_state_t* egl = BACKEND_DATA(r, egl_backend_state_t);
   egl_output_state_t* egl_output = (egl_output_state_t*)output->user_data_render; 
 
@@ -648,13 +658,12 @@ renderer_end_frame_egl(vt_renderer_t *r, vt_output_t *output,  const pixman_box3
     eglSwapBuffers(egl->egl_dsp, output->render_surface);
   }
 
-
 }
 
 bool
-renderer_destroy_egl(vt_renderer_t* r) {
+renderer_destroy_egl(struct vt_renderer_t* r) {
   if (!r || !r->impl.destroy || !r->user_data) {
-    log_error(r->comp->log, "EGL: Renderer backend not initialized before destroying backend.");
+    VT_ERROR(r->comp->log, "EGL: Renderer backend not initialized before destroying backend.");
     return false;
   }
   egl_backend_state_t* egl = BACKEND_DATA(r, egl_backend_state_t);
@@ -662,18 +671,17 @@ renderer_destroy_egl(vt_renderer_t* r) {
 
   if (egl->egl_ctx != EGL_NO_CONTEXT) {
     if(!eglDestroyContext(egl->egl_dsp, egl->egl_ctx)) {
-      log_error(r->comp->log, "eglDestroyContext() failed: %s", _egl_err_str(eglGetError()));
+      VT_ERROR(r->comp->log, "eglDestroyContext() failed: %s", _egl_err_str(eglGetError()));
       return false;
     }
     egl->egl_ctx = EGL_NO_CONTEXT;
   }
 
   if(!eglTerminate(egl->egl_dsp)) {
-    log_error(r->comp->log, "EGL: eglTerminate() failed: %s", _egl_err_str(eglGetError()));
+    VT_ERROR(r->comp->log, "EGL: eglTerminate() failed: %s", _egl_err_str(eglGetError()));
     return false;
   }
 
-  free(r->user_data);
   r->user_data = NULL;
 
   return true;

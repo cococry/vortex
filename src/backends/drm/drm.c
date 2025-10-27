@@ -1,6 +1,5 @@
 #define _GNU_SOURCE
 
-#include <drm.h>
 #include <xf86drmMode.h>
 #include <xf86drm.h>
 #include <fcntl.h>
@@ -9,36 +8,57 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 #include <gbm.h>
-#include <signal.h>
 #include <unistd.h>
 #include <linux/kd.h>  
+#include <pthread.h>  
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <drm/drm_fourcc.h>
-#include <linux/input-event-codes.h>
+#include <stdarg.h>
 
-#include <stdlib.h>
 #include <errno.h>
 
 #include <wayland-server-core.h>
 #include <wayland-util.h>
+#include <pthread.h>
 
+#include "../../render/renderer.h"
 #include "./drm.h"
-#include "../../log.h"
-#include "../../backend.h"
+#include "./session_drm.h"
+
+#include <linux/input-event-codes.h>
+
+typedef struct {
+  struct wl_list backends;
+  uint32_t x_ptr;
+  int32_t vt_fd;
+  struct vt_compositor_t* comp;
+
+  struct wl_listener session_terminate_listener,
+    seat_disable_listener, seat_enable_listener;
+} drm_backend_master_state_t;
 
 typedef struct {
   int drm_fd;
   drmEventContext evctx;
   drmModeRes* res;
-
   struct gbm_device* gbm_dev;
 
-  int32_t tty_fd;
+  struct wl_list outputs;
 
-  long kb_mode_before;
+  struct vt_compositor_t* comp;
+  struct gbm_device* native_handle;
+
+  struct wl_list link;
+
+  struct vt_renderer_t* renderer;
+
+  struct vt_backend_t* root_backend;
+
+  char gpu_path[64];
+
+  struct wl_event_source *event_source 
 } drm_backend_state_t;
-
-static volatile sig_atomic_t vt_acquire_pending, vt_release_pending;
 
 typedef struct {
   struct gbm_bo *current_bo;
@@ -61,38 +81,32 @@ typedef struct {
   uint32_t crtc_id;
 } drm_output_state_t;
 
-typedef enum {
-  _DRM_TTY_TEXT = 0,
-  _DRM_TTY_GRAPHICS,
-} drm_tty_mode_t;
+static void   _drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec, unsigned int usec, void *data);
+static void   _drm_release_all_scanout(struct vt_output_t* output);
+static void   _drm_handle_vt_release(int sig);
+static void   _drm_handle_vt_acquire(int sig);
+static bool   _drm_suspend(drm_backend_state_t* backend);
+static bool   _drm_resume(drm_backend_state_t* backend);
+static int    _drm_dispatch(int fd, uint32_t mask, void *data);
+static bool   _drm_init_for_device(struct vt_compositor_t* comp, drm_backend_state_t* drm, int32_t device_fd, const char* gpu_path);
+static bool   _drm_init_active_outputs_for_device(drm_backend_state_t* drm);
+static bool   _drm_handle_frame_for_device(drm_backend_state_t* drm, struct vt_output_t* output);
+static bool   _drm_create_output_for_device(drm_backend_state_t* drm, struct vt_output_t* output, void* data);
+static bool   _drm_destroy_output_for_device(drm_backend_state_t* drm, struct vt_output_t* output);
+static bool   _drm_terminate_for_device(drm_backend_state_t* drm);
 
-static void _drm_page_flip_handler(int fd, unsigned int frame,
-                                   unsigned int sec, unsigned int usec, void *data);
-
-static void _drm_release_all_scanout(vt_output_t* output);
-
-static void  _drm_handle_vt_release(int sig);
-
-static void _drm_handle_vt_acquire(int sig);
-
-static bool _drm_setup_tty(vt_backend_t* backend);
-
-static bool _drm_suspend_tty(vt_backend_t* backend);
-
-static bool _drm_resume_tty(vt_backend_t* backend);
-
-static int  _drm_dispatch(int fd, uint32_t mask, void *data);
-
-static bool _drm_set_tty_mode(vt_compositor_t* c, int tty_fd, drm_tty_mode_t mode);
+static void   _drm_on_session_terminate(struct wl_listener* listener, void* data); 
+static void   _drm_on_seat_enable(struct wl_listener* listener, void* data); 
+static void   _drm_on_seat_disable(struct wl_listener* listener, void* data); 
 
 void 
 _drm_page_flip_handler(int fd, unsigned int frame,
                        unsigned int sec, unsigned int usec, void *data) {
-  vt_output_t* output = (vt_output_t*)data; 
+  struct vt_output_t* output = (struct vt_output_t*)data; 
   drm_output_state_t* drm_output = BACKEND_DATA(output, drm_output_state_t);
-  vt_compositor_t* comp = output->backend->comp;
+  struct vt_compositor_t* comp = output->backend->comp;
 
-  log_trace(comp->log, "DRM: _drm_page_flip_handler(): Handling page flip event.")
+  VT_TRACE(comp->log, "DRM: _drm_page_flip_handler(): Handling page flip event.")
 
   // Release the old, unused backbuffer
   if (drm_output->older_bo) {
@@ -106,7 +120,7 @@ _drm_page_flip_handler(int fd, unsigned int frame,
 
   // Swap buffers, the previous buffer becomes the currently displayed buffer 
   // and the currently displayed buffer becomes the new, pending frame buffer 
-  // (that we got from eglSwapBuffers and is rendered to with OpenGL)
+  // (that we got from swapping buffers and is rendered to with OpenGL/Vulkan etc)
   drm_output->prev_bo = drm_output->current_bo;
   drm_output->prev_fb = drm_output->current_fb;
 
@@ -118,18 +132,18 @@ _drm_page_flip_handler(int fd, unsigned int frame,
   drm_output->pending_fb = 0;
 
   drm_output->flip_inflight = false;
-  uint32_t t = comp_get_time_msec(); 
+  uint32_t t = vt_util_get_time_msec(); 
 
   // Send the frame callbacks to all clients, establishing correct frame pacing
-  comp_send_frame_callbacks_for_output(comp, output, t);
+  vt_comp_frame_done(comp, output, t);
 
   if(output->needs_repaint) {
-    comp_schedule_repaint(comp, output);
+    vt_comp_schedule_repaint(comp, output);
   }
 }
 
 void 
-_drm_release_all_scanout(vt_output_t* output) {
+_drm_release_all_scanout(struct vt_output_t* output) {
   drm_backend_state_t* drm = BACKEND_DATA(output->backend, drm_backend_state_t);
   drm_output_state_t* drm_output = BACKEND_DATA(output, drm_output_state_t) ;
 
@@ -151,66 +165,20 @@ _drm_release_all_scanout(vt_output_t* output) {
   }
 }
 
-
-void 
-_drm_handle_vt_release(int sig) {
-  vt_release_pending = true;
-}
-void 
-_drm_handle_vt_acquire(int sig) {
-  vt_acquire_pending = true;
-}
-
-bool _drm_setup_tty(vt_backend_t* backend) {
-  drm_backend_state_t* drm = BACKEND_DATA(backend, drm_backend_state_t); 
-  vt_compositor_t* comp = backend->comp;
-
-  signal(SIGUSR1, _drm_handle_vt_release);
-  signal(SIGUSR2, _drm_handle_vt_acquire);
-
-  drm->tty_fd = open("/dev/tty", O_RDWR | O_CLOEXEC);
-  if(drm->tty_fd < 0) {
-    log_error(comp->log, "DRM: failed to open /dev/tty");
-    return false;
-  }
-
-  _drm_set_tty_mode(backend->comp, drm->tty_fd, _DRM_TTY_GRAPHICS);
-
-  struct vt_mode tty_mode = {
-    .mode = VT_PROCESS,
-    .waitv = 1,
-    .relsig = SIGUSR1, 
-    .acqsig = SIGUSR2 
-  };
-  if(ioctl(drm->tty_fd, VT_SETMODE, &tty_mode) < 0) {
-    log_error(comp->log, "DRM: failed to set TTY switching mode.");
-    return false;
-  }
-
-  ioctl(drm->tty_fd, KDGKBMODE, &drm->kb_mode_before);
-
-  ioctl(drm->tty_fd, KDSKBMODE, K_OFF);
-
-
-  return true;
-}
-
 bool 
-_drm_suspend_tty(vt_backend_t* backend) {
-  if(!backend || !backend->user_data) return false;
+_drm_suspend(drm_backend_state_t* backend) {
+  if(!backend) return false;
   if (backend->comp->suspended) return true;
   backend->comp->suspended = true;
 
-  drm_backend_state_t* drm = BACKEND_DATA(backend, drm_backend_state_t); 
-
-  log_trace(backend->comp->log, "DRM: suspending TTY session...");
+  VT_TRACE(backend->comp->log, "DRM: suspending seat session...");
 
   // Drain any pending flips
   bool any_inflight;
   do {
     any_inflight = false;
-    vt_output_t* output;
-    wl_list_for_each(output, &backend->outputs, link) {
+    struct vt_output_t* output;
+    wl_list_for_each(output, &backend->outputs, link_local) {
       if(!output->user_data) continue;
       if (BACKEND_DATA(output, drm_output_state_t)->flip_inflight) {
         any_inflight = true;
@@ -218,15 +186,16 @@ _drm_suspend_tty(vt_backend_t* backend) {
       }
     }
     if (any_inflight)
-      drmHandleEvent(drm->drm_fd, &drm->evctx);
+      drmHandleEvent(backend->drm_fd, &backend->evctx);
   } while (any_inflight);
+
 
   // Drop graphics context 
   if(!backend->renderer->impl.drop_context(backend->renderer)) return false; 
 
   // Destroy all the graphical outputs
-  vt_output_t* output, *tmp;
-  wl_list_for_each_safe(output, tmp, &backend->outputs, link) {
+  struct vt_output_t* output, *tmp;
+  wl_list_for_each_safe(output, tmp, &backend->outputs, link_local) {
     if(!output->user_data) continue;
     _drm_release_all_scanout(output);
     drm_output_state_t* drm_output = BACKEND_DATA(output, drm_output_state_t);
@@ -235,86 +204,78 @@ _drm_suspend_tty(vt_backend_t* backend) {
     if(!backend->renderer->impl.destroy_renderable_output(backend->renderer, output)) return false;
   }
 
-
-  // Set tty to text mode
-  _drm_set_tty_mode(backend->comp, drm->tty_fd, _DRM_TTY_TEXT);
-
-  if(drmDropMaster(drm->drm_fd) != 0) {
-    log_warn(backend->comp->log, "DMR: drmDropMaster() failed: %s\n", strerror(errno));
-  }
-  ioctl(drm->tty_fd, VT_RELDISP, 1);
-
   return true;
 }
 
 bool 
-_drm_resume_tty(vt_backend_t* backend) {
-  if(!backend || !backend->user_data) return false;
+_drm_resume(drm_backend_state_t* backend) {
+  if(!backend) return false;
   if (!backend->comp->suspended) return true;
 
-  drm_backend_state_t* drm = BACKEND_DATA(backend, drm_backend_state_t); 
-
-  log_trace(backend->comp->log, "DRM: resuming TTY session...");
-
-  // Try everything to become the master (deep)
-  bool is_master = false;
-  for (int i = 0; i < 50; i++) {
-    if (drmSetMaster(drm->drm_fd) == 0) {
-      is_master = true;
-      break;
-    }
-    usleep(20000); 
-  }
-
-  if(!is_master) {
-    if (drmSetMaster(drm->drm_fd) != 0) {
-      ioctl(drm->tty_fd, VT_RELDISP, VT_ACKACQ);
-      log_fatal(backend->comp->log, "DRM: we cannot become the master, drmSetMaster still failed: %s", strerror(errno));
-      return false;
-    }
-  }
-
-  log_trace(backend->comp->log, "DRM: Vortex is now the DRM master of %s.", ttyname(drm->tty_fd));
+  VT_TRACE(backend->comp->log, "DRM: resuming seat session...");
   backend->comp->suspended = false;
 
-  backend->renderer->impl.init(backend, backend->renderer, backend->native_handle);
-  vt_output_t* output, *tmp;
-  const uint32_t desired_format = backend->renderer->_desired_render_buffer_format;
-  wl_list_for_each_safe(output, tmp, &backend->outputs, link) {
-    if(!output->user_data) continue;
+  if (backend->gbm_dev)
+    gbm_device_destroy(backend->gbm_dev);
 
-    drm_output_state_t* drm_output = BACKEND_DATA(output, drm_output_state_t);
-    drm_output->gbm_surf = gbm_surface_create(
-      drm->gbm_dev,
-      drm_output->mode.hdisplay, drm_output->mode.vdisplay,
-      !desired_format ? backend->_desired_render_buffer_format : desired_format,
-      GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING
-    );
-    output->native_window = drm_output->gbm_surf;
+  backend->gbm_dev = gbm_create_device(backend->drm_fd);
+  backend->native_handle = backend->gbm_dev;
 
-    if(!backend->renderer->impl.setup_renderable_output(backend->renderer, output)) return false;
-    drm_output->needs_modeset = true;
-    drm_output->modeset_bootstrapped = false;
-    drm_output->flip_inflight = false;
-    output->repaint_pending = false;
+  backend->renderer->impl.destroy(backend->renderer);
+  backend->renderer->impl.init(backend->root_backend, backend->renderer, backend->native_handle);
 
-    log_trace(backend->comp->log, "DRM: Recreated GBM/rendering surfaces of output (%ux%u@%.2f, ID: %i).",
-              output->width, output->height, output->refresh_rate, drm_output->conn_id);
+  {
+    struct vt_output_t* output, *tmp;
+    const uint32_t desired_format = backend->renderer->_desired_render_buffer_format;
+    wl_list_for_each_safe(output, tmp, &backend->outputs, link_local) {
+      if(!output->user_data) continue;
+
+      drm_output_state_t* drm_output = BACKEND_DATA(output, drm_output_state_t);
+      drm_output->gbm_surf = gbm_surface_create(
+        backend->gbm_dev,
+        drm_output->mode.hdisplay, drm_output->mode.vdisplay,
+        desired_format, 
+        GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING
+      );
+      output->native_window = drm_output->gbm_surf;
+
+      if(!backend->renderer->impl.setup_renderable_output(backend->renderer, output)) return false;
+      drm_output->needs_modeset = true;
+      drm_output->modeset_bootstrapped = false;
+      drm_output->flip_inflight = false;
+      output->repaint_pending = false;
+
+      VT_TRACE(backend->comp->log, "DRM: Recreated GBM/rendering surfaces of output (%ux%u@%.2f, ID: %i).",
+               output->width, output->height, output->refresh_rate, drm_output->conn_id);
+    }
   }
 
-  // Set tty to graphics mode
-  _drm_set_tty_mode(backend->comp, drm->tty_fd, _DRM_TTY_GRAPHICS);
 
-  // Ack acquire
-  if(ioctl(drm->tty_fd, VT_RELDISP, VT_ACKACQ) < 0) {
-    log_error(backend->comp->log, "DRM: VT_RELDISP VT_ACKACQ ioctl failed: %s", strerror(errno));
-    return false;
+  if (backend->event_source) {
+    wl_event_source_remove(backend->event_source);
+    backend->event_source = NULL;
   }
+  backend->event_source = wl_event_loop_add_fd(backend->comp->wl.evloop, 
+                                               backend->drm_fd, WL_EVENT_READABLE, _drm_dispatch, backend);
 
+  vt_comp_invalidate_all_surfaces(backend->comp);
+
+  struct vt_output_t* output, *tmp;
   // Schedule repaint on all outputs
-  wl_list_for_each(output, &backend->outputs, link) {
-    comp_schedule_repaint(backend->comp, output);
+  wl_list_for_each(output, &backend->outputs, link_local) {
+    drm_output_state_t* drm_output = BACKEND_DATA(output, drm_output_state_t);
+    pixman_region32_clear(&output->damage);
+    pixman_region32_union_rect(&output->damage, &output->damage, 0, 0, output->width, output->height);
+
+    drm_output->needs_modeset = true;
+    drm_output->modeset_bootstrapped = true;
+    vt_comp_repaint_scene(backend->comp, output);
+    _drm_handle_frame_for_device(backend, output);
   }
+  uint32_t t = vt_util_get_time_msec();
+  vt_comp_frame_done_all(backend->comp, t);
+  wl_display_flush_clients(backend->comp->wl.dsp);
+
 
   return true;
 }
@@ -327,324 +288,69 @@ _drm_dispatch(int fd, uint32_t mask, void *data) {
   return 0;
 }
 
-bool
-_drm_set_tty_mode(vt_compositor_t* c, int tty_fd, drm_tty_mode_t mode) {
-  int32_t tty_mode = -1; 
-  const char* mode_str;
-  switch (mode)  {
-    case _DRM_TTY_GRAPHICS: {
-      mode_str = "graphics";
-      tty_mode = KD_GRAPHICS;
-      break;
-    }
-    case _DRM_TTY_TEXT: {
-      mode_str = "text";
-      tty_mode = KD_TEXT;
-      break;
-    }
-    default: {
-      log_error(c->log, "DRM: Trying to set invalid TTY graphics mode.");
-      return false;
-    }
+static struct vt_device_drm_t* _drm_find_device_by_gpu_path(struct vt_session_drm_t* session, const char* path) {
+  struct vt_device_drm_t* dev;
+  wl_list_for_each(dev, &session->devices, link) {
+    if(strcmp(dev->path, path) == 0) return dev;
   }
-  if(ioctl(tty_fd, KDSETMODE, tty_mode) < 0) {
-    log_error(c->log, "DRM: Failed to enter TTY %s mode: %m", mode_str);
-    return false;
-  }
-
-  log_trace(c->log, "DRM: %s is now in %s mode.", ttyname(tty_fd), mode_str);
-
-  return true;
+  return NULL;
 }
 
-bool
-backend_init_drm(vt_backend_t* backend) {
-  if(!backend) return false;
-  if(!(backend->user_data = COMP_ALLOC(backend->comp, sizeof(drm_backend_state_t))))  {
-    return false;
-  }
-  backend->_desired_render_buffer_format = GBM_FORMAT_XRGB8888;
-  wl_list_init(&backend->outputs);
+bool _drm_init_for_device(struct vt_compositor_t* comp, drm_backend_state_t* drm, int32_t device_fd, const char* gpu_path) {
+  if(!drm) return false;
+  wl_list_init(&drm->outputs);
 
-  drm_backend_state_t* drm = BACKEND_DATA(backend, drm_backend_state_t); 
-  vt_compositor_t* comp = backend->comp;
+  drm->drm_fd = device_fd;
+  snprintf(drm->gpu_path, sizeof(drm->gpu_path), "%s", gpu_path);
+  drm->comp = comp;
 
-  log_trace(comp->log, "DRM: Initializing DRM/KMS backend...");
+  VT_TRACE(comp->log, "DRM: Initializing DRM/KMS backend...");
 
-  if(!_drm_setup_tty(backend)) {
-    backend_terminate_drm(backend);
-    log_fatal(backend->comp->log, "DRM: failed to setup TTY for rendering.");
-    return false;
-  }
-
-  drmDevicePtr devices[16] = {0};
-  int num = drmGetDevices2(0, devices, 16);
-
-  if (num < 0) {
-    log_fatal(backend->comp->log, "DRM: No valid DRM device found.");
-    return false;
-  }
-
-  for (int i = 0; i < num; i++) {
-    drmDevicePtr dev = devices[i];
-
-    // Only consider primary nodes like /dev/dri/cardX
-    if (!(dev->available_nodes & (1 << DRM_NODE_PRIMARY)))
-      continue;
-
-    const char *node = dev->nodes[DRM_NODE_PRIMARY];
-    drm->drm_fd = open(node, O_RDWR | O_CLOEXEC);
-    if (drm->drm_fd < 0) {
-      log_error(backend->comp->log, "DRM: Failed to open device %s: %s\n", node, strerror(errno));
-      continue;
-    }
-    break;
-  }
-
-  drmFreeDevices(devices, num);
-
-  if (drmSetMaster(drm->drm_fd) != 0) {
-    backend_terminate_drm(backend);
-    log_fatal(comp->log, "DRM: drmSetMaster failed: %s", strerror(errno));
-    return false;
-  }
-
-  log_trace(comp->log, "DRM: Vortex is now the DRM master of %s.", ttyname(drm->tty_fd));
 
   if(!(drm->gbm_dev = gbm_create_device(drm->drm_fd))) {
-    log_error(comp->log, "DRM: cannot create GBM device (fd: %i)", drm->drm_fd);
-    backend_terminate_drm(backend);
+    VT_ERROR(comp->log, "DRM: cannot create GBM device (fd: %i)", drm->drm_fd);
+    _drm_terminate_for_device(drm);
     return false;
   }
 
-  log_trace(comp->log, "DRM: Successfully created GBM device on FD: %i", drm->drm_fd);  
+  VT_TRACE(comp->log, "DRM: Successfully created GBM device on FD: %i", drm->drm_fd);  
 
   drm->evctx.version = DRM_EVENT_CONTEXT_VERSION;
   drm->evctx.page_flip_handler = _drm_page_flip_handler;
   drm->evctx.vblank_handler = NULL;
 
-  log_trace(comp->log, "DRM: Successfully initialized DRM/KMS backend.");
+  drm->event_source = wl_event_loop_add_fd(comp->wl.evloop, device_fd, WL_EVENT_READABLE, _drm_dispatch, drm);
 
-  int fd = drm->drm_fd;
-  wl_event_loop_add_fd(comp->wl.evloop, fd, WL_EVENT_READABLE, _drm_dispatch, drm);
+  drm->native_handle = drm->gbm_dev;
 
-  backend->native_handle = drm->gbm_dev;
+  drm->renderer = VT_ALLOC(comp, sizeof(struct vt_renderer_t));
+  drm->renderer->comp = comp;
+  vt_renderer_implement(drm->renderer, VT_RENDERING_BACKEND_EGL_OPENGL);
 
-  return true;
-}
+  drm->renderer->impl.init(comp->backend, drm->renderer, drm->native_handle);
+  _drm_init_active_outputs_for_device(drm);
 
-bool 
-backend_implement_drm(vt_compositor_t* comp) {
-  if(!comp || !comp->backend) return false;
-
-  log_trace(comp->log, "DRM: Implementing backend...");
-
-  comp->backend->platform = VT_BACKEND_DRM_GBM; 
-
-  comp->backend->impl = (vt_backend_interface_t){
-    .init = backend_init_drm,
-    .handle_event = backend_handle_event_drm,
-    .suspend = backend_suspend_drm,
-    .resume = backend_resume_drm,
-    .handle_frame = backend_handle_frame_drm,
-    .initialize_active_outputs = backend_initialize_active_outputs_drm, 
-    .terminate = backend_terminate_drm,
-    .create_output = backend_create_output_drm, 
-    .destroy_output = backend_destroy_output_drm, 
-    .prepare_output_frame = backend_prepare_output_frame_drm,
-    .__handle_input = backend___handle_input_drm
-  };
+  VT_TRACE(comp->log, "DRM: Successfully initialized DRM/KMS backend for GPU %i.", device_fd);
 
   return true;
 }
 
-  bool 
-backend_handle_event_drm(vt_backend_t* backend) {
-  if (vt_release_pending) {
-    vt_release_pending = 0;
-    backend->impl.suspend(backend);
-  }
-  if (vt_acquire_pending) {
-    vt_acquire_pending = 0;
-    if (!backend->impl.resume(backend)) {
-      backend->comp->running = false;
-    }
-  }
-  return true;
-}
-
 bool 
-backend_suspend_drm(vt_backend_t* backend) {
-  if(!_drm_suspend_tty(backend)) {
-    log_error(backend->comp->log, "DRM: Failed to suspend backend.");
-    return false;
-  }
-  return true;
-}
+_drm_init_active_outputs_for_device(drm_backend_state_t* drm) {
+  if(!drm) return false;
+  struct vt_compositor_t* comp = drm->comp;
 
-bool 
-backend_resume_drm(vt_backend_t* backend) {
-  if(!_drm_resume_tty(backend)) {
-    log_error(backend->comp->log, "DRM: Failed to resume backend.");
-    return false;
-  }
-  return true;
-}
+  VT_TRACE(comp->log, "DRM: Initializing active outputs.");
 
-bool 
-backend_handle_frame_drm(vt_backend_t* backend, vt_output_t* output) {
-  if(!backend || !backend->user_data) return false;
-
-  drm_backend_state_t* drm = BACKEND_DATA(backend, drm_backend_state_t); 
-  vt_compositor_t* comp = backend->comp;
-
-  log_trace(comp->log, "DRM: Handling frame...");
-
-  // Render the compositor scene 
-  comp_repaint_scene(comp, output);
-
-  if (!backend->renderer) {
-    log_error(comp->log, "DRM: Renderer backend not initialized before handling frame.");
-    return false;
-  }
-
-  drm_output_state_t* drm_output = BACKEND_DATA(output, drm_output_state_t); 
-
-  // Retrieve the front buffer that we rendered to with the renderer (e.g EGL) 
-  struct gbm_bo *bo = gbm_surface_lock_front_buffer(drm_output->gbm_surf);
-  // If we could not get the front buffer, we'll try again next frame.
-  if (!bo) {
-    log_warn(comp->log, "DRM: Failed to get the GBM front buffer for frame.");
-    output->needs_repaint = true; 
-    return true;
-  }
-
-  uint32_t w = gbm_bo_get_width(bo);
-  uint32_t h = gbm_bo_get_height(bo);
-  uint32_t fmt = gbm_bo_get_format(bo);
-  uint32_t handle = gbm_bo_get_handle(bo).u32;
-  uint32_t stride = gbm_bo_get_stride(bo);
-  uint32_t fb;
-  uint32_t handles[4] = { gbm_bo_get_handle(bo).u32 };
-  uint32_t strides[4] = { gbm_bo_get_stride(bo) };
-  uint32_t offsets[4] = { 0 };
-
-  uint64_t modifier = gbm_bo_get_modifier(bo);
-
-  int ret;
-  // If the BO wants modifiers, add the FB with modifier arguments
-  if (modifier != DRM_FORMAT_MOD_INVALID) {
-    uint64_t mods[4] = { modifier, 0, 0, 0 };
-    ret = drmModeAddFB2WithModifiers(drm->drm_fd, w, h, fmt,
-                                     handles, strides, offsets, mods, &fb,
-                                     DRM_MODE_FB_MODIFIERS);
-  } else {
-    ret = drmModeAddFB2(drm->drm_fd, w, h, fmt,
-                        handles, strides, offsets, &fb, 0);
-  }
-
-  // If we could not create a DRM frame buffer...
-  if (ret != 0) {
-    gbm_surface_release_buffer(drm_output->gbm_surf, bo);
-    // Try again next farme
-    output->needs_repaint = true;
-    log_error(comp->log, "DRM: canot create DRM frame buffer: drmModeAddFB2(%ux%u, fmt=0x%08x) failed: %s",
-              w, h, fmt, strerror(errno));
-    return false;
-  }
-
-  if (drm_output->needs_modeset) {
-    if (drmModeSetCrtc(drm->drm_fd, drm_output->crtc_id, fb,
-                       0, 0, &drm_output->conn_id, 1, &drm_output->mode) != 0) {
-      drmModeRmFB(drm->drm_fd, fb);
-      gbm_surface_release_buffer(drm_output->gbm_surf, bo);
-      // Try again next farme
-      output->needs_repaint = true;
-      log_error(comp->log, "DRM: cannot set CRTC mode: drmModeSetCrtc() failed: %s",
-                strerror(errno));
-      return false;
-    }
-    log_trace(comp->log, "DRM: Successfully performed DRM CRTC mode set for output (%ux%u@%.2f, ID: %i)",
-              output->width, output->height, output->refresh_rate, drm_output->conn_id);
-
-    // Release the old buffer 
-    if (drm_output->current_bo) {
-      drmModeRmFB(drm->drm_fd, drm_output->current_fb);
-      gbm_surface_release_buffer(drm_output->gbm_surf, drm_output->current_bo);
-    }
-
-    // Assign the newly rendered buffer
-    drm_output->current_bo = bo;
-    drm_output->current_fb = fb;
-    drm_output->needs_modeset = false;
-
-    // If we did not yet bootstrap (we just applied the first CRTC), we need to 
-    // manually send the frame callbacks to the clients to kick off
-    // the client rendering loop, because this path does not invoke page_flip_handler(),
-    // which would normally send the frame callbacks.
-    if(!drm_output->modeset_bootstrapped) {
-      uint32_t t = comp_get_time_msec();
-      comp_send_frame_callbacks(comp, output, t);
-      wl_display_flush_clients(comp->wl.dsp);
-      output->needs_repaint = false;
-      drm_output->modeset_bootstrapped = true;
-      log_trace(comp->log, "DRM: Successfully bootstrapped the first frame.");
-    }
-    return true;
-  }
-
-  // Set pending buffer and eventually assign to 
-  // current in _drm_page_flip_handler() (after flip completes)
-  drm_output->pending_bo = bo;
-  drm_output->pending_fb = fb;
-
-  if( 
-    drmModePageFlip(drm->drm_fd, drm_output->crtc_id, fb,
-                    DRM_MODE_PAGE_FLIP_EVENT, output) != 0) {
-    // Flip refused; free pending and try again later
-    drmModeRmFB(drm->drm_fd, drm_output->pending_fb);
-    gbm_surface_release_buffer(drm_output->gbm_surf, drm_output->pending_bo);
-    drm_output->pending_bo = NULL; drm_output->pending_fb = 0;
-    output->needs_repaint = true;
-    log_error(comp->log, "DRM: cannot do a page flip: drmModePageFlip() failed: %s",
-              strerror(errno));
-    return false;
-  }
-  log_trace(comp->log, "DRM: Successfully performed drmModePageFlip() call.");
-
-  drm_output->flip_inflight = true;
-
-  // we’ve submitted a frame so clear the desire until something else changes
-  output->needs_repaint = false;
-}
-
-
-bool 
-backend_handle_repaint_drm(vt_backend_t* backend, vt_output_t* output) {
-  // ingored in DMR
-  (void)backend;
-  (void)output;
-}
-
-
-bool 
-backend_initialize_active_outputs_drm(vt_backend_t* backend) {
-  if(!backend || !backend->user_data) return false;
-
-  drm_backend_state_t* drm = BACKEND_DATA(backend, drm_backend_state_t); 
-  vt_compositor_t* comp = backend->comp;
-
-  log_trace(comp->log, "DRM: Initializing active outputs.");
-
-  if (!backend->renderer || !backend->renderer->impl.setup_renderable_output) {
-    log_error(comp->log, "DRM: Renderer backend not initialized before output setup.");
+  if (!drm->renderer || !drm->renderer->impl.setup_renderable_output) {
+    VT_ERROR(comp->log, "DRM: Renderer backend not initialized before output setup.");
     return false;
   }
 
 
   drm->res = drmModeGetResources(drm->drm_fd);
   if (!drm->res) {
-    log_error(comp->log, "DRM: drmModeGetResources() failed: %s", strerror(errno));
+    VT_ERROR(comp->log, "DRM: drmModeGetResources() failed: %s", strerror(errno));
     return false;
   }
 
@@ -652,115 +358,47 @@ backend_initialize_active_outputs_drm(vt_backend_t* backend) {
     drmModeConnector *conn = drmModeGetConnector(drm->drm_fd, drm->res->connectors[i]);
     if (!conn) continue;
     if (conn->connection == DRM_MODE_CONNECTED && conn->count_modes > 0) {
-      vt_output_t* output = COMP_ALLOC(comp, sizeof(vt_output_t));
-      pixman_region32_init(&output->damage);
-      output->backend = backend;
+      struct vt_output_t* output = VT_ALLOC(comp, sizeof(struct vt_output_t));
       if (!output) {
-        log_error(comp->log, "DRM: allocation failed for output.");
+        VT_ERROR(comp->log, "DRM: allocation failed for output.");
         drmModeFreeConnector(conn);
         continue;
       }
-      if (!backend->impl.create_output(backend, output, conn)) {
-        log_error(comp->log, "DRM: Failed to setup internal DRM output output.");
-        free(output);
+      pixman_region32_init(&output->damage);
+      output->backend = comp->backend;
+      if (!_drm_create_output_for_device(drm, output, conn)) {
+        VT_ERROR(comp->log, "DRM: Failed to setup internal DRM output output.");
         continue;
       } 
-      if(!backend->renderer->impl.setup_renderable_output(backend->renderer, output)) {
-        log_error(comp->log, "DRM: Failed to setup renderable output for DRM output (%ix%i@%.2f)",
-                  output->width, output->height, output->refresh_rate);
-        backend->impl.destroy_output(backend, output);
-        free(output);
+      if(!drm->renderer->impl.setup_renderable_output(drm->renderer, output)) {
+        VT_ERROR(comp->log, "DRM: Failed to setup renderable output for DRM output (%ix%i@%.2f)",
+                 output->width, output->height, output->refresh_rate);
+        _drm_destroy_output_for_device(drm, output);
         continue;
       }
     }
     drmModeFreeConnector(conn);
   }
 
-  if (wl_list_empty(&backend->outputs)) {
-    log_error(comp->log, "DRM: No connected connector found");
+  if (wl_list_empty(&drm->outputs)) {
+    VT_ERROR(comp->log, "DRM: No connected connector found");
     drmModeFreeResources(drm->res);
     return false;
   }
 
   return true;
 }
-
-static void restore_tty(int tty_fd, int saved_kb_mode, struct termios *saved_tio) {
-}
-bool
-backend_terminate_drm(vt_backend_t* backend) {
-  if(!backend) return false;
-  drm_backend_state_t* drm = BACKEND_DATA(backend, drm_backend_state_t); 
-  vt_compositor_t* comp = backend->comp; 
-
-
-  if (!comp->suspended && drm->drm_fd > 0) {
-    bool any_inflight;
-    do {
-      any_inflight = false;
-      vt_output_t* output;
-      wl_list_for_each(output, &backend->outputs, link) {
-        if (BACKEND_DATA(output, drm_output_state_t)->flip_inflight) {
-          any_inflight = true;
-          break;
-        }
-      }
-      if (any_inflight)
-        drmHandleEvent(drm->drm_fd, &drm->evctx);
-    } while (any_inflight);
-  }
-
-  if(drm->res)
-    drmModeFreeResources(drm->res);
-
-  _drm_set_tty_mode(backend->comp, drm->tty_fd, _DRM_TTY_TEXT);
-  ioctl(drm->tty_fd, KDSKBMODE, drm->kb_mode_before);
-
-  vt_output_t *output, *tmp;
-  wl_list_for_each_safe(output, tmp, &backend->outputs, link) {
-    backend->impl.destroy_output(backend, output);
-  }
-
-  if (drm->gbm_dev) {
-    gbm_device_destroy(drm->gbm_dev);
-    drm->gbm_dev = NULL;
-  }
-
-
-  if (drm->drm_fd > 0) drmDropMaster(drm->drm_fd);
-
-  if (drm->tty_fd > 0) {
-    struct vt_mode mode = { .mode = VT_AUTO };
-    ioctl(drm->tty_fd, VT_SETMODE, &mode);
-
-    close(drm->tty_fd);
-    drm->tty_fd = -1;
-  }
-
-  if (drm->drm_fd > 0) {
-    close(drm->drm_fd);
-    drm->drm_fd = -1;
-  }
-
-  if(backend->user_data) {
-    free(backend->user_data);
-    backend->user_data = NULL;
-  }
-
-  return true;
-}
-
 
 bool 
-backend_create_output_drm(vt_backend_t* backend, vt_output_t* output, void* data) {
-  if(!backend || !output || !data) return false;
+_drm_create_output_for_device(drm_backend_state_t* drm, struct vt_output_t* output, void* data) {
+  if(!drm || !output || !data) return false;
 
-  log_trace(backend->comp->log, "DMR: Creating DRM internal output.");
-  if(!(output->user_data = COMP_ALLOC(backend->comp, sizeof(drm_output_state_t)))) {
+  VT_TRACE(drm->comp->log, "DMR: Creating DRM internal output.");
+  if(!(output->user_data = VT_ALLOC(drm->comp, sizeof(drm_output_state_t)))) {
     return false;
   }
 
-  drmModeConnector* conn          = (drmModeConnector*)data;
+  drmModeConnector* conn = (drmModeConnector*)data;
   drmModeModeInfo mode;
   bool found = false;
   for (int j = 0; j < conn->count_modes; j++) {
@@ -774,10 +412,9 @@ backend_create_output_drm(vt_backend_t* backend, vt_output_t* output, void* data
     // Fallback to the first mode if none marked preferred
     mode = conn->modes[0];
   }
-  drm_backend_state_t* drm        = BACKEND_DATA(backend, drm_backend_state_t);
   drm_output_state_t* drm_output  = BACKEND_DATA(output, drm_output_state_t);
   drmModeModeInfo preferred_mode  = mode; 
-  vt_compositor_t* comp           = backend->comp; 
+  struct vt_compositor_t* comp    = drm->comp; 
 
   output->needs_repaint = true;
 
@@ -812,54 +449,57 @@ backend_create_output_drm(vt_backend_t* backend, vt_output_t* output, void* data
   }
 
   if (!drm_output->crtc_id) {
-    log_error(comp->log, "DRM: Failed to find CRTC for connector %u", drm_output->conn_id);
+    VT_ERROR(comp->log, "DRM: Failed to find CRTC for connector %u", drm_output->conn_id);
     drmModeFreeConnector(conn);
-    free(output->user_data);
     return false;
   }
 
-  const uint32_t desired_format = GBM_FORMAT_XRGB8888;
+  const uint32_t desired_format = drm->renderer->_desired_render_buffer_format;
   if(!(drm_output->gbm_surf = gbm_surface_create(
     drm->gbm_dev,
     drm_output->mode.hdisplay, drm_output->mode.vdisplay,
     desired_format,
     GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING
   ))) {
-    log_error(comp->log, "DRM: cannot create GBM surface (%ux%u@%u) for output on connector %i for rendering.", 
-              drm_output->mode.hdisplay, drm_output->mode.vdisplay, drm_output->mode.vrefresh, drm_output->conn_id);
-    free(output->user_data);
+    VT_ERROR(comp->log, "DRM: cannot create GBM surface (%ux%u@%u) for output on connector %i for rendering.", 
+             drm_output->mode.hdisplay, drm_output->mode.vdisplay, drm_output->mode.vrefresh, drm_output->conn_id);
     return false;
   } 
 
-  // Set the output's native window handle
 
-  wl_list_insert(&backend->outputs, &output->link);
+  VT_TRACE(comp->log, "DRM: Acknowledged connector: %u, CRTC %u, mode %ux%u@%u (%p)",
+           drm_output->conn_id, drm_output->crtc_id,
+           drm_output->mode.hdisplay, drm_output->mode.vdisplay, drm_output->mode.vrefresh, output);
 
-  log_trace(comp->log, "DRM: Acknowledged connector: %u, CRTC %u, mode %ux%u@%u",
-            drm_output->conn_id, drm_output->crtc_id,
-            drm_output->mode.hdisplay, drm_output->mode.vdisplay, drm_output->mode.vrefresh);
-
+  drm_backend_master_state_t* drm_master = BACKEND_DATA(output->backend, drm_backend_master_state_t); 
   // TODO: Implement correct output layouting e.g vertical monitors
-  static uint32_t x_ptr = 0;
   output->width = (uint32_t)drm_output->mode.hdisplay; 
   output->height = (uint32_t)drm_output->mode.vdisplay; 
-  output->x = x_ptr;
+  output->x = drm_master->x_ptr;
   output->y = 0; 
   output->height = (uint32_t)drm_output->mode.vdisplay; 
   output->refresh_rate = (uint32_t)drm_output->mode.vrefresh; 
   output->native_window = drm_output->gbm_surf;
   output->format = desired_format; 
   output->id = drm_output->conn_id;
+  output->renderer = drm->renderer;
 
-  x_ptr += output->width;
+  drm_master->x_ptr += output->width;
+  
+  wl_list_insert(&drm->outputs, &output->link_local);
+  wl_list_insert(&drm->comp->outputs, &output->link_global);
 
 
   return true;
 }
 
-bool 
-backend_destroy_output_drm(vt_backend_t* backend, vt_output_t* output) {
-  if(!output->user_data) return false;
+bool   
+_drm_destroy_output_for_device(drm_backend_state_t* drm, struct vt_output_t* output) {
+  if(!drm) return false;
+  if(!output || !output->user_data) return false;
+  
+  VT_TRACE(drm->comp->log, "DRM: Destroying output %p.\n", output);
+
   _drm_release_all_scanout(output);
   drm_output_state_t* drm_output = BACKEND_DATA(output, drm_output_state_t);
   if (drm_output->gbm_surf) {
@@ -867,25 +507,330 @@ backend_destroy_output_drm(vt_backend_t* backend, vt_output_t* output) {
     drm_output->gbm_surf = NULL;
   }
 
-  if(!backend->renderer->impl.destroy_renderable_output(backend->renderer, output)) return false;
+  if(!drm->renderer->impl.destroy_renderable_output(drm->renderer, output)) return false;
 
-  free(output->user_data);
+
   output->user_data = NULL;
     
-  wl_list_remove(&output->link);
-  free(output);
+  wl_list_remove(&output->link_local);
+
   output = NULL;
 
-  if(!wl_list_length(&backend->outputs)) {
-    backend->comp->running = false;
+  return true;
+}
+
+static bool 
+_drm_terminate_for_device(drm_backend_state_t* drm) {
+  if(!drm) return false;
+  struct vt_compositor_t* comp = drm->comp; 
+
+  if (!comp->suspended && drm->drm_fd > 0) {
+    bool any_inflight;
+    do {
+      any_inflight = false;
+      struct vt_output_t* output;
+      wl_list_for_each(output, &drm->outputs, link_local) {
+        if (BACKEND_DATA(output, drm_output_state_t)->flip_inflight) {
+          any_inflight = true;
+          break;
+        }
+      }
+      if (any_inflight)
+        drmHandleEvent(drm->drm_fd, &drm->evctx);
+    } while (any_inflight);
   }
+
+  if(drm->res)
+    drmModeFreeResources(drm->res);
+
+
+  struct vt_output_t *output, *tmp;
+  wl_list_for_each_safe(output, tmp, &drm->outputs, link_local) {
+    _drm_destroy_output_for_device(drm, output);
+  }
+
+  drm->renderer->impl.destroy(drm->renderer);
+
+  if (drm->gbm_dev) {
+    gbm_device_destroy(drm->gbm_dev);
+    drm->gbm_dev = NULL;
+  }
+
+
+  if (drm->drm_fd > 0) drmDropMaster(drm->drm_fd);
+
+  if (drm->drm_fd > 0) {
+    close(drm->drm_fd);
+    drm->drm_fd = -1;
+  }
+
+
+  return true;
+}
+
+void 
+_drm_on_session_terminate(struct wl_listener* listener, void* data) {
+  if(!data) return;
+  struct vt_session_t* session = (struct vt_session_t*)data;
+  struct vt_session_drm_t* session_drm = BACKEND_DATA(session, struct vt_session_drm_t); 
+
+  struct vt_device_drm_t* dev, *tmp_dev;
+  wl_list_for_each_safe(dev, tmp_dev, &session_drm->devices, link) {
+    vt_session_close_device_drm(session, dev);
+  }
+
+  // Stop listening
+  wl_list_remove(&listener->link);
+}
+
+void _drm_on_seat_enable(struct wl_listener *listener, void *data) {
+  if(!data) return;
+  struct vt_session_t* session = (struct vt_session_t*)data;
+  struct vt_session_drm_t* session_drm = BACKEND_DATA(session, struct vt_session_drm_t); 
+
+  drm_backend_master_state_t *drm_master =
+    BACKEND_DATA(session->comp->backend, drm_backend_master_state_t);
+  drm_backend_state_t *drm;
+
+  wl_list_for_each(drm, &drm_master->backends, link) {
+    struct vt_device_drm_t *dev = _drm_find_device_by_gpu_path(session_drm, drm->gpu_path);
+    if (!dev) {
+      dev = VT_ALLOC(session->comp, sizeof(*dev));
+      wl_list_insert(&session_drm->devices, &dev->link);
+    }
+
+    if (!vt_session_open_device_drm(session, dev, drm->gpu_path)) {
+      VT_ERROR(session->comp->log,
+               "DRM/SESSION: Failed to open device '%s'.", drm->gpu_path);
+      continue;
+    }
+
+    drm->drm_fd = dev->fd;
+    _drm_resume(drm);
+  }
+}
+
+void  
+_drm_on_seat_disable(struct wl_listener* listener, void* data) {
+  if(!data) return;
+  struct vt_session_t* session = (struct vt_session_t*)data;
+  struct vt_session_drm_t* session_drm = BACKEND_DATA(session, struct vt_session_drm_t); 
+
+  drm_backend_master_state_t* drm_master = BACKEND_DATA(session->comp->backend, drm_backend_master_state_t); 
+  drm_backend_state_t* drm;
+  wl_list_for_each(drm, &drm_master->backends, link) {
+    _drm_suspend(drm);
+  }
+
+  // Close all the devices
+  struct vt_device_drm_t* dev, *tmp_dev;
+  wl_list_for_each_safe(dev, tmp_dev, &session_drm->devices, link) {
+    if(!vt_session_close_device_drm(session, dev)) {
+      VT_ERROR(session->comp->log, "DRM/SESSION: Failed to close device (ID: %i)'.\n", dev->device_id);
+    }
+  }
+}
+
+bool 
+_drm_handle_frame_for_device(drm_backend_state_t* drm, struct vt_output_t* output) {
+  if(!drm || !output) return false;
+  struct vt_compositor_t* comp = drm->comp;
+
+  VT_TRACE(comp->log, "DRM: Handling frame...");
+
+  if (!drm->renderer) {
+    VT_ERROR(comp->log, "DRM: Renderer backend not initialized before handling frame.");
+    return false;
+  }
+
+  drm_output_state_t* drm_output = BACKEND_DATA(output, drm_output_state_t); 
+
+  // Retrieve the front buffer that we rendered to with the renderer 
+  struct gbm_bo *bo = gbm_surface_lock_front_buffer(drm_output->gbm_surf);
+  // If we could not get the front buffer, we'll try again next frame.
+  if (!bo) {
+    VT_WARN(comp->log, "DRM: Failed to get the GBM front buffer for frame in output %p.", output);
+    output->needs_repaint = true; 
+    return true;
+  }
+
+  uint32_t w = gbm_bo_get_width(bo);
+  uint32_t h = gbm_bo_get_height(bo);
+  uint32_t fmt = gbm_bo_get_format(bo);
+  uint32_t handle = gbm_bo_get_handle(bo).u32;
+  uint32_t stride = gbm_bo_get_stride(bo);
+  uint32_t fb;
+  uint32_t handles[4] = { gbm_bo_get_handle(bo).u32 };
+  uint32_t strides[4] = { gbm_bo_get_stride(bo) };
+  uint32_t offsets[4] = { 0 };
+
+  uint64_t modifier = gbm_bo_get_modifier(bo);
+
+  int ret;
+  // If the BO wants modifiers, add the FB with modifier arguments
+  if (modifier != DRM_FORMAT_MOD_INVALID) {
+    uint64_t mods[4] = { modifier, 0, 0, 0 };
+    ret = drmModeAddFB2WithModifiers(drm->drm_fd, w, h, fmt,
+                                     handles, strides, offsets, mods, &fb,
+                                     DRM_MODE_FB_MODIFIERS);
+  } else {
+    ret = drmModeAddFB2(drm->drm_fd, w, h, fmt,
+                        handles, strides, offsets, &fb, 0);
+  }
+
+  // If we could not create a DRM frame buffer...
+  if (ret != 0) {
+    gbm_surface_release_buffer(drm_output->gbm_surf, bo);
+    // Try again next farme
+    output->needs_repaint = true;
+    VT_ERROR(comp->log, "DRM: canot create DRM frame buffer for output %p: drmModeAddFB2(%ux%u, fmt=0x%08x) failed: %s",
+             output, w, h, fmt, strerror(errno));
+    return false;
+  }
+
+  if (drm_output->needs_modeset) {
+    if (drmModeSetCrtc(drm->drm_fd, drm_output->crtc_id, fb,
+                       0, 0, &drm_output->conn_id, 1, &drm_output->mode) != 0) {
+      drmModeRmFB(drm->drm_fd, fb);
+      gbm_surface_release_buffer(drm_output->gbm_surf, bo);
+      // Try again next farme
+      output->needs_repaint = true;
+      VT_ERROR(comp->log, "DRM: cannot set CRTC mode for output %p: drmModeSetCrtc() failed: %s",
+               output, strerror(errno));
+      return false;
+    }
+    VT_TRACE(comp->log, "DRM: Successfully performed DRM CRTC mode set for output %p (%ux%u@%.2f, ID: %i)", output,
+             output->width, output->height, output->refresh_rate, drm_output->conn_id);
+
+    // Release the old buffer 
+    if (drm_output->current_bo) {
+      drmModeRmFB(drm->drm_fd, drm_output->current_fb);
+      gbm_surface_release_buffer(drm_output->gbm_surf, drm_output->current_bo);
+    }
+
+    // Assign the newly rendered buffer
+    drm_output->current_bo = bo;
+    drm_output->current_fb = fb;
+    drm_output->needs_modeset = false;
+
+    // If we did not yet bootstrap (we just applied the first CRTC), we need to 
+    // manually send the frame callbacks to the clients to kick off
+    // the client rendering loop, because this path does not invoke page_flip_handler(),
+    // which would normally send the frame callbacks.
+    if(!drm_output->modeset_bootstrapped) {
+      uint32_t t = vt_util_get_time_msec();
+      vt_comp_frame_done_all(comp, t);
+      wl_display_flush_clients(comp->wl.dsp);
+      output->needs_repaint = false;
+      drm_output->modeset_bootstrapped = true;
+      VT_TRACE(comp->log, "DRM: Successfully bootstrapped the first frame for output %p.", output);
+    }
+    return true;
+  }
+
+  // Set pending buffer and eventually assign to 
+  // current in _drm_page_flip_handler() (after flip completes)
+  drm_output->pending_bo = bo;
+  drm_output->pending_fb = fb;
+
+  if( 
+    drmModePageFlip(drm->drm_fd, drm_output->crtc_id, fb,
+                    DRM_MODE_PAGE_FLIP_EVENT, output) != 0) {
+    // Flip refused; free pending and try again later
+    drmModeRmFB(drm->drm_fd, drm_output->pending_fb);
+    gbm_surface_release_buffer(drm_output->gbm_surf, drm_output->pending_bo);
+    drm_output->pending_bo = NULL; drm_output->pending_fb = 0;
+    output->needs_repaint = true;
+    VT_ERROR(comp->log, "DRM: cannot do a page flip: drmModePageFlip() failed: %s",
+             strerror(errno));
+    return false;
+  }
+  VT_TRACE(comp->log, "DRM: Successfully performed drmModePageFlip() call.");
+
+  drm_output->flip_inflight = true;
+
+  // we’ve submitted a frame so clear the desire until something else changes
+  output->needs_repaint = false;
+}
+
+// ===================================================
+// =================== PUBLIC API ====================
+// ===================================================
+bool
+backend_init_drm(struct vt_backend_t* backend) {
+  if(!backend || !backend->comp || !backend->comp->session) return false;
+  if(!(backend->user_data = VT_ALLOC(backend->comp, sizeof(drm_backend_master_state_t))))  {
+    return false;
+  }
+
+  drm_backend_master_state_t* drm_master = BACKEND_DATA(backend, drm_backend_master_state_t); 
+  drm_master->comp = backend->comp;
+
+  wl_list_init(&drm_master->backends);
+
+  // Listen for the session terminate signal so that 
+  // we can call our backend-specific handler. 
+  drm_master->session_terminate_listener.notify = _drm_on_session_terminate; 
+  wl_signal_add(&backend->comp->session->ev_session_terminate, &drm_master->session_terminate_listener);
+
+  // Listen for seat enable/disable signals for correct VT switching 
+  // functionality
+  struct vt_session_drm_t* session_drm = BACKEND_DATA(backend->comp->session, struct vt_session_drm_t); 
+  drm_master->seat_enable_listener.notify = _drm_on_seat_enable; 
+  wl_signal_add(&session_drm->ev_seat_enable, &drm_master->seat_enable_listener);
+  
+  drm_master->seat_disable_listener.notify = _drm_on_seat_disable; 
+  wl_signal_add(&session_drm->ev_seat_disable, &drm_master->seat_disable_listener);
+
+  // Create a DRM backend state for all the enumerated GPUs
+  const uint8_t max_gpus = 8;
+  struct vt_device_drm_t* gpus[max_gpus];
+  uint32_t n_gpus = vt_session_enumerate_cards_drm(backend->comp->session, gpus, max_gpus);
+
+  for(uint32_t i = 0; i < n_gpus; i++) {
+    drm_backend_state_t* drm_backend = VT_ALLOC(backend->comp, sizeof(drm_backend_state_t));
+    drm_backend->root_backend = backend;
+    if(!_drm_init_for_device(backend->comp, drm_backend, gpus[i]->fd, gpus[i]->path)) {
+      VT_ERROR(backend->comp->log, "DRM: Failed to initialize DRM backend for GPU (%i).", gpus[i]->fd);
+      return false;
+    }
+    wl_list_insert(&drm_master->backends, &drm_backend->link);
+  }
+
   return true;
 }
 
 bool 
-backend_prepare_output_frame_drm(vt_backend_t* backend, vt_output_t* output) {
+backend_handle_frame_drm(struct vt_backend_t* backend, struct vt_output_t* output) {
+  if(!backend || !backend->user_data) return false;
+
+  drm_backend_master_state_t* drm_master = BACKEND_DATA(backend, drm_backend_master_state_t); 
+  drm_backend_state_t* drm;
+  wl_list_for_each(drm, &drm_master->backends, link) {
+    _drm_handle_frame_for_device(drm, output);
+  }
+}
+
+
+bool
+backend_terminate_drm(struct vt_backend_t* backend) {
+  struct vt_device_drm_t* dev, *tmp_dev;
+  drm_backend_master_state_t* drm_master = BACKEND_DATA(backend, drm_backend_master_state_t); 
+  drm_backend_state_t* drm;
+  wl_list_for_each(drm, &drm_master->backends, link) {
+    _drm_terminate_for_device(drm);
+  }
+
+  if(backend->user_data) {
+    backend->user_data = NULL;
+  }
+}
+
+
+bool 
+backend_prepare_output_frame_drm(struct vt_backend_t* backend, struct vt_output_t* output) {
+  (void)backend;
   drm_output_state_t* drm_output = BACKEND_DATA(output, drm_output_state_t);
-  drm_backend_state_t* drm = BACKEND_DATA(backend, drm_backend_state_t); 
   if(drm_output->flip_inflight) return false;
   if(!output->needs_repaint && drm_output->modeset_bootstrapped) return false;
 
@@ -893,20 +838,25 @@ backend_prepare_output_frame_drm(vt_backend_t* backend, vt_output_t* output) {
 }
 
 bool 
-backend___handle_input_drm(vt_backend_t* backend, bool mods, uint32_t key) {
-  if(!backend || !backend->user_data) return false;
-  drm_backend_state_t* drm = BACKEND_DATA(backend, drm_backend_state_t);
-  if(!drm) return false;
-  if (mods) {
-    if (key == KEY_F1) ioctl(drm->tty_fd, VT_ACTIVATE, 1);
-    if (key == KEY_F2) ioctl(drm->tty_fd, VT_ACTIVATE, 2);
-    if (key == KEY_F3) ioctl(drm->tty_fd, VT_ACTIVATE, 3);
-    if (key == KEY_F4) ioctl(drm->tty_fd, VT_ACTIVATE, 4);
-    if (key == KEY_F5) ioctl(drm->tty_fd, VT_ACTIVATE, 5);
-    if (key == KEY_F6) ioctl(drm->tty_fd, VT_ACTIVATE, 6);
-    if (key == KEY_F7) ioctl(drm->tty_fd, VT_ACTIVATE, 7);
-    if (key == KEY_F8) ioctl(drm->tty_fd, VT_ACTIVATE, 8);
-    if (key == KEY_F9) ioctl(drm->tty_fd, VT_ACTIVATE, 9);
-  }
+backend_implement_drm(struct vt_compositor_t* comp) {
+  if(!comp || !comp->backend) return false;
+
+  VT_TRACE(comp->log, "DRM: Implementing backend...");
+
+  comp->backend->platform = VT_BACKEND_DRM_GBM; 
+
+  comp->backend->impl = (vt_backend_interface_t){
+    .init = backend_init_drm,
+    .handle_frame = backend_handle_frame_drm,
+    .terminate = backend_terminate_drm,
+    .prepare_output_frame = backend_prepare_output_frame_drm,
+  };
+      
+  comp->session->impl = (struct vt_session_interface_t){
+    .init = vt_session_init_drm,
+    .terminate = vt_session_terminate_drm
+  };
+
   return true;
 }
+

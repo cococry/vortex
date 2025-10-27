@@ -1,44 +1,48 @@
 #pragma once
 
+#include <stdint.h>
+#include <stdlib.h>
 #include <stdio.h>
+#include <wayland-server-core.h>
 
 #define _BRAND_NAME "vortex"  
 #define _VERSION "alpha 0.1"
 
-#define log_trace(logstate, ...) if(!(logstate).quiet)                              \
+#define VT_TRACE(logstate, ...) if(!(logstate).quiet)                               \
 { if((logstate).verbose) { do {                                                     \
-  log_header((logstate).stream, LL_TRACE);                                         \
+  vt_util_log_header((logstate).stream, VT_LL_TRACE);                               \
   fprintf((logstate).stream, __VA_ARGS__);                                          \
   fprintf((logstate).stream, "\n");                                                 \
   if((logstate).stream != stdout &&                                                 \
     (logstate).stream != stderr && !(logstate).quiet) {                             \
-    log_header(stdout, LL_TRACE);                                                  \
+    vt_util_log_header(stdout, VT_LL_TRACE);                                        \
     fprintf(stdout, __VA_ARGS__);                                                   \
     fprintf(stdout, "\n");                                                          \
   }                                                                                 \
 } while(0); }  }                                                                    \
 
-#define log_warn(logstate, ...) if(!(logstate).quiet) {                             \
+#define VT_WARN(logstate, ...) if(!(logstate).quiet) {                              \
   do {                                                                              \
-    log_header((logstate).stream, LL_WARN);                                        \
+    vt_util_log_header((logstate).stream, VT_LL_WARN);                              \
     fprintf((logstate).stream, __VA_ARGS__);                                        \
     fprintf((logstate).stream, "\n");                                               \
     if((logstate).stream != stdout &&                                               \
       (logstate).stream != stderr && !(logstate).quiet) {                           \
-      log_header(stdout, LL_WARN);                                                 \
+      vt_util_log_header(stdout, VT_LL_WARN);                                       \
       fprintf(stdout, __VA_ARGS__);                                                 \
       fprintf(stdout, "\n");                                                        \
     }                                                                               \
   } while(0); }                                                                     \
 
-#define log_error(logstate, ...) if(!(logstate).quiet) {                            \
+#define VT_ERROR(logstate, ...) if(!(logstate).quiet) {                             \
   do {                                                                              \
-    log_header((logstate).stream == stdout ? stderr : (logstate).stream, LL_ERR);  \
+    vt_util_log_header((logstate).stream == stdout                                  \
+        ? stderr : (logstate).stream, VT_LL_ERR);                                   \
     fprintf((logstate).stream == stdout ? stderr : (logstate).stream, __VA_ARGS__); \
     fprintf((logstate).stream == stdout ? stderr : (logstate).stream, "\n");        \
     if((logstate).stream != stdout &&                                               \
       (logstate).stream != stderr && !(logstate).quiet) {                           \
-      log_header(stderr, LL_ERR);                                                  \
+      vt_util_log_header(stderr, VT_LL_ERR);                                        \
       fprintf(stderr, __VA_ARGS__);                                                 \
       fprintf(stderr, "\n");                                                        \
     }                                                                               \
@@ -46,12 +50,13 @@
 
 #define log_fatal(logstate, ...) if(!(logstate).quiet) {                            \
   do {                                                                              \
-    log_header((logstate).stream == stdout ? stderr : (logstate).stream, LL_FATAL);\
+    vt_util_log_header((logstate).stream == stdout                                  \
+        ? stderr : (logstate).stream, VT_LL_FATAL);                                 \
     fprintf((logstate).stream == stdout ? stderr : (logstate).stream, __VA_ARGS__); \
     fprintf((logstate).stream == stdout ? stderr : (logstate).stream, "\n");        \
     if((logstate).stream != stdout &&                                               \
       (logstate).stream != stderr && !(logstate).quiet) {                           \
-      log_header(stderr, LL_FATAL);                                                 \
+      vt_util_log_header(stderr, VT_LL_FATAL);                                      \
       fprintf(stderr, __VA_ARGS__);                                                 \
       fprintf(stderr, "\n");                                                        \
     }                                                                               \
@@ -59,13 +64,31 @@
   } while(0); }                                                                     \
 
 typedef enum {
-  LL_TRACE = 0,
-  LL_WARN,
-  LL_ERR,
-  LL_FATAL,
-  LL_COUNT
+  VT_LL_TRACE = 0,
+  VT_LL_WARN,
+  VT_LL_ERR,
+  VT_LL_FATAL,
+  VT_LL_COUNT
 } log_level_t;
 
-void log_header(FILE* stream, log_level_t lvl);
+void vt_util_log_header(FILE* stream, log_level_t lvl);
 
-char* log_get_filepath();
+char* vt_util_log_get_filepath();
+
+typedef struct vt_arena {
+    uint8_t *base;
+    size_t   offset;
+    size_t   capacity;
+} vt_arena_t;
+
+uint64_t vt_util_get_time_msec(void);
+
+void vt_util_arena_init(vt_arena_t *a, size_t capacity);
+
+void* vt_util_alloc(vt_arena_t *a, size_t size);
+
+void vt_util_arena_reset(vt_arena_t *a);
+
+void vt_util_arena_destroy(vt_arena_t *a);
+
+void vt_util_emit_signal(struct wl_signal *signal, void *data);

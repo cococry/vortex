@@ -1,234 +1,68 @@
 #define _GNU_SOURCE
-#include "backend.h"
-#include "log.h"
-#include "renderers/egl_gl46.h"
+#include "core/backend.h"
+#include "core/scene.h"
+#include "protocols/xdg_shell.h"
 
-#include <time.h>
 #include <linux/vt.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
 #include <stdlib.h>
-#include <errno.h>
 #include <fcntl.h>
-#include <linux/input-event-codes.h>
 #include <dlfcn.h>
 #include <dirent.h>
 
 #include <glad.h>
 #include <wayland-server.h>
 
-#include "xdg-shell-protocol.h" 
+#include "render/renderer.h"
 #include "config.h"
 
+static void _vt_comp_frame_handler(void* data);
 
-static void _comp_frame_handler(void* data);
+static bool _vt_comp_render_output(struct vt_compositor_t* c, struct vt_output_t* output);
 
-static bool _comp_render_output(vt_compositor_t* c, vt_output_t* output);
+static const char* _vt_comp_handle_cmd_flags(struct vt_compositor_t* c, int argc, char** argv);
 
-static void _comp_render_scene_for_damage(vt_compositor_t* c, vt_output_t* output, pixman_box32_t damage);
+static void _vt_comp_log_help();
 
-static const char* _comp_handle_cmd_flags(vt_compositor_t* c, int argc, char** argv);
+static bool _vt_comp_wl_init(struct vt_compositor_t* c);
 
-static void _comp_log_help();
-
-static void _comp_implement_render(vt_compositor_t* c);
-
-static bool _comp_wl_init(vt_compositor_t* c);
-
-static void  _comp_wl_bind(struct wl_client *client, void *data,
+static void  _vt_comp_wl_bind(struct wl_client *client, void *data,
                            uint32_t version, uint32_t id);
 
-static void _comp_load_backend(vt_compositor_t* c, const char* backend_name, const char* backend_path);
+static void _vt_comp_load_backend(struct vt_compositor_t* c, const char* backend_name, const char* backend_path);
 
-static void _comp_associate_surface_with_output(vt_compositor_t* c, vt_surface_t* surf, vt_output_t* output);
+static void _vt_comp_associate_surface_with_output(struct vt_compositor_t* c, vt_surface_t* surf, struct vt_output_t* output);
 
-static void _comp_wl_xdg_wm_base_bind(
-  struct wl_client *client, void *data,
-  uint32_t version, uint32_t id);
+static struct vt_renderer_t* _vt_comp_get_renderer_from_surface(vt_surface_t* surf);
 
-static void _comp_wl_surface_create(
+void _vt_comp_wl_surface_create(
   struct wl_client *client,
   struct wl_resource *resource,
   uint32_t id);
 
-static void _comp_wl_surface_create_region(
+void _vt_comp_wl_surface_create_region(
   struct wl_client *client,
   struct wl_resource *resource,
   uint32_t id);
 
-
-static void _comp_wl_xdg_wm_base_destroy(struct wl_client *client, struct wl_resource *resource);
-
-static void _comp_wl_xdg_wm_base_create_positioner(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  uint32_t id);
-
-static void _comp_wl_xdg_wm_base_get_xdg_surface(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  uint32_t id,
-  struct wl_resource *surface_res);
-
-static void _comp_wl_xdg_wm_base_pong(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  uint32_t serial);
-
-static void _comp_wl_xdg_positioner_destroy(
-  struct wl_client *client,
-  struct wl_resource *resource);
-
-static void _comp_wl_xdg_positioner_set_size(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  int32_t width,
-  int32_t height);
-
-static void _comp_wl_xdg_positioner_set_anchor_rect(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  int32_t x,
-  int32_t y,
-  int32_t width,
-  int32_t height);
-
-static void _comp_wl_xdg_positioner_set_anchor(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  uint32_t anchor);
-
-static void _comp_wl_xdg_positioner_set_gravity(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  uint32_t gravity);
-
-static void _comp_wl_xdg_positioner_set_constraint_adjustment(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  uint32_t constraint_adjustment);
-
-static void _comp_wl_xdg_positioner_set_offset(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  int32_t x,
-  int32_t y);
-
-static void _comp_wl_xdg_surface_destroy(
-  struct wl_client *client,
-  struct wl_resource *resource);
-
-static void _comp_wl_xdg_surface_get_toplevel(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  uint32_t id);
-
-static void _comp_wl_xdg_surface_get_popup(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  uint32_t id,
-  struct wl_resource *parent_surface,
-  struct wl_resource *positioner);
-
-static void _comp_wl_xdg_surface_ack_configure(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  uint32_t serial);
-
-static void _comp_wl_xdg_surface_set_window_geometry(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  int32_t x,
-  int32_t y,
-  int32_t width,
-  int32_t height);
-
-static void _comp_wl_xdg_toplevel_destroy(
-  struct wl_client *client,
-  struct wl_resource *resource);
-
-static void _comp_wl_xdg_toplevel_set_parent(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  struct wl_resource *parent_resource);
-
-static void _comp_wl_xdg_toplevel_set_title(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  const char *title);
-
-static void _comp_wl_xdg_toplevel_set_app_id(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  const char *app_id);
-
-static void _comp_wl_xdg_toplevel_show_window_menu(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  struct wl_resource *seat,
-  uint32_t serial,
-  int32_t x,
-  int32_t y);
-
-static void _comp_wl_xdg_toplevel_move(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  struct wl_resource *seat,
-  uint32_t serial);
-
-static void _comp_wl_xdg_toplevel_resize(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  struct wl_resource *seat,
-  uint32_t serial,
-  uint32_t edges);
-
-static void _comp_wl_xdg_toplevel_set_max_size(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  int32_t width,
-  int32_t height);
-
-static void _comp_wl_xdg_toplevel_set_min_size(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  int32_t width,
-  int32_t height);
-
-static void _comp_wl_xdg_toplevel_set_maximized(
-  struct wl_client *client,
-  struct wl_resource *resource);
-
-static void _comp_wl_xdg_toplevel_unset_maximized(
-  struct wl_client *client,
-  struct wl_resource *resource);
-
-static void _comp_wl_xdg_toplevel_set_fullscreen(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  struct wl_resource *output);
-
-static void _comp_wl_xdg_toplevel_unset_fullscreen(struct wl_client *client, struct wl_resource *resource);
-
-static void _comp_wl_xdg_toplevel_set_minimized(struct wl_client *client, struct wl_resource *resource);
-
-static void _comp_wl_surface_attach(
+static void _vt_comp_wl_surface_attach(
   struct wl_client *client,
   struct wl_resource *resource,
   struct wl_resource *buffer,
   int32_t x,
   int32_t y);
 
-static void _comp_wl_surface_commit(
+static void _vt_comp_wl_surface_commit(
   struct wl_client *client,
   struct wl_resource *resource);
 
-static void _comp_wl_surface_frame(
+static void _vt_comp_wl_surface_frame(
   struct wl_client *client,
   struct wl_resource *resource,
   uint32_t callback);
 
-static void _comp_wl_surface_damage(
+static void _vt_comp_wl_surface_damage(
   struct wl_client *client,
   struct wl_resource *resource,
   int32_t x,
@@ -236,27 +70,27 @@ static void _comp_wl_surface_damage(
   int32_t width,
   int32_t height);  
 
-static void _comp_wl_surface_set_opaque_region(
+static void _vt_comp_wl_surface_set_opaque_region(
   struct wl_client *client,
   struct wl_resource *resource,
   struct wl_resource *region);
 
-static void _comp_wl_surface_set_input_region(
+static void _vt_comp_wl_surface_set_input_region(
   struct wl_client *client,
   struct wl_resource *resource,
   struct wl_resource *region);
 
-static void _comp_wl_surface_set_buffer_transform(
+static void _vt_comp_wl_surface_set_buffer_transform(
   struct wl_client *client,
   struct wl_resource *resource,
   int32_t transform);
 
-static void _comp_wl_surface_set_buffer_scale(
+static void _vt_comp_wl_surface_set_buffer_scale(
   struct wl_client *client,
   struct wl_resource *resource,
   int32_t scale);
 
-static void _comp_wl_surface_damage_buffer(
+static void _vt_comp_wl_surface_damage_buffer(
   struct wl_client *client,
   struct wl_resource *resource,
   int32_t x,
@@ -264,21 +98,21 @@ static void _comp_wl_surface_damage_buffer(
   int32_t width,
   int32_t height);
 
-static void _comp_wl_surface_offset(struct wl_client *client,
+static void _vt_comp_wl_surface_offset(struct wl_client *client,
                                     struct wl_resource *resource,
                                     int32_t x,
                                     int32_t y);
 
-static void _comp_wl_surface_destroy(struct wl_client *client,
+static void _vt_comp_wl_surface_destroy(struct wl_client *client,
                                      struct wl_resource *resource);
 
-static void _comp_wl_surface_handle_resource_destroy(struct wl_resource* resource);
+static void _vt_comp_wl_surface_handle_resource_destroy(struct wl_resource* resource);
 
-static void _comp_wl_region_destroy(
+static void _vt_comp_wl_region_destroy(
   struct wl_client *client,
   struct wl_resource *resource);
 
-static void _comp_wl_region_add(
+static void _vt_comp_wl_region_add(
   struct wl_client *client,
   struct wl_resource *resource,
   int32_t x,
@@ -286,7 +120,7 @@ static void _comp_wl_region_add(
   int32_t width,
   int32_t height);
 
-static void _comp_wl_region_subtract(
+static void _vt_comp_wl_region_subtract(
   struct wl_client *client,
   struct wl_resource *resource,
   int32_t x,
@@ -296,81 +130,37 @@ static void _comp_wl_region_subtract(
 
 
 static const struct wl_compositor_interface compositor_impl = {
-  .create_surface = _comp_wl_surface_create,
-  .create_region = _comp_wl_surface_create_region 
-};
-
-static const struct xdg_positioner_interface xdg_positioner_impl = {
-  .destroy = _comp_wl_xdg_positioner_destroy,
-  .set_size = _comp_wl_xdg_positioner_set_size,
-  .set_anchor_rect = _comp_wl_xdg_positioner_set_anchor_rect,
-  .set_anchor = _comp_wl_xdg_positioner_set_anchor,
-  .set_gravity = _comp_wl_xdg_positioner_set_gravity,
-  .set_constraint_adjustment = _comp_wl_xdg_positioner_set_constraint_adjustment,
-  .set_offset = _comp_wl_xdg_positioner_set_offset,
-};
-
-
-static const struct xdg_toplevel_interface xdg_toplevel_impl = {
-  .destroy = _comp_wl_xdg_toplevel_destroy,
-  .set_parent = _comp_wl_xdg_toplevel_set_parent,
-  .set_title = _comp_wl_xdg_toplevel_set_title,
-  .set_app_id = _comp_wl_xdg_toplevel_set_app_id,
-  .show_window_menu = _comp_wl_xdg_toplevel_show_window_menu,
-  .move = _comp_wl_xdg_toplevel_move,
-  .resize = _comp_wl_xdg_toplevel_resize,
-  .set_max_size = _comp_wl_xdg_toplevel_set_max_size,
-  .set_min_size = _comp_wl_xdg_toplevel_set_min_size,
-  .set_maximized = _comp_wl_xdg_toplevel_set_maximized,
-  .unset_maximized = _comp_wl_xdg_toplevel_unset_maximized,
-  .set_fullscreen = _comp_wl_xdg_toplevel_set_fullscreen,
-  .unset_fullscreen = _comp_wl_xdg_toplevel_unset_fullscreen,
-  .set_minimized = _comp_wl_xdg_toplevel_set_minimized,
-};
-
-
-static const struct xdg_surface_interface xdg_surface_impl = {
-  .destroy = _comp_wl_xdg_surface_destroy,
-  .get_toplevel = _comp_wl_xdg_surface_get_toplevel,
-  .get_popup = _comp_wl_xdg_surface_get_popup,
-  .ack_configure = _comp_wl_xdg_surface_ack_configure,
-  .set_window_geometry = _comp_wl_xdg_surface_set_window_geometry,
-};
-
-static const struct xdg_wm_base_interface xdg_wm_base_impl = {
-  .destroy = _comp_wl_xdg_wm_base_destroy,
-  .create_positioner = _comp_wl_xdg_wm_base_create_positioner,
-  .get_xdg_surface = _comp_wl_xdg_wm_base_get_xdg_surface,
-  .pong = _comp_wl_xdg_wm_base_pong,
+  .create_surface = _vt_comp_wl_surface_create,
+  .create_region = _vt_comp_wl_surface_create_region 
 };
 
 static const struct wl_surface_interface surface_impl = {
-  .attach = _comp_wl_surface_attach,
-  .commit = _comp_wl_surface_commit,
-  .damage = _comp_wl_surface_damage, 
-  .frame = _comp_wl_surface_frame,
-  .set_opaque_region = _comp_wl_surface_set_opaque_region,
-  .set_input_region = _comp_wl_surface_set_input_region,
-  .set_buffer_scale = _comp_wl_surface_set_buffer_scale,
-  .set_buffer_transform = _comp_wl_surface_set_buffer_transform,
-  .offset = _comp_wl_surface_offset, 
-  .destroy = _comp_wl_surface_destroy,
-  .damage_buffer = _comp_wl_surface_damage_buffer,
+  .attach = _vt_comp_wl_surface_attach,
+  .commit = _vt_comp_wl_surface_commit,
+  .damage = _vt_comp_wl_surface_damage, 
+  .frame = _vt_comp_wl_surface_frame,
+  .set_opaque_region = _vt_comp_wl_surface_set_opaque_region,
+  .set_input_region = _vt_comp_wl_surface_set_input_region,
+  .set_buffer_scale = _vt_comp_wl_surface_set_buffer_scale,
+  .set_buffer_transform = _vt_comp_wl_surface_set_buffer_transform,
+  .offset = _vt_comp_wl_surface_offset, 
+  .destroy = _vt_comp_wl_surface_destroy,
+  .damage_buffer = _vt_comp_wl_surface_damage_buffer,
 };
 
 static const struct wl_region_interface region_impl = {
-  .add = _comp_wl_region_add,
-  .destroy= _comp_wl_region_destroy,
-  .subtract = _comp_wl_region_subtract,
+  .add = _vt_comp_wl_region_add,
+  .destroy= _vt_comp_wl_region_destroy,
+  .subtract = _vt_comp_wl_region_subtract,
 };
 
-static void* _comp_dl_handle = NULL;
+static void* _vt_comp_dl_handle = NULL;
 
 void 
-_comp_frame_handler(void *data) {
-  vt_output_t* output = data;
+_vt_comp_frame_handler(void *data) {
+  struct vt_output_t* output = data;
   if(!output) return;
-  vt_compositor_t* c = output->backend->comp;
+  struct vt_compositor_t* c = output->backend->comp;
   if(!c) return;
   if(output->backend->comp->suspended) {
     // Avoid busy loop
@@ -383,12 +173,12 @@ _comp_frame_handler(void *data) {
     output->repaint_pending = false;
     return;
   }
-  if(!_comp_render_output(c, output)) {
+  if(!_vt_comp_render_output(c, output)) {
     // Avoid busy loop
     output->repaint_pending = false;
     return;
   }
-  log_trace(c->log, "Pending repaint on output %p got satisfied.", output);
+  VT_TRACE(c->log, "Pending repaint on output %p got satisfied.", output);
   if(output->repaint_source) {
     wl_event_source_remove(output->repaint_source);
     output->repaint_source = NULL;
@@ -398,7 +188,7 @@ _comp_frame_handler(void *data) {
 
 /* Heed my words struggeler... */
 void 
-comp_send_frame_callbacks_for_output(vt_compositor_t *c, vt_output_t* output, uint32_t t) {
+vt_comp_frame_done(struct vt_compositor_t *c, struct vt_output_t* output, uint32_t t) {
   // Basically iterate each surface on a specific output and for each surface iterate 
   // each frame pending callback (since the last page flip on that output) and 
   // let the client know we're done rendering their frames by calling 
@@ -423,7 +213,7 @@ comp_send_frame_callbacks_for_output(vt_compositor_t *c, vt_output_t* output, ui
       surf->needs_frame_done = false;
       surf->cb_pool.n_cbs = 0;
       surf->_mask_outputs_presented_on = 0;
-      log_trace(surf->comp->log, "Sent wl_callback.done() for all pending frame callbacks on output %p.", output)
+      VT_TRACE(surf->comp->log, "Sent wl_callback.done() for all pending frame callbacks on output %p.", output)
     }
   }
   c->any_frame_cb_pending = false;
@@ -431,7 +221,7 @@ comp_send_frame_callbacks_for_output(vt_compositor_t *c, vt_output_t* output, ui
 }
 
 void 
-comp_send_frame_callbacks(vt_compositor_t *c, vt_output_t* output, uint32_t t) {
+vt_comp_frame_done_all(struct vt_compositor_t *c, uint32_t t) {
   // Basically iterate each surface and for each surface iterate 
   // each frame pending callback (since the last page flip) and 
   // let the client know we're done rendering their frames by calling 
@@ -441,22 +231,23 @@ comp_send_frame_callbacks(vt_compositor_t *c, vt_output_t* output, uint32_t t) {
     if(!surf->needs_frame_done) continue; 
 
     for (uint32_t i = 0; i < surf->cb_pool.n_cbs; i++) {
-      if(!surf->cb_pool.cbs[i]) continue;
+      //if(!surf->cb_pool.cbs[i]) continue;
       wl_callback_send_done(surf->cb_pool.cbs[i], t);
       wl_resource_destroy(surf->cb_pool.cbs[i]);
       if(!c->sent_frame_cbs) c->sent_frame_cbs = true;
     }
     surf->needs_frame_done = false;
     surf->cb_pool.n_cbs = 0;
-    log_trace(surf->comp->log, "Sent wl_callback.done() for all pending frame callbacks on output %p.", output)
+    VT_TRACE(surf->comp->log, "Sent wl_callback.done() for all pending frame callbacks.")
   }
   c->any_frame_cb_pending = false;
 }
 
 bool
-_comp_render_output(vt_compositor_t* c, vt_output_t* output) {
+_vt_comp_render_output(struct vt_compositor_t* c, struct vt_output_t* output) {
   if(!c || !c->backend || !c->backend->impl.handle_frame || !output) return false;
 
+  vt_comp_repaint_scene(c, output);
   c->backend->impl.handle_frame(c->backend, output);
   output->repaint_pending = false;
 
@@ -515,26 +306,28 @@ static char** _scan_valid_backends(size_t *count_out) {
 }
 
 const char*
-_comp_handle_cmd_flags(vt_compositor_t* c, int argc, char** argv) {
+_vt_comp_handle_cmd_flags(struct vt_compositor_t* c, int argc, char** argv) {
   if(argc > 1) {
     for(uint32_t i = 1; i < argc; i++) {
       char* flag = argv[i];
       if(_flag_cmp(flag, "--logfile", "-lf")) {
-        c->log.stream = fopen(log_get_filepath(), "w"); 
+        c->log.stream = fopen(vt_util_log_get_filepath(), "a");  
         if (c->log.stream)
           setvbuf(c->log.stream, NULL, _IONBF, 0);
+        else
+          perror("log fopen");
       } else if(_flag_cmp(flag, "--verbose", "-vb")) {
         c->log.verbose = true;
       } else if(_flag_cmp(flag, "--quiet", "-q")) {
         c->log.quiet = true;
       } else if(_flag_cmp(flag, "-h", "--help")) {
-        _comp_log_help();
+        _vt_comp_log_help();
       } else if(_flag_cmp(flag, "-v", "--version")) {
         printf(_VERSION"\n");
         exit(0);
       } else if(_flag_cmp(flag, "-b", "--backend")) {
         if (i + 1 >= argc) {
-          log_error(c->log, "Missing value for %s", flag);
+          VT_ERROR(c->log, "Missing value for %s", flag);
           exit(1);
         }
         char* backend_str = argv[++i];
@@ -545,7 +338,7 @@ _comp_handle_cmd_flags(vt_compositor_t* c, int argc, char** argv) {
         for(uint32_t i = 0; i < n; i++)
           if(strcmp(backend_str, valid_backends[i]) == 0) { valid = true; break; }
         if(!valid) {
-          log_error(c->log, "Invalid compositor backend: '%s'", backend_str);
+          VT_ERROR(c->log, "Invalid compositor backend: '%s'", backend_str);
           fprintf(stderr, "Valid backends are: [ "); 
           for(uint32_t i = 0; i < n; i++)
             fprintf(stderr, "%s %s", valid_backends[i], i != n - 1 ? "," : "");
@@ -557,7 +350,7 @@ _comp_handle_cmd_flags(vt_compositor_t* c, int argc, char** argv) {
       } 
       else if(_flag_cmp(flag, "-bp", "--backend-path")) {
         if (i + 1 >= argc) {
-          log_error(c->log, "Missing value for %s", flag);
+          VT_ERROR(c->log, "Missing value for %s", flag);
           exit(1);
         }
         char* backend_path = argv[++i];
@@ -565,16 +358,16 @@ _comp_handle_cmd_flags(vt_compositor_t* c, int argc, char** argv) {
       }
       else if(_flag_cmp(flag, "-vo", "--virtual-outputs")) {
         if (i + 1 >= argc) {
-          log_error(c->log, "Missing value for %s", flag);
+          VT_ERROR(c->log, "Missing value for %s", flag);
           exit(1);
         }
         c->n_virtual_outputs = atoi(argv[++i]);
         if (c->n_virtual_outputs <= 0)
           c->n_virtual_outputs = 1;
-        log_trace(c->log, "Virtual outputs set to %d", c->n_virtual_outputs);
+        VT_TRACE(c->log, "Virtual outputs set to %d", c->n_virtual_outputs);
       }
       else {
-        log_error(c->log, "invalid option -- '%s'", flag);
+        VT_ERROR(c->log, "invalid option -- '%s'", flag);
         exit(1);
       }
     }
@@ -582,7 +375,7 @@ _comp_handle_cmd_flags(vt_compositor_t* c, int argc, char** argv) {
   return NULL;
 }
 
-void _comp_log_help() {
+void _vt_comp_log_help() {
   printf("Usage: vortex [option:s] (value:s)\n");
   printf("Options: \n");
   printf("%-30s %s\n", "-h, --help", "Show this help message and exit");
@@ -605,34 +398,7 @@ void _comp_log_help() {
 }
 
 void 
-_comp_implement_render(vt_compositor_t* c) {
-  if(!c || !c->backend || !c->backend->renderer) return;
-
-  if(c->backend->renderer->rendering_backend == VT_RENDERING_BACKEND_EGL_OPENGL) {
-    c->backend->renderer->impl = (vt_renderer_interface_t){
-      .init = renderer_init_egl, 
-      .setup_renderable_output = renderer_setup_renderable_output_egl, 
-      .resize_renderable_output = renderer_resize_renderable_output_egl,
-      .destroy_renderable_output = renderer_destroy_renderable_output_egl,
-      .import_buffer = renderer_import_buffer_egl,
-      .drop_context = renderer_drop_context_egl, 
-      .set_vsync = renderer_set_vsync_egl,
-      .composite_pass = renderer_composite_pass_egl,
-      .stencil_damage_pass = renderer_stencil_damage_pass_egl,
-      .set_clear_color = renderer_set_clear_color_egl,
-      .begin_frame = renderer_begin_frame_egl,
-      .begin_scene = renderer_begin_scene_egl,
-      .draw_surface = renderer_draw_surface_egl,
-      .draw_rect = renderer_draw_rect_egl,
-      .end_frame = renderer_end_frame_egl,
-      .end_scene = renderer_end_scene_egl,
-      .destroy = renderer_destroy_egl
-    };
-  }
-}
-
-void 
-_comp_wl_bind(struct wl_client *client, void *data,
+_vt_comp_wl_bind(struct wl_client *client, void *data,
               uint32_t version, uint32_t id) {
   struct wl_resource *res = wl_resource_create(client,&wl_compositor_interface,version,id);
   wl_resource_set_implementation(res,&compositor_impl, data, NULL);
@@ -640,9 +406,9 @@ _comp_wl_bind(struct wl_client *client, void *data,
 
 
 void 
-_comp_load_backend(vt_compositor_t* c, const char* backend_name, const char* backend_path) {
-  if(_comp_dl_handle) {
-    log_warn(c->log, "Trying to reload backend during runtime, this is not supported.");
+_vt_comp_load_backend(struct vt_compositor_t* c, const char* backend_name, const char* backend_path) {
+  if(_vt_comp_dl_handle) {
+    VT_WARN(c->log, "Trying to reload backend during runtime, this is not supported.");
     return;
   }
 
@@ -656,8 +422,8 @@ _comp_load_backend(vt_compositor_t* c, const char* backend_name, const char* bac
       backend_name);
   }
 
-  _comp_dl_handle = dlopen(path, RTLD_NOW);
-  if(!_comp_dl_handle) {
+  _vt_comp_dl_handle = dlopen(path, RTLD_NOW);
+  if(!_vt_comp_dl_handle) {
     const char *err = dlerror();
     log_fatal(c->log, "%s (%s)", path, err ? err : "unknown error");
     return;
@@ -665,22 +431,22 @@ _comp_load_backend(vt_compositor_t* c, const char* backend_name, const char* bac
 
   char sym[64];
   sprintf(sym, "backend_implement_%s", backend_name);
-  backend_implement_func_t sym_ptr = dlsym(_comp_dl_handle, sym);
+  backend_implement_func_t sym_ptr = dlsym(_vt_comp_dl_handle, sym);
 
   if(!sym_ptr) {
     log_fatal(c->log, "Backend %s does not export backend_implement_%s.", path, backend_name);
-    dlclose(_comp_dl_handle);
+    dlclose(_vt_comp_dl_handle);
     return;
   }
 
   if(!sym_ptr(c)) {
     log_fatal(c->log, "Backend %s failed to initialize.", path);
-    dlclose(_comp_dl_handle);
+    dlclose(_vt_comp_dl_handle);
     return;
   }
 }
 
-void _comp_associate_surface_with_output(vt_compositor_t* c, vt_surface_t* surf, vt_output_t* output) {
+void _vt_comp_associate_surface_with_output(struct vt_compositor_t* c, vt_surface_t* surf, struct vt_output_t* output) {
   // Skip if surface and output don’t intersect
   if (surf->x + surf->width  <= output->x ||
     surf->x >= output->x + output->width ||
@@ -690,47 +456,47 @@ void _comp_associate_surface_with_output(vt_compositor_t* c, vt_surface_t* surf,
 
 }
 
-void
-_comp_wl_xdg_wm_base_bind(
-  struct wl_client *client, void *data,
-  uint32_t version, uint32_t id) {
-  struct wl_resource* res = wl_resource_create(client, &xdg_wm_base_interface, version, id);
-  wl_resource_set_implementation(res, &xdg_wm_base_impl, data, NULL);
+struct vt_renderer_t* 
+_vt_comp_get_renderer_from_surface(vt_surface_t* surf) {
+  struct vt_output_t* output;
+  wl_list_for_each(output, &surf->comp->outputs, link_global) {
+    if(!(surf->_mask_outputs_visible_on & (1u << output->id))) continue;
+    return output->renderer;
+  }
+  return NULL;
 }
 
 void 
-_comp_wl_surface_create(
+_vt_comp_wl_surface_create(
   struct wl_client *client,
   struct wl_resource *resource,
   uint32_t id) {
-  vt_compositor_t* c = wl_resource_get_user_data(resource);
-  log_trace(c->log, "Got compositor.surface_create: Started managing surface.")
-  // Allocate the struct to store compositor information about the surface
-  vt_surface_t* surf = COMP_ALLOC(c, sizeof(*surf));
-  static int ptr = 0;
+  struct vt_compositor_t* c = wl_resource_get_user_data(resource);
+  VT_TRACE(c->log, "Got compositor.surface_create: Started managing surface.")
+  // Allocate the struct to store protocol information about the surface
+  vt_surface_t* surf = VT_ALLOC(c, sizeof(*surf));
+  surf->comp = c;
   surf->x = 20;
   surf->y = 20;
-  surf->cb_pool.n_cbs = 0;
-  surf->title  = NULL;
-  surf->app_id = NULL;
-  surf->comp = c;
+
+  // Init the damage regions
   pixman_region32_init(&surf->current_damage);
   pixman_region32_init(&surf->pending_damage);
 
   // Add the surface to list of surfaces in the compositor
   wl_list_insert(&c->surfaces, &surf->link);
-  log_trace(c->log, "compositor.surface_create: Inserted surface into list.")
+  VT_TRACE(c->log, "compositor.surface_create: Inserted surface into list.")
 
   // Get the surface's wayland resource
   struct wl_resource* res = wl_resource_create(client, &wl_surface_interface, 4, id);
-  wl_resource_set_implementation(res, &surface_impl, surf, _comp_wl_surface_handle_resource_destroy);
+  wl_resource_set_implementation(res, &surface_impl, surf, _vt_comp_wl_surface_handle_resource_destroy);
   surf->surf_res = res;
 
-  log_trace(c->log, "compositor.surface_create: Setting surface implementation.")
+  VT_TRACE(c->log, "compositor.surface_create: Setting surface implementation.")
 }
 
 void 
-_comp_wl_surface_create_region(
+_vt_comp_wl_surface_create_region(
   struct wl_client *client,
   struct wl_resource *resource,
   uint32_t id) {
@@ -741,269 +507,7 @@ _comp_wl_surface_create_region(
 }
 
 void 
-_comp_wl_xdg_wm_base_destroy(struct wl_client *client, struct wl_resource *resource)
-{
-  wl_resource_destroy(resource);
-}
-
-void 
-_comp_wl_xdg_wm_base_create_positioner(struct wl_client *client,
-                                       struct wl_resource *resource, uint32_t id)
-{
-  struct wl_resource *pos = wl_resource_create(client, &xdg_positioner_interface,
-                                               wl_resource_get_version(resource), id);
-  wl_resource_set_implementation(pos, &xdg_positioner_impl, NULL, NULL);
-}
-
-void 
-_comp_wl_xdg_wm_base_get_xdg_surface(struct wl_client *client,
-                                     struct wl_resource *resource,
-                                     uint32_t id, struct wl_resource *surface_res)
-{
-  struct wl_resource *xdg_surf = wl_resource_create(client, &xdg_surface_interface,
-                                                    wl_resource_get_version(resource), id);
-  vt_surface_t* surf = wl_resource_get_user_data(surface_res);
-  surf->xdg_surf_res = xdg_surf;
-  wl_resource_set_implementation(xdg_surf, &xdg_surface_impl, surf, NULL);
-}
-
-void 
-_comp_wl_xdg_wm_base_pong(struct wl_client *client,
-                          struct wl_resource *resource, uint32_t serial)
-{
-}
-
-void 
-_comp_wl_xdg_positioner_destroy(struct wl_client *client,
-                                struct wl_resource *resource)
-{
-  wl_resource_destroy(resource);
-}
-
-void 
-_comp_wl_xdg_positioner_set_size(struct wl_client *client,
-                                 struct wl_resource *resource,
-                                 int32_t width, int32_t height)
-{
-}
-
-void 
-_comp_wl_xdg_positioner_set_anchor_rect(struct wl_client *client,
-                                        struct wl_resource *resource,
-                                        int32_t x, int32_t y,
-                                        int32_t width, int32_t height)
-{
-}
-
-void 
-_comp_wl_xdg_positioner_set_anchor(struct wl_client *client,
-                                   struct wl_resource *resource,
-                                   uint32_t anchor)
-{
-}
-
-void 
-_comp_wl_xdg_positioner_set_gravity(struct wl_client *client,
-                                    struct wl_resource *resource,
-                                    uint32_t gravity)
-{
-}
-
-void 
-_comp_wl_xdg_positioner_set_constraint_adjustment(struct wl_client *client,
-                                                  struct wl_resource *resource,
-                                                  uint32_t constraint_adjustment)
-{
-}
-
-void 
-_comp_wl_xdg_positioner_set_offset(struct wl_client *client,
-                                   struct wl_resource *resource,
-                                   int32_t x, int32_t y)
-{
-}
-
-void 
-_comp_wl_xdg_surface_destroy(struct wl_client *client,
-                             struct wl_resource *resource)
-{
-  wl_resource_destroy(resource);
-}
-
-void
-send_initial_configure(vt_surface_t* surf)
-{
-  struct wl_array states;
-  wl_array_init(&states);
-
-  // 0,0 = let client decide initial size
-  xdg_toplevel_send_configure(surf->xdg_toplevel_res, 0, 0, &states);
-
-  xdg_surface_send_configure(surf->xdg_surf_res,
-                             wl_display_next_serial(surf->comp->wl.dsp));
-
-  wl_array_release(&states);
-}
-
-
-void 
-_comp_wl_xdg_surface_get_toplevel(struct wl_client *client,
-                                  struct wl_resource *resource,
-                                  uint32_t id)
-{
-  vt_surface_t* surf = wl_resource_get_user_data(resource);
-
-  struct wl_resource *top = wl_resource_create(client, &xdg_toplevel_interface,
-                                               wl_resource_get_version(resource), id);
-  wl_resource_set_implementation(top, &xdg_toplevel_impl, surf, NULL);
-  surf->xdg_toplevel_res = top;
-
-  // send an initial configure
-  send_initial_configure(surf);
-}
-
-void 
-_comp_wl_xdg_surface_get_popup(struct wl_client *client,
-                               struct wl_resource *resource,
-                               uint32_t id,
-                               struct wl_resource *parent_surface,
-                               struct wl_resource *positioner)
-{
-}
-
-void 
-_comp_wl_xdg_surface_ack_configure(struct wl_client *client,
-                                   struct wl_resource *resource,
-                                   uint32_t serial)
-{
-  vt_surface_t* surf = wl_resource_get_user_data(resource);
-  surf->last_configure_serial = serial;
-}
-
-void 
-_comp_wl_xdg_surface_set_window_geometry(struct wl_client *client,
-                                         struct wl_resource *resource,
-                                         int32_t x, int32_t y,
-                                         int32_t width, int32_t height)
-{
-}
-
-
-
-void
-_comp_wl_xdg_toplevel_destroy(struct wl_client *client, struct wl_resource *resource)
-{
-  wl_resource_destroy(resource);
-}
-
-void
-_comp_wl_xdg_toplevel_set_parent(struct wl_client *client,
-                                 struct wl_resource *resource,
-                                 struct wl_resource *parent_resource)
-{
-}
-
-void
-_comp_wl_xdg_toplevel_set_title(struct wl_client *client,
-                                struct wl_resource *resource,
-                                const char *title)
-{
-  vt_surface_t* surf = wl_resource_get_user_data(resource);
-  if (surf->title)
-    free(surf->title);
-  surf->title = strdup(title ? title : "");
-}
-
-void
-_comp_wl_xdg_toplevel_set_app_id(struct wl_client *client,
-                                 struct wl_resource *resource,
-                                 const char *app_id)
-{
-  vt_surface_t* surf = wl_resource_get_user_data(resource);
-  if (surf->app_id)
-    free(surf->app_id);
-  surf->app_id = strdup(app_id ? app_id : "");
-}
-
-void
-_comp_wl_xdg_toplevel_show_window_menu(struct wl_client *client,
-                                       struct wl_resource *resource,
-                                       struct wl_resource *seat,
-                                       uint32_t serial,
-                                       int32_t x, int32_t y)
-{
-  // optional: ignore
-}
-
-void
-_comp_wl_xdg_toplevel_move(struct wl_client *client,
-                           struct wl_resource *resource,
-                           struct wl_resource *seat,
-                           uint32_t serial)
-{
-  // optional: ignore
-}
-
-void
-_comp_wl_xdg_toplevel_resize(struct wl_client *client,
-                             struct wl_resource *resource,
-                             struct wl_resource *seat,
-                             uint32_t serial,
-                             uint32_t edges)
-{
-  // optional: ignore
-}
-
-void
-_comp_wl_xdg_toplevel_set_max_size(struct wl_client *client,
-                                   struct wl_resource *resource,
-                                   int32_t width, int32_t height)
-{
-  // optional: ignore
-}
-
-void
-_comp_wl_xdg_toplevel_set_min_size(struct wl_client *client,
-                                   struct wl_resource *resource,
-                                   int32_t width, int32_t height)
-{
-  // optional: ignore
-}
-
-void
-_comp_wl_xdg_toplevel_set_maximized(struct wl_client *client,
-                                    struct wl_resource *resource)
-{
-  // optional: ignore
-}
-
-void
-_comp_wl_xdg_toplevel_unset_maximized(struct wl_client *client,
-                                      struct wl_resource *resource)
-{
-}
-
-void
-_comp_wl_xdg_toplevel_set_fullscreen(struct wl_client *client,
-                                     struct wl_resource *resource,
-                                     struct wl_resource *output)
-{
-}
-
-void
-_comp_wl_xdg_toplevel_unset_fullscreen(struct wl_client *client,
-                                       struct wl_resource *resource)
-{
-}
-
-void
-_comp_wl_xdg_toplevel_set_minimized(struct wl_client *client,
-                                    struct wl_resource *resource)
-{
-}
-
-void 
-_comp_wl_surface_attach(
+_vt_comp_wl_surface_attach(
   struct wl_client *client,
   struct wl_resource *resource,
   struct wl_resource *buffer,
@@ -1013,30 +517,30 @@ _comp_wl_surface_attach(
   // in the surface struct
   vt_surface_t* surf = wl_resource_get_user_data(resource);
   if(!surf) {
-    log_error(surf->comp->log, "compositor.surface_attach: No internal surface data allocated.")
+    VT_ERROR(surf->comp->log, "compositor.surface_attach: No internal surface data allocated.")
     return;
   }
-  log_trace(surf->comp->log, "Got compositor.surface_attach.")
+  VT_TRACE(surf->comp->log, "Got compositor.surface_attach.")
     surf->buf_res = buffer;
 }
 
 void 
-_comp_wl_surface_commit(
+_vt_comp_wl_surface_commit(
   struct wl_client *client,
   struct wl_resource *resource) {
   vt_surface_t* surf = wl_resource_get_user_data(resource);
   if(!surf) {
-    log_error(surf->comp->log, "compositor.surface_attach: No internal surface data allocated.")
+    VT_ERROR(surf->comp->log, "compositor.surface_attach: No internal surface data allocated.")
     return;
   }
 
-  log_trace(surf->comp->log, "Got compositor.surface_commit.")
+  VT_TRACE(surf->comp->log, "Got compositor.surface_commit.")
 
-  if (!surf) { log_error(surf->comp->log, "surface_commit: NULL user_data"); return; }
+  if (!surf) { VT_ERROR(surf->comp->log, "surface_commit: NULL user_data"); return; }
 
   // No buffer attached, this commit is illegal  
   if (!surf->buf_res) {
-    log_warn(surf->comp->log, "compositor.surface_commit: Got commit request without attached buffer.")
+    VT_WARN(surf->comp->log, "compositor.surface_commit: Got commit request without attached buffer.")
     return;
   }
 
@@ -1045,7 +549,6 @@ _comp_wl_surface_commit(
   }
 
   if(pixman_region32_empty(&surf->pending_damage)) return;
-
 
   pixman_box32_t extents = *pixman_region32_extents(&surf->pending_damage);
 
@@ -1059,15 +562,6 @@ _comp_wl_surface_commit(
 
   pixman_region32_clear(&surf->pending_damage);
 
-  pixman_region32_intersect_rect(&surf->current_damage,
-                                 &surf->current_damage,
-                                 0, 0, surf->width, surf->height);
-
-  if(surf->comp->backend->renderer->impl.import_buffer)
-    surf->comp->backend->renderer->impl.import_buffer(surf->comp->backend->renderer, surf, surf->buf_res);
-
-  // Tell the client we're finsied uploading its buffer
-  wl_buffer_send_release(surf->buf_res);
 
   // If the size of the surface changed, 
   // we need to recalculate the outputs that the surface is visible on 
@@ -1078,24 +572,44 @@ _comp_wl_surface_commit(
   surf->height = surf->tex.height;
 
   if(!surf->_mask_outputs_visible_on) {
-    vt_output_t* output;
-    wl_list_for_each(output, &surf->comp->backend->outputs, link) {
-      _comp_associate_surface_with_output(surf->comp, surf, output);
+    struct vt_output_t* output;
+    wl_list_for_each(output, &surf->comp->outputs, link_global) {
+      _vt_comp_associate_surface_with_output(surf->comp, surf, output);
     }
+    // Mark as needing redraw
+    pixman_region32_clear(&surf->current_damage);
+    pixman_region32_union_rect(&surf->current_damage,
+                               &surf->current_damage, 0, 0, surf->width, surf->height);
   }
+ 
+  pixman_region32_intersect_rect(&surf->current_damage,
+                                 &surf->current_damage,
+                                 0, 0, surf->width, surf->height);
 
-  log_trace(surf->comp->log, "compositor.surface_commit: Scheduling repaint to render commited buffer.");
 
+  VT_TRACE(surf->comp->log, "compositor.surface_commit: Scheduling repaint to render commited buffer.");
 
   // Schedule a repaint for all outputs that the surface intersects with
-  vt_output_t* output;
-  wl_list_for_each(output, &surf->comp->backend->outputs, link) {
-    if(!(surf->_mask_outputs_visible_on & (1u << output->id))) continue;
+  bool imported_buf = false;
+  struct vt_output_t* output;
+  wl_list_for_each(output, &surf->comp->outputs, link_global) {
+    if(!(surf->_mask_outputs_visible_on & (1u << output->id))) {
+      VT_WARN(surf->comp->log, "Not rerendering for surface %p because not on output %p.\n", surf, output);
+      continue;
+    }
+    if(!imported_buf) {
+      if(output->renderer && output->renderer->impl.import_buffer) {
+        output->renderer->impl.import_buffer(output->renderer, surf, surf->buf_res);
+        imported_buf = true;
+        // Tell the client we're finsied uploading its buffer
+        wl_buffer_send_release(surf->buf_res);
+      }
+    }
     pixman_box32_t ext = *pixman_region32_extents(&surf->current_damage);
     pixman_region32_union_rect(&output->damage, &output->damage,
                                surf->x + ext.x1, surf->y + ext.y1,
                                ext.x2 - ext.x1, ext.y2 - ext.y1); 
-    comp_schedule_repaint(surf->comp, output);
+    vt_comp_schedule_repaint(surf->comp, output);
   }
 
   pixman_region32_clear(&surf->current_damage);
@@ -1103,37 +617,37 @@ _comp_wl_surface_commit(
 
 
 void
-_comp_wl_surface_frame(
+_vt_comp_wl_surface_frame(
   struct wl_client *client,
   struct wl_resource *resource,
   uint32_t callback) {
   vt_surface_t* surf = wl_resource_get_user_data(resource);
   if(!surf) {
-    log_error(surf->comp->log, "compositor.surface_frame: No internal surface data allocated.")
+    VT_ERROR(surf->comp->log, "compositor.surface_frame: No internal surface data allocated.")
     return;
   }
 
-  log_trace(surf->comp->log, "Got compositor.surface_frame.")
+  VT_TRACE(surf->comp->log, "Got compositor.surface_frame.")
   struct wl_resource* res = wl_resource_create(client, &wl_callback_interface, 1, callback);
 
   // Store the frame callback in the list of pending frame callbacks.
   // wl_callback_send_done must be called for each of the pending callbacks
   // after the next page flip event completes in order to correctly handle 
   // frame pacing ( see send_frame_callbacks() ).
-  if(surf->cb_pool.n_cbs >= COMP_MAX_FRAME_CBS) {
-    log_warn(surf->comp->log, "Surface %p already has %i frame callbacks queued - dropping new one.", surf->cb_pool.n_cbs);
+  if(surf->cb_pool.n_cbs >= VT_MAX_FRAME_CBS) {
+    VT_WARN(surf->comp->log, "Surface %p already has %i frame callbacks queued - dropping new one.", surf->cb_pool.n_cbs);
     return;
   }
   surf->cb_pool.cbs[surf->cb_pool.n_cbs++] = res;
 
-  log_trace(surf->comp->log, "compositor.surface_frame: Inserting frame callback into list of surface %p.", surf)
+  VT_TRACE(surf->comp->log, "compositor.surface_frame: Inserting frame callback into list of surface %p.", surf)
 
     surf->needs_frame_done = true;
   surf->comp->any_frame_cb_pending = true;
 }
 
 void 
-_comp_wl_surface_damage(
+_vt_comp_wl_surface_damage(
   struct wl_client *client,
   struct wl_resource *resource,
   int32_t x,
@@ -1142,7 +656,7 @@ _comp_wl_surface_damage(
   int32_t height) {
   vt_surface_t* surf = wl_resource_get_user_data(resource);
   if(!surf) {
-    log_error(surf->comp->log, "compositor.surface_damage: No internal surface data allocated.")
+    VT_ERROR(surf->comp->log, "compositor.surface_damage: No internal surface data allocated.")
     return;
   }
 
@@ -1154,7 +668,7 @@ _comp_wl_surface_damage(
 
 }
 void 
-_comp_wl_surface_damage_buffer(struct wl_client *client,
+_vt_comp_wl_surface_damage_buffer(struct wl_client *client,
                                struct wl_resource *resource,
                                int32_t x,
                                int32_t y,
@@ -1162,7 +676,7 @@ _comp_wl_surface_damage_buffer(struct wl_client *client,
                                int32_t height) {
   vt_surface_t* surf = wl_resource_get_user_data(resource);
   if(!surf) {
-    log_error(surf->comp->log, "compositor.surface_damage: No internal surface data allocated.")
+    VT_ERROR(surf->comp->log, "compositor.surface_damage: No internal surface data allocated.")
     return;
   }
 
@@ -1175,7 +689,7 @@ _comp_wl_surface_damage_buffer(struct wl_client *client,
 
 
 void
-_comp_wl_surface_set_opaque_region(
+_vt_comp_wl_surface_set_opaque_region(
   struct wl_client *client,
   struct wl_resource *resource,
   struct wl_resource *region) {
@@ -1183,28 +697,28 @@ _comp_wl_surface_set_opaque_region(
 }
 
 void 
-_comp_wl_surface_set_input_region(struct wl_client *client,
+_vt_comp_wl_surface_set_input_region(struct wl_client *client,
                                   struct wl_resource *resource,
                                   struct wl_resource *region) {
 
 }
 
 void
-_comp_wl_surface_set_buffer_transform(struct wl_client *client,
+_vt_comp_wl_surface_set_buffer_transform(struct wl_client *client,
                                       struct wl_resource *resource,
                                       int32_t transform) {
 
 }
 
 void
-_comp_wl_surface_set_buffer_scale(struct wl_client *client,
+_vt_comp_wl_surface_set_buffer_scale(struct wl_client *client,
                                   struct wl_resource *resource,
                                   int32_t scale) {
 
 }
 
 void
-_comp_wl_surface_offset(struct wl_client *client,
+_vt_comp_wl_surface_offset(struct wl_client *client,
                         struct wl_resource *resource,
                         int32_t x,
                         int32_t y) {
@@ -1212,53 +726,60 @@ _comp_wl_surface_offset(struct wl_client *client,
 }
 
 void
-_comp_wl_surface_destroy(struct wl_client *client,
+_vt_comp_wl_surface_destroy(struct wl_client *client,
                          struct wl_resource *resource) {
-  vt_compositor_t* comp = ((vt_surface_t*)wl_resource_get_user_data(resource))->comp;
-  log_trace(comp->log, 
+  struct vt_surface_t* surf = ((vt_surface_t*)wl_resource_get_user_data(resource));
+  
+  VT_TRACE(surf->comp->log, 
             "Got surface.destroy: Destroying surface resource.")
   wl_resource_destroy(resource);
 
 }
 
 void 
-_comp_wl_surface_handle_resource_destroy(struct wl_resource* resource) {
+_vt_comp_wl_surface_handle_resource_destroy(struct wl_resource* resource) {
   vt_surface_t* surf = wl_resource_get_user_data(resource);
   int32_t x = surf->x;
   int32_t y = surf->y;
   int32_t w = surf->width;
   int32_t h = surf->height;
-  log_trace(surf->comp->log, 
+  VT_TRACE(surf->comp->log, 
             "Got surface.destroy handler: Unmanaging client.")
 
   wl_list_remove(&surf->link);
 
-  pixman_region32_fini(&surf->_scratch_damage);
   pixman_region32_fini(&surf->pending_damage);
   pixman_region32_fini(&surf->current_damage);
 
-  free(surf);
-
   // Schedule a repaint for all outputs that the surface intersects with
-  vt_output_t* output;
-  wl_list_for_each(output, &surf->comp->backend->outputs, link) {
+  struct vt_output_t* output;
+  bool destroyed_render_res = false;
+  wl_list_for_each(output, &surf->comp->outputs, link_global) {
     if(!(surf->_mask_outputs_visible_on & (1u << output->id))) continue;
+    // Destory surface texture with the renderer associated with the first output 
+    // the surface is on
+    if(!destroyed_render_res && output->renderer && output->renderer->impl.destroy_surface_texture) {
+      output->renderer->impl.destroy_surface_texture(output->renderer, surf);
+      destroyed_render_res = true;
+    }
+    // Damage the part of the screen where the surface was located 
+    // and schedule a repaint
     pixman_region32_union_rect(
       &output->damage, &output->damage,
       x, y, w, h); 
-    comp_schedule_repaint(surf->comp, output);
+    vt_comp_schedule_repaint(surf->comp, output);
   }
 }
 
 void 
-_comp_wl_region_destroy(
+_vt_comp_wl_region_destroy(
   struct wl_client *client,
   struct wl_resource *resource) {
 
 }
 
 void
-_comp_wl_region_add(
+_vt_comp_wl_region_add(
   struct wl_client *client,
   struct wl_resource *resource,
   int32_t x,
@@ -1269,7 +790,7 @@ _comp_wl_region_add(
 }
 
 void 
-_comp_wl_region_subtract(
+_vt_comp_wl_region_subtract(
   struct wl_client *client,
   struct wl_resource *resource,
   int32_t x,
@@ -1279,7 +800,7 @@ _comp_wl_region_subtract(
 
 }
 
-uint32_t comp_merge_damaged_regions(pixman_box32_t *merged,
+uint32_t vt_comp_merge_damaged_regions(pixman_box32_t *merged,
                                     pixman_region32_t *region) {
   if (pixman_region32_empty(region)) return 0;
 
@@ -1287,7 +808,7 @@ uint32_t comp_merge_damaged_regions(pixman_box32_t *merged,
   pixman_box32_t *rects = pixman_region32_rectangles(region, &n_rects);
   if(!n_rects) return 0;
 
-  if (n_rects > COMP_MAX_DAMAGE_RECTS) {
+  if (n_rects > VT_MAX_DAMAGE_RECTS) {
     merged[0] = *pixman_region32_extents(region);
     return 1; 
   }
@@ -1298,125 +819,59 @@ uint32_t comp_merge_damaged_regions(pixman_box32_t *merged,
 }
 
 bool 
-_comp_wl_init(vt_compositor_t* c) {
+_vt_comp_wl_init(struct vt_compositor_t* c) {
   if(!(c->wl.dsp = wl_display_create())) {
-    log_error(c->log, "cannot create wayland display.");
+    VT_ERROR(c->log, "cannot create wayland display.");
     return false;
   }
 
-  log_trace(c->log, "Sucessfully created wayland display.");
+  VT_TRACE(c->log, "Sucessfully created wayland display.");
 
   wl_list_init(&c->surfaces);
 
   if(!(c->wl.evloop = wl_display_get_event_loop(c->wl.dsp))) {
-    log_error(c->log, "Cannot get wayland event loop.");
+    VT_ERROR(c->log, "Cannot get wayland event loop.");
     return false;
   }
 
   wl_display_init_shm(c->wl.dsp);
 
-  wl_global_create(c->wl.dsp, &wl_compositor_interface, 4, c, _comp_wl_bind); 
+  wl_global_create(c->wl.dsp, &wl_compositor_interface, 4, c, _vt_comp_wl_bind); 
 
-  if(!(c->wl.xdg_wm_base = wl_global_create(c->wl.dsp, &xdg_wm_base_interface, 1, NULL, _comp_wl_xdg_wm_base_bind))) {
-    log_error(c->log, "Cannot implement XDG base interface.");
+  if(!vt_xdg_shell_init(c)) {
+    VT_ERROR(c->log, "Cannot initialize XDG shell.");
     return false;
   }
 
   const char *socket_name = wl_display_add_socket_auto(c->wl.dsp);
   if (!socket_name) {
-    log_error(c->log, "Failed to create Wayland socket: no clients will be able to connect.");
+    VT_ERROR(c->log, "Failed to create Wayland socket: no clients will be able to connect.");
     return false; 
   } else {
-    log_trace(c->log, "Wayland display ready on socket '%s'.", socket_name);
+    VT_TRACE(c->log, "Wayland display ready on socket '%s'.", socket_name);
   }
 
 
   return true;
 }
 
-static int 
-libinput_fd_ready(int fd, uint32_t mask, void *data) {
-  vt_compositor_t* c = data;
-  static bool alt_down = false, ctrl_down = false;
-  libinput_dispatch(c->input);
-
-  struct libinput_event *event;
-  while ((event = libinput_get_event(c->input)) != NULL) {
-    enum libinput_event_type type = libinput_event_get_type(event);
-
-    switch (type) {
-      case LIBINPUT_EVENT_KEYBOARD_KEY: {
-        struct libinput_event_keyboard *kbevent =
-          libinput_event_get_keyboard_event(event);
-        uint32_t key = libinput_event_keyboard_get_key(kbevent);
-        enum libinput_key_state state =
-          libinput_event_keyboard_get_key_state(kbevent);
-
-        if (state == LIBINPUT_KEY_STATE_PRESSED && key == KEY_LEFTCTRL)
-          ctrl_down = true;
-        else if (state == LIBINPUT_KEY_STATE_RELEASED && key == KEY_LEFTCTRL)
-          ctrl_down = false;
-
-        if (state == LIBINPUT_KEY_STATE_PRESSED && key == KEY_LEFTALT)
-          alt_down = true;
-        else if (state == LIBINPUT_KEY_STATE_RELEASED && key == KEY_LEFTALT)
-          alt_down = false;
-
-        if (state == LIBINPUT_KEY_STATE_PRESSED && key == 41) {
-          c->running = false;
-        }
-
-        bool mods = (alt_down && ctrl_down &&
-          state == LIBINPUT_KEY_STATE_PRESSED);
-
-        if(c->backend->impl.__handle_input)
-          c->backend->impl.__handle_input(c->backend, mods, key);
-        break;
-      }
-
-      default:
-        break;
-    }
-
-    libinput_event_destroy(event);
-  }
-
-  return 0;
-}
-
-
-
-static inline int input_open_restricted(const char* path, int32_t flags, void* user_data) {
-  int fd = open(path, flags);
-  return fd < 0 ? -errno : fd;
-}
-
-static inline void input_close_restricted(int32_t fd, void* user_data) {
-  close(fd);
-}
-
-
-static const struct libinput_interface input_interface = {
-  .close_restricted = input_close_restricted,
-  .open_restricted = input_open_restricted
-};
-
 bool
-comp_init(vt_compositor_t* c, int argc, char** argv) {
-  comp_arena_init(&c->arena, 1024 * 1024 * 2);
+vt_comp_init(struct vt_compositor_t* c, int argc, char** argv) {
+  vt_util_arena_init(&c->arena, 1024 * 1024 * 2);
+
+  wl_list_init(&c->outputs);
+
   c->log.stream = stdout;
   c->log.verbose = false;
   c->log.quiet = false;
 
   c->backend = calloc(1, sizeof(*c->backend));
-  c->backend->renderer = calloc(1, sizeof(*c->backend->renderer));
   c->backend->comp = c;
-  c->backend->renderer->comp = c;
+  
+  c->session = calloc(1, sizeof(*c->session));
+  c->session->comp = c;
 
-  c->backend->renderer->rendering_backend = VT_RENDERING_BACKEND_EGL_OPENGL;
-
-
-  const char* backend_str = _comp_handle_cmd_flags(c, argc, argv);
+  const char* backend_str = _vt_comp_handle_cmd_flags(c, argc, argv);
   if(!backend_str) {
     if(getenv("WAYLAND_DISPLAY"))
       backend_str = "wl";
@@ -1427,91 +882,67 @@ comp_init(vt_compositor_t* c, int argc, char** argv) {
   if(strcmp(backend_str, "wl") == 0 && !c->n_virtual_outputs)
     c->n_virtual_outputs = 1;
 
-  _comp_load_backend(c, backend_str, c->_cmd_line_backend_path);
-  _comp_implement_render(c);
+  _vt_comp_load_backend(c, backend_str, c->_cmd_line_backend_path);
 
-  if(!_comp_wl_init(c)) {
-    log_error(c->log, "Failed to initialize wayland state.")
+  if(!_vt_comp_wl_init(c)) {
+    VT_ERROR(c->log, "Failed to initialize wayland state.")
     return false;
   }
 
+  // Initialize session 
+  c->session->impl.init(c->session);
+  
   // Initialize backend 
-  if(!(c->backend->impl.init(c->backend))) {
-    log_error(c->log, "Failed to initialize compositor backend.")
-    return false;
-  }
-  // initialize renderer
-  if(!(c->backend->renderer->impl.init(c->backend, c->backend->renderer, c->backend->native_handle))) {
-    log_error(c->log, "Failed to initialize rendering backend.")
+  if(!c->backend->impl.init(c->backend)) {
+    VT_ERROR(c->log, "Failed to initialize compositor backend.")
     return false;
   }
 
-  // Initialize outputs
-  if(!(c->backend->impl.initialize_active_outputs(c->backend))) {
-    log_error(c->log, "Failed to initialize backend outputs.")
-    return false;
-  }
-
-  if(c->backend->platform == VT_BACKEND_DRM_GBM) {
-    struct udev* udev = udev_new();
-    if(!udev) {
-      log_error(c->log, "Failed to create udev context.");
-      return false;
-    } else {
-      log_trace(c->log, "Successfully created udev context.");
-    }
-    c->input = libinput_udev_create_context(&input_interface, NULL, udev);
-    if(!c->input) {
-      log_error(c->log, "Failed to create libinput context.");
-      return false;
-    } else {
-      log_trace(c->log, "Successfully created libinput context.");
-    }
-    libinput_udev_assign_seat(c->input, "seat0");
-    libinput_dispatch(c->input);
-
-    int li_fd = libinput_get_fd(c->input);
-    wl_event_loop_add_fd(c->wl.evloop, li_fd,
-                         WL_EVENT_READABLE, libinput_fd_ready, c);
-  }
-
-  vt_output_t* output;
-  wl_list_for_each(output, &c->backend->outputs, link) {
+  struct vt_output_t* output;
+  wl_list_for_each(output, &c->outputs, link_global) {
     output->repaint_pending = false;
-    comp_schedule_repaint(c, output);
+    vt_comp_schedule_repaint(c, output);
   }
+
+  vt_scene_node_t* root = vt_scene_node_create(c, 0, 0, output->width, output->height);
+ 
+  vt_scene_node_add_child(c, root, vt_scene_node_create(c, 20, 20, 20, 20));
+
+  for(uint32_t i = 0; i < root->child_count; i++) {
+    printf("Root children: %f, %f, %f, %f\n",
+           root->childs[i]->x, 
+           root->childs[i]->y, 
+           root->childs[i]->w, 
+           root->childs[i]->h
+           );
+  }
+
   return true;
 }
 
 void
-comp_run(vt_compositor_t *c) {
+vt_comp_run(struct vt_compositor_t *c) {
   c->running = true;
-  log_trace(c->log, "Entering main event loop...");
+  VT_TRACE(c->log, "Entering main event loop...");
   while (c->running) {
     wl_event_loop_dispatch(c->wl.evloop, -1);
     wl_display_flush_clients(c->wl.dsp);
-
-    if(!(c->backend->impl.handle_event(c->backend))) {
-      log_warn(c->log, "Failed to handle backend event.");
-    }
-
   }
 }
 
 bool
-comp_terminate(vt_compositor_t *c) {
-  log_trace(c->log, "Shutting down...");
+vt_comp_terminate(struct vt_compositor_t *c) {
+  VT_TRACE(c->log, "Shutting down...");
   c->running = false;
 
-  // Shut down renderer & backend
-  if(!c->backend->renderer->impl.destroy(c->backend->renderer)) {
-    log_error(c->log, "Failed to terminate renderer.");
-    return false;
-  }
   if(!(c->backend->impl.terminate(c->backend))) {
-    log_error(c->log, "Failed to terminate backend");
+    VT_ERROR(c->log, "Failed to terminate backend");
     return false;
   }
+
+  c->session->impl.terminate(c->session);
+
+  free(c->session);
 
   // Shut down wayland 
   if (c->wl.dsp) {
@@ -1521,46 +952,46 @@ comp_terminate(vt_compositor_t *c) {
   }
 
   // Clean up log
-  log_trace(c->log, "Shutdown complete.");
+  VT_TRACE(c->log, "Shutdown complete.");
 
   if (c->log.stream && c->log.stream != stdout && c->log.stream != stderr) {
     fclose(c->log.stream);
     c->log.stream = NULL;
   }
+  
+  vt_util_arena_destroy(&c->arena); 
 
-  dlclose(_comp_dl_handle);
+  dlclose(_vt_comp_dl_handle);
 }
 
 void 
-comp_schedule_repaint(vt_compositor_t *c, vt_output_t* output) {
+vt_comp_schedule_repaint(struct vt_compositor_t *c, struct vt_output_t* output) {
   if(!c || !output || !c->backend) return;
   if (c->suspended) {
-    log_warn(c->log, "Trying to schedule repaint while compositor is suspended.");
+    VT_WARN(c->log, "Trying to schedule repaint while compositor is suspended.");
     return;
   }
   if (output->repaint_pending) {
     return;
   }
   output->needs_repaint = true;
-  if(!c->backend->impl.prepare_output_frame(c->backend, output)) return;
+  //if(!c->backend->impl.prepare_output_frame(c->backend, output)) return;
   if(!output->repaint_pending) {
     output->repaint_pending = true;
-    output->repaint_source = wl_event_loop_add_idle(c->wl.evloop, _comp_frame_handler, output);
+    output->repaint_source = wl_event_loop_add_idle(c->wl.evloop, _vt_comp_frame_handler, output);
   }
 
-  log_trace(c->log, "Scheduling repaint on output %p.", output);
+  VT_TRACE(c->log, "Scheduling repaint on output %p.", output);
 
 }
+void vt_comp_repaint_scene(struct vt_compositor_t *c, struct vt_output_t *output) {
+  if (!c || !output || !c->backend || !output->renderer) return;
 
-void comp_repaint_scene(vt_compositor_t *c, vt_output_t* output) {
-  if (!c || !output || !c->backend || !c->backend->renderer) return;
-
-  vt_renderer_t *r = c->backend->renderer;
+  struct vt_renderer_t* r = output->renderer;
   r->impl.begin_frame(r, output);
 
-  pixman_box32_t damage_boxes[COMP_MAX_DAMAGE_RECTS];
-  int32_t n_damage = comp_merge_damaged_regions(damage_boxes, &output->damage);
-
+  pixman_box32_t damage_boxes[VT_MAX_DAMAGE_RECTS];
+  int32_t n_damage = vt_comp_merge_damaged_regions(damage_boxes, &output->damage);
 
   // Damage Pass
   r->impl.stencil_damage_pass(r, output);
@@ -1598,41 +1029,35 @@ void comp_repaint_scene(vt_compositor_t *c, vt_output_t* output) {
   output->needs_repaint = false;
 }
 
-uint32_t 
-comp_get_time_msec(void) {
-  struct timespec ts;
-  clock_gettime(CLOCK_MONOTONIC, &ts);
-  return (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
-}
+void vt_comp_invalidate_all_surfaces(struct vt_compositor_t *comp) {
+  if (!comp) return;
 
-void 
-comp_arena_init(vt_arena_t* a, size_t capacity) {
-  a->base = (uint8_t*)malloc(capacity);
-  a->offset = 0;
-  a->capacity = capacity;
-}
+  VT_TRACE(comp->log, "Invalidating all surface GPU imports...");
 
-void*
-comp_alloc(vt_arena_t* a, size_t size)  {
-  size = (size + 7u) & ~7u;
-  if (a->offset + size > a->capacity) {
-    fprintf(stderr, "arena violated.\n");
-    exit(1);
+  vt_surface_t *surf, *tmp;
+  wl_list_for_each_safe(surf, tmp, &comp->surfaces, link) {
+    // Destroy GPU texture if renderer has one
+    if (surf->tex.id) {
+      struct vt_renderer_t* r = _vt_comp_get_renderer_from_surface(surf);
+      if ( r && r->impl.destroy_surface_texture) {
+        r->impl.destroy_surface_texture(r, surf);
+      }
+      memset(&surf->tex, 0, sizeof(surf->tex));
+    }
+
+    // Force re-import
+    surf->_mask_outputs_visible_on = 0;
+
+
+    // Optionally, if the client still has a buffer attached, ask it to repaint
+    if (surf->buf_res) {
+      // Send a frame done to poke the client
+      uint32_t t = vt_util_get_time_msec();
+      struct wl_resource *cb = wl_resource_create(
+        wl_resource_get_client(surf->buf_res),
+        &wl_callback_interface, 1, 0);
+      if (cb)
+        wl_callback_send_done(cb, t);
+    }
   }
-  void *ptr = a->base + a->offset;
-  a->offset += size;
-  memset(ptr, 0, size);
-  return ptr;
-}
-
-void
-comp_arena_reset(vt_arena_t* a) {
-  a->offset = 0;
-}
-
-void 
-comp_arena_destroy(vt_arena_t* a) {
-  free(a->base);
-  a->base = NULL;
-  a->capacity = a->offset = 0;
 }
