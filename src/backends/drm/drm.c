@@ -35,7 +35,7 @@ typedef struct {
   struct vt_compositor_t* comp;
 
   struct wl_listener session_terminate_listener,
-    seat_disable_listener, seat_enable_listener;
+  seat_disable_listener, seat_enable_listener;
 } drm_backend_master_state_t;
 
 typedef struct {
@@ -167,20 +167,29 @@ _drm_release_all_scanout(struct vt_output_t* output) {
 
 bool 
 _drm_suspend(drm_backend_state_t* backend) {
-  if(!backend) return false;
-  if (backend->comp->suspended) return true;
+  if (!backend)
+    return false;
+  if (backend->comp->suspended)
+    return true;
+
   backend->comp->suspended = true;
+  VT_TRACE(backend->comp->log, "DRM: Suspending seat session (VT switch away)...");
 
-  VT_TRACE(backend->comp->log, "DRM: suspending seat session...");
+  // we stop submitting new flips immediately
+  struct vt_output_t* output;
+  wl_list_for_each(output, &backend->outputs, link_local) {
+    output->needs_repaint = false;
+  }
 
-  // Drain any pending flips
+  // Drain any in-flight page flips 
   bool any_inflight;
   do {
     any_inflight = false;
-    struct vt_output_t* output;
     wl_list_for_each(output, &backend->outputs, link_local) {
-      if(!output->user_data) continue;
-      if (BACKEND_DATA(output, drm_output_state_t)->flip_inflight) {
+      if (!output->user_data)
+        continue;
+      drm_output_state_t* drm_output = BACKEND_DATA(output, drm_output_state_t);
+      if (drm_output->flip_inflight) {
         any_inflight = true;
         break;
       }
@@ -189,93 +198,86 @@ _drm_suspend(drm_backend_state_t* backend) {
       drmHandleEvent(backend->drm_fd, &backend->evctx);
   } while (any_inflight);
 
+  // disable scanout on all outputs (causes ~1 frame of black screen but safe)
+  wl_list_for_each(output, &backend->outputs, link_local) {
+    if (!output->user_data)
+      continue;
 
-  // Drop graphics context 
-  if(!backend->renderer->impl.drop_context(backend->renderer)) return false; 
-
-  // Destroy all the graphical outputs
-  struct vt_output_t* output, *tmp;
-  wl_list_for_each_safe(output, tmp, &backend->outputs, link_local) {
-    if(!output->user_data) continue;
-    _drm_release_all_scanout(output);
     drm_output_state_t* drm_output = BACKEND_DATA(output, drm_output_state_t);
-    gbm_surface_destroy(drm_output->gbm_surf);
-    drm_output->gbm_surf = NULL;
-    if(!backend->renderer->impl.destroy_renderable_output(backend->renderer, output)) return false;
+
+    VT_TRACE(backend->comp->log, 
+             "DRM: Disabling CRTC %u for connector %u.", 
+             drm_output->crtc_id, drm_output->conn_id);
+
+    drmModeSetCrtc(backend->drm_fd, drm_output->crtc_id,
+                   0, 0, 0, NULL, 0, NULL);
   }
 
   return true;
 }
 
+
 bool 
 _drm_resume(drm_backend_state_t* backend) {
-  if(!backend) return false;
-  if (!backend->comp->suspended) return true;
+  if (!backend)
+    return false;
+  if (!backend->comp->suspended)
+    return true;
 
-  VT_TRACE(backend->comp->log, "DRM: resuming seat session...");
   backend->comp->suspended = false;
-
-  if (backend->gbm_dev)
-    gbm_device_destroy(backend->gbm_dev);
-
-  backend->gbm_dev = gbm_create_device(backend->drm_fd);
-  backend->native_handle = backend->gbm_dev;
-
-  backend->renderer->impl.destroy(backend->renderer);
-  backend->renderer->impl.init(backend->root_backend, backend->renderer, backend->native_handle);
-
-  {
-    struct vt_output_t* output, *tmp;
-    const uint32_t desired_format = backend->renderer->_desired_render_buffer_format;
-    wl_list_for_each_safe(output, tmp, &backend->outputs, link_local) {
-      if(!output->user_data) continue;
-
-      drm_output_state_t* drm_output = BACKEND_DATA(output, drm_output_state_t);
-      drm_output->gbm_surf = gbm_surface_create(
-        backend->gbm_dev,
-        drm_output->mode.hdisplay, drm_output->mode.vdisplay,
-        desired_format, 
-        GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING
-      );
-      output->native_window = drm_output->gbm_surf;
-
-      if(!backend->renderer->impl.setup_renderable_output(backend->renderer, output)) return false;
-      drm_output->needs_modeset = true;
-      drm_output->modeset_bootstrapped = false;
-      drm_output->flip_inflight = false;
-      output->repaint_pending = false;
-
-      VT_TRACE(backend->comp->log, "DRM: Recreated GBM/rendering surfaces of output (%ux%u@%.2f, ID: %i).",
-               output->width, output->height, output->refresh_rate, drm_output->conn_id);
-    }
-  }
+  VT_TRACE(backend->comp->log, "DRM: Resuming seat session (VT switch back)...");
 
 
-  if (backend->event_source) {
-    wl_event_source_remove(backend->event_source);
-    backend->event_source = NULL;
-  }
-  backend->event_source = wl_event_loop_add_fd(backend->comp->wl.evloop, 
-                                               backend->drm_fd, WL_EVENT_READABLE, _drm_dispatch, backend);
-
-  vt_comp_invalidate_all_surfaces(backend->comp);
-
-  struct vt_output_t* output, *tmp;
-  // Schedule repaint on all outputs
+  struct vt_output_t* output;
   wl_list_for_each(output, &backend->outputs, link_local) {
-    drm_output_state_t* drm_output = BACKEND_DATA(output, drm_output_state_t);
-    pixman_region32_clear(&output->damage);
-    pixman_region32_union_rect(&output->damage, &output->damage, 0, 0, output->width, output->height);
+    if (!output->user_data)
+      continue;
 
-    drm_output->needs_modeset = true;
-    drm_output->modeset_bootstrapped = true;
-    vt_comp_repaint_scene(backend->comp, output);
-    _drm_handle_frame_for_device(backend, output);
+    drm_output_state_t* drm_output = BACKEND_DATA(output, drm_output_state_t);
+    if (!drm_output->current_bo || drm_output->current_fb == 0)
+      continue;
+
+    VT_TRACE(backend->comp->log,
+             "DRM: Re-enabling CRTC %u with existing framebuffer %u for connector %u.",
+             drm_output->crtc_id, drm_output->current_fb, drm_output->conn_id);
+
+    // libseat has already called drmSetMaster() for us.
+    // we can safely re-enable CRTCs and resume rendering.
+    if (drmModeSetCrtc(backend->drm_fd, drm_output->crtc_id,
+                       drm_output->current_fb, 0, 0,
+                       &drm_output->conn_id, 1, &drm_output->mode) != 0) {
+      VT_ERROR(backend->comp->log,
+               "DRM: Failed to restore CRTC %u: %s",
+               drm_output->crtc_id, strerror(errno));
+      drm_output->needs_modeset = true;
+    } else {
+      drm_output->needs_modeset = false;
+    }
+
+    // mark the output for repaint on the next frame
+    output->needs_repaint = true;
+    drm_output->flip_inflight = false;
   }
+
+  if (!backend->event_source) {
+    backend->event_source = wl_event_loop_add_fd(
+      backend->comp->wl.evloop,
+      backend->drm_fd,
+      WL_EVENT_READABLE,
+      _drm_dispatch,
+      backend);
+  }
+
+  wl_list_for_each(output, &backend->outputs, link_local) {
+    pixman_region32_clear(&output->damage);
+    pixman_region32_union_rect(&output->damage, &output->damage,
+                               0, 0, output->width, output->height);
+    vt_comp_schedule_repaint(backend->comp, output);
+  }
+
   uint32_t t = vt_util_get_time_msec();
   vt_comp_frame_done_all(backend->comp, t);
   wl_display_flush_clients(backend->comp->wl.dsp);
-
 
   return true;
 }
@@ -485,7 +487,7 @@ _drm_create_output_for_device(drm_backend_state_t* drm, struct vt_output_t* outp
   output->renderer = drm->renderer;
 
   drm_master->x_ptr += output->width;
-  
+
   wl_list_insert(&drm->outputs, &output->link_local);
   wl_list_insert(&drm->comp->outputs, &output->link_global);
 
@@ -497,7 +499,7 @@ bool
 _drm_destroy_output_for_device(drm_backend_state_t* drm, struct vt_output_t* output) {
   if(!drm) return false;
   if(!output || !output->user_data) return false;
-  
+
   VT_TRACE(drm->comp->log, "DRM: Destroying output %p.\n", output);
 
   _drm_release_all_scanout(output);
@@ -511,7 +513,7 @@ _drm_destroy_output_for_device(drm_backend_state_t* drm, struct vt_output_t* out
 
 
   output->user_data = NULL;
-    
+
   wl_list_remove(&output->link_local);
 
   output = NULL;
@@ -583,52 +585,41 @@ _drm_on_session_terminate(struct wl_listener* listener, void* data) {
   wl_list_remove(&listener->link);
 }
 
-void _drm_on_seat_enable(struct wl_listener *listener, void *data) {
-  if(!data) return;
-  struct vt_session_t* session = (struct vt_session_t*)data;
-  struct vt_session_drm_t* session_drm = BACKEND_DATA(session, struct vt_session_drm_t); 
+void _drm_on_seat_disable(struct wl_listener* listener, void* data) {
+  if (!data)
+    return;
 
-  drm_backend_master_state_t *drm_master =
+  struct vt_session_t* session = (struct vt_session_t*)data;
+  drm_backend_master_state_t* drm_master =
     BACKEND_DATA(session->comp->backend, drm_backend_master_state_t);
-  drm_backend_state_t *drm;
 
-  wl_list_for_each(drm, &drm_master->backends, link) {
-    struct vt_device_drm_t *dev = _drm_find_device_by_gpu_path(session_drm, drm->gpu_path);
-    if (!dev) {
-      dev = VT_ALLOC(session->comp, sizeof(*dev));
-      wl_list_insert(&session_drm->devices, &dev->link);
-    }
+  VT_TRACE(session->comp->log, "DRM: Seat disable event (VT switch away)");
 
-    if (!vt_session_open_device_drm(session, dev, drm->gpu_path)) {
-      VT_ERROR(session->comp->log,
-               "DRM/SESSION: Failed to open device '%s'.", drm->gpu_path);
-      continue;
-    }
-
-    drm->drm_fd = dev->fd;
-    _drm_resume(drm);
-  }
-}
-
-void  
-_drm_on_seat_disable(struct wl_listener* listener, void* data) {
-  if(!data) return;
-  struct vt_session_t* session = (struct vt_session_t*)data;
-  struct vt_session_drm_t* session_drm = BACKEND_DATA(session, struct vt_session_drm_t); 
-
-  drm_backend_master_state_t* drm_master = BACKEND_DATA(session->comp->backend, drm_backend_master_state_t); 
   drm_backend_state_t* drm;
   wl_list_for_each(drm, &drm_master->backends, link) {
     _drm_suspend(drm);
   }
 
-  // Close all the devices
-  struct vt_device_drm_t* dev, *tmp_dev;
-  wl_list_for_each_safe(dev, tmp_dev, &session_drm->devices, link) {
-    if(!vt_session_close_device_drm(session, dev)) {
-      VT_ERROR(session->comp->log, "DRM/SESSION: Failed to close device (ID: %i)'.\n", dev->device_id);
-    }
+  VT_TRACE(session->comp->log, "DRM: Seat disable complete (devices paused, not closed).");
+}
+
+
+void _drm_on_seat_enable(struct wl_listener *listener, void *data) {
+  if (!data)
+    return;
+
+  struct vt_session_t* session = (struct vt_session_t*)data;
+  drm_backend_master_state_t* drm_master =
+    BACKEND_DATA(session->comp->backend, drm_backend_master_state_t);
+
+  VT_TRACE(session->comp->log, "DRM: Seat enable event (VT switch back)");
+
+  drm_backend_state_t* drm;
+  wl_list_for_each(drm, &drm_master->backends, link) {
+    _drm_resume(drm);
   }
+
+  VT_TRACE(session->comp->log, "DRM: Seat enable complete (devices resumed).");
 }
 
 bool 
@@ -637,6 +628,7 @@ _drm_handle_frame_for_device(drm_backend_state_t* drm, struct vt_output_t* outpu
   struct vt_compositor_t* comp = drm->comp;
 
   VT_TRACE(comp->log, "DRM: Handling frame...");
+  vt_comp_repaint_scene(comp, output);
 
   if (!drm->renderer) {
     VT_ERROR(comp->log, "DRM: Renderer backend not initialized before handling frame.");
@@ -778,7 +770,7 @@ backend_init_drm(struct vt_backend_t* backend) {
   struct vt_session_drm_t* session_drm = BACKEND_DATA(backend->comp->session, struct vt_session_drm_t); 
   drm_master->seat_enable_listener.notify = _drm_on_seat_enable; 
   wl_signal_add(&session_drm->ev_seat_enable, &drm_master->seat_enable_listener);
-  
+
   drm_master->seat_disable_listener.notify = _drm_on_seat_disable; 
   wl_signal_add(&session_drm->ev_seat_disable, &drm_master->seat_disable_listener);
 
@@ -851,7 +843,7 @@ backend_implement_drm(struct vt_compositor_t* comp) {
     .terminate = backend_terminate_drm,
     .prepare_output_frame = backend_prepare_output_frame_drm,
   };
-      
+
   comp->session->impl = (struct vt_session_interface_t){
     .init = vt_session_init_drm,
     .terminate = vt_session_terminate_drm
