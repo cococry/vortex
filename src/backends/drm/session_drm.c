@@ -14,7 +14,7 @@
 
 #include <linux/input-event-codes.h>
 
-#include "../../core/backend.h"
+#include "../../core/core_types.h"
 
 #define _VT_DRM_PRIMARY_MINOR_NAME  "card"
 

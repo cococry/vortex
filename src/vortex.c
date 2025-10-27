@@ -1,4 +1,4 @@
-#include "src/core/backend.h"
+#include "src/core/compositor.h"
 
 int main(int argc, char** argv) {
   struct vt_compositor_t* c = calloc(1, sizeof(*c));

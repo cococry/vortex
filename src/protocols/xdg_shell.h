@@ -1,20 +1,20 @@
 #pragma once
 
-#include "../core/backend.h"
+#include "../core/core_types.h"
 
-typedef enum {
+enum vt_xdg_surface_role_t {
   VT_XDG_SURFACE_TOPLEVEL = 0,
   VT_XDG_SURFACE_POPUP,
-} vt_xdg_surface_role_t;
+};
 
 typedef struct vt_xdg_surface_t vt_xdg_surface_t;
 
-typedef struct {
+struct vt_xdg_toplevel_t {
   struct wl_resource *xdg_toplevel_res; 
   char* app_id, *title;
 
   vt_xdg_surface_t* xdg_surf;
-} vt_xdg_toplevel_t;
+};
 
 struct vt_xdg_surface_t {
   struct wl_resource *xdg_surf_res;
@@ -23,7 +23,7 @@ struct vt_xdg_surface_t {
   struct vt_surface_t* surf;
 
   union {
-    vt_xdg_toplevel_t toplevel;
+    struct vt_xdg_toplevel_t toplevel;
   };
 };
 

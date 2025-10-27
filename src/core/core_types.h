@@ -24,38 +24,36 @@ struct vt_surface_t;
 struct vt_backend_t;
 struct vt_output_t;
 
-typedef struct {
+struct log_state_t {
   FILE* stream;
   bool verbose, quiet;
-} log_state_t;
+} ;
 
-typedef struct {
+struct wl_state_t {
   struct wl_display* dsp;
   struct wl_event_loop* evloop;
   struct wl_compositor* compositor;
-} wl_state_t;
+};
 
 
 typedef bool (*backend_implement_func_t)(struct vt_compositor_t* comp);
 
-typedef struct {
+struct vt_backend_interface_t {
   bool (*init)(struct vt_backend_t* backend);
   bool (*implement)(struct vt_compositor_t* comp);
   bool (*handle_frame)(struct vt_backend_t* backend, struct vt_output_t* output);
   bool (*prepare_output_frame)(struct vt_backend_t* backend, struct vt_output_t* output);
   bool (*terminate)(struct vt_backend_t* backend);
-} vt_backend_interface_t;
-
+};
 
 struct vt_backend_t {
   void* user_data;
-  vt_backend_interface_t impl;
+  struct vt_backend_interface_t impl;
 
   struct vt_compositor_t* comp;
 
   vt_backend_platform_t platform;
 };
-
 
 struct vt_output_t {
   struct wl_list link_local, link_global; 
@@ -79,11 +77,11 @@ struct vt_output_t {
 }; 
 
 struct vt_compositor_t {
-  wl_state_t  wl;
+  struct wl_state_t  wl;
   struct libinput* input;
 
   struct vt_backend_t* backend;
-  log_state_t log;
+  struct log_state_t log;
 
   struct wl_list surfaces; 
 
@@ -96,26 +94,8 @@ struct vt_compositor_t {
 
   struct wl_list outputs;
 
-  vt_arena_t arena;
+  struct vt_arena_t arena;
   
   struct vt_session_t* session;
 };
 
-
-bool vt_comp_init(struct vt_compositor_t *c, int argc, char** argv);
-
-void vt_comp_run(struct vt_compositor_t *c);
-
-uint32_t vt_comp_merge_damaged_regions(pixman_box32_t *merged, pixman_region32_t *region);
-
-bool vt_comp_terminate(struct vt_compositor_t *c);
-
-void vt_comp_frame_done(struct vt_compositor_t *c, struct vt_output_t* output, uint32_t t);
-
-void vt_comp_frame_done_all(struct vt_compositor_t *c, uint32_t t);
-
-void vt_comp_schedule_repaint(struct vt_compositor_t *c, struct vt_output_t* output);
-
-void vt_comp_repaint_scene(struct vt_compositor_t *c, struct vt_output_t* output);
-
-void vt_comp_invalidate_all_surfaces(struct vt_compositor_t *comp);

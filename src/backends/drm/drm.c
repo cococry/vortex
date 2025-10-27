@@ -23,12 +23,14 @@
 #include <pthread.h>
 
 #include "../../render/renderer.h"
+#include "../../core/compositor.h"
+
 #include "./drm.h"
 #include "./session_drm.h"
 
 #include <linux/input-event-codes.h>
 
-typedef struct {
+struct drm_backend_master_state_t {
   struct wl_list backends;
   uint32_t x_ptr;
   int32_t vt_fd;
@@ -36,9 +38,9 @@ typedef struct {
 
   struct wl_listener session_terminate_listener,
   seat_disable_listener, seat_enable_listener;
-} drm_backend_master_state_t;
+};
 
-typedef struct {
+struct drm_backend_state_t {
   int drm_fd;
   drmEventContext evctx;
   drmModeRes* res;
@@ -58,9 +60,9 @@ typedef struct {
   char gpu_path[64];
 
   struct wl_event_source *event_source 
-} drm_backend_state_t;
+};
 
-typedef struct {
+struct drm_output_state_t {
   struct gbm_bo *current_bo;
   struct gbm_bo *pending_bo;
   struct gbm_bo *prev_bo;
@@ -79,21 +81,21 @@ typedef struct {
   drmModeModeInfo mode;
   uint32_t conn_id;
   uint32_t crtc_id;
-} drm_output_state_t;
+};
 
 static void   _drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec, unsigned int usec, void *data);
 static void   _drm_release_all_scanout(struct vt_output_t* output);
 static void   _drm_handle_vt_release(int sig);
 static void   _drm_handle_vt_acquire(int sig);
-static bool   _drm_suspend(drm_backend_state_t* backend);
-static bool   _drm_resume(drm_backend_state_t* backend);
+static bool   _drm_suspend(struct drm_backend_state_t* backend);
+static bool   _drm_resume(struct drm_backend_state_t* backend);
 static int    _drm_dispatch(int fd, uint32_t mask, void *data);
-static bool   _drm_init_for_device(struct vt_compositor_t* comp, drm_backend_state_t* drm, int32_t device_fd, const char* gpu_path);
-static bool   _drm_init_active_outputs_for_device(drm_backend_state_t* drm);
-static bool   _drm_handle_frame_for_device(drm_backend_state_t* drm, struct vt_output_t* output);
-static bool   _drm_create_output_for_device(drm_backend_state_t* drm, struct vt_output_t* output, void* data);
-static bool   _drm_destroy_output_for_device(drm_backend_state_t* drm, struct vt_output_t* output);
-static bool   _drm_terminate_for_device(drm_backend_state_t* drm);
+static bool   _drm_init_for_device(struct vt_compositor_t* comp, struct drm_backend_state_t* drm, int32_t device_fd, const char* gpu_path);
+static bool   _drm_init_active_outputs_for_device(struct drm_backend_state_t* drm);
+static bool   _drm_handle_frame_for_device(struct drm_backend_state_t* drm, struct vt_output_t* output);
+static bool   _drm_create_output_for_device(struct drm_backend_state_t* drm, struct vt_output_t* output, void* data);
+static bool   _drm_destroy_output_for_device(struct drm_backend_state_t* drm, struct vt_output_t* output);
+static bool   _drm_terminate_for_device(struct drm_backend_state_t* drm);
 
 static void   _drm_on_session_terminate(struct wl_listener* listener, void* data); 
 static void   _drm_on_seat_enable(struct wl_listener* listener, void* data); 
@@ -103,7 +105,7 @@ void
 _drm_page_flip_handler(int fd, unsigned int frame,
                        unsigned int sec, unsigned int usec, void *data) {
   struct vt_output_t* output = (struct vt_output_t*)data; 
-  drm_output_state_t* drm_output = BACKEND_DATA(output, drm_output_state_t);
+  struct drm_output_state_t* drm_output = BACKEND_DATA(output, struct drm_output_state_t);
   struct vt_compositor_t* comp = output->backend->comp;
 
   VT_TRACE(comp->log, "DRM: _drm_page_flip_handler(): Handling page flip event.")
@@ -144,8 +146,8 @@ _drm_page_flip_handler(int fd, unsigned int frame,
 
 void 
 _drm_release_all_scanout(struct vt_output_t* output) {
-  drm_backend_state_t* drm = BACKEND_DATA(output->backend, drm_backend_state_t);
-  drm_output_state_t* drm_output = BACKEND_DATA(output, drm_output_state_t) ;
+  struct drm_backend_state_t* drm = BACKEND_DATA(output->backend, struct drm_backend_state_t);
+  struct drm_output_state_t* drm_output = BACKEND_DATA(output, struct drm_output_state_t) ;
 
   // Basically release all used DRM scanout buffers  
   if (drm_output->pending_bo) {
@@ -166,7 +168,7 @@ _drm_release_all_scanout(struct vt_output_t* output) {
 }
 
 bool 
-_drm_suspend(drm_backend_state_t* backend) {
+_drm_suspend(struct drm_backend_state_t* backend) {
   if (!backend)
     return false;
   if (backend->comp->suspended)
@@ -188,7 +190,7 @@ _drm_suspend(drm_backend_state_t* backend) {
     wl_list_for_each(output, &backend->outputs, link_local) {
       if (!output->user_data)
         continue;
-      drm_output_state_t* drm_output = BACKEND_DATA(output, drm_output_state_t);
+      struct drm_output_state_t* drm_output = BACKEND_DATA(output, struct drm_output_state_t);
       if (drm_output->flip_inflight) {
         any_inflight = true;
         break;
@@ -203,7 +205,7 @@ _drm_suspend(drm_backend_state_t* backend) {
     if (!output->user_data)
       continue;
 
-    drm_output_state_t* drm_output = BACKEND_DATA(output, drm_output_state_t);
+    struct drm_output_state_t* drm_output = BACKEND_DATA(output, struct drm_output_state_t);
 
     VT_TRACE(backend->comp->log, 
              "DRM: Disabling CRTC %u for connector %u.", 
@@ -218,7 +220,7 @@ _drm_suspend(drm_backend_state_t* backend) {
 
 
 bool 
-_drm_resume(drm_backend_state_t* backend) {
+_drm_resume(struct drm_backend_state_t* backend) {
   if (!backend)
     return false;
   if (!backend->comp->suspended)
@@ -233,7 +235,7 @@ _drm_resume(drm_backend_state_t* backend) {
     if (!output->user_data)
       continue;
 
-    drm_output_state_t* drm_output = BACKEND_DATA(output, drm_output_state_t);
+    struct drm_output_state_t* drm_output = BACKEND_DATA(output, struct drm_output_state_t);
     if (!drm_output->current_bo || drm_output->current_fb == 0)
       continue;
 
@@ -285,7 +287,7 @@ _drm_resume(drm_backend_state_t* backend) {
 int  
 _drm_dispatch(int fd, uint32_t mask, void *data) {
   if(!data) return 0;
-  drm_backend_state_t* drm = (drm_backend_state_t*)data;
+  struct drm_backend_state_t* drm = (struct drm_backend_state_t*)data;
   drmHandleEvent(fd, &drm->evctx);
   return 0;
 }
@@ -298,7 +300,7 @@ static struct vt_device_drm_t* _drm_find_device_by_gpu_path(struct vt_session_dr
   return NULL;
 }
 
-bool _drm_init_for_device(struct vt_compositor_t* comp, drm_backend_state_t* drm, int32_t device_fd, const char* gpu_path) {
+bool _drm_init_for_device(struct vt_compositor_t* comp, struct drm_backend_state_t* drm, int32_t device_fd, const char* gpu_path) {
   if(!drm) return false;
   wl_list_init(&drm->outputs);
 
@@ -338,7 +340,7 @@ bool _drm_init_for_device(struct vt_compositor_t* comp, drm_backend_state_t* drm
 }
 
 bool 
-_drm_init_active_outputs_for_device(drm_backend_state_t* drm) {
+_drm_init_active_outputs_for_device(struct drm_backend_state_t* drm) {
   if(!drm) return false;
   struct vt_compositor_t* comp = drm->comp;
 
@@ -392,11 +394,11 @@ _drm_init_active_outputs_for_device(drm_backend_state_t* drm) {
 }
 
 bool 
-_drm_create_output_for_device(drm_backend_state_t* drm, struct vt_output_t* output, void* data) {
+_drm_create_output_for_device(struct drm_backend_state_t* drm, struct vt_output_t* output, void* data) {
   if(!drm || !output || !data) return false;
 
   VT_TRACE(drm->comp->log, "DMR: Creating DRM internal output.");
-  if(!(output->user_data = VT_ALLOC(drm->comp, sizeof(drm_output_state_t)))) {
+  if(!(output->user_data = VT_ALLOC(drm->comp, sizeof(struct drm_output_state_t)))) {
     return false;
   }
 
@@ -414,7 +416,7 @@ _drm_create_output_for_device(drm_backend_state_t* drm, struct vt_output_t* outp
     // Fallback to the first mode if none marked preferred
     mode = conn->modes[0];
   }
-  drm_output_state_t* drm_output  = BACKEND_DATA(output, drm_output_state_t);
+  struct drm_output_state_t* drm_output  = BACKEND_DATA(output, struct drm_output_state_t);
   drmModeModeInfo preferred_mode  = mode; 
   struct vt_compositor_t* comp    = drm->comp; 
 
@@ -473,7 +475,7 @@ _drm_create_output_for_device(drm_backend_state_t* drm, struct vt_output_t* outp
            drm_output->conn_id, drm_output->crtc_id,
            drm_output->mode.hdisplay, drm_output->mode.vdisplay, drm_output->mode.vrefresh, output);
 
-  drm_backend_master_state_t* drm_master = BACKEND_DATA(output->backend, drm_backend_master_state_t); 
+  struct drm_backend_master_state_t* drm_master = BACKEND_DATA(output->backend, struct drm_backend_master_state_t); 
   // TODO: Implement correct output layouting e.g vertical monitors
   output->width = (uint32_t)drm_output->mode.hdisplay; 
   output->height = (uint32_t)drm_output->mode.vdisplay; 
@@ -496,14 +498,14 @@ _drm_create_output_for_device(drm_backend_state_t* drm, struct vt_output_t* outp
 }
 
 bool   
-_drm_destroy_output_for_device(drm_backend_state_t* drm, struct vt_output_t* output) {
+_drm_destroy_output_for_device(struct drm_backend_state_t* drm, struct vt_output_t* output) {
   if(!drm) return false;
   if(!output || !output->user_data) return false;
 
   VT_TRACE(drm->comp->log, "DRM: Destroying output %p.\n", output);
 
   _drm_release_all_scanout(output);
-  drm_output_state_t* drm_output = BACKEND_DATA(output, drm_output_state_t);
+  struct drm_output_state_t* drm_output = BACKEND_DATA(output, struct drm_output_state_t);
   if (drm_output->gbm_surf) {
     gbm_surface_destroy(drm_output->gbm_surf);
     drm_output->gbm_surf = NULL;
@@ -522,7 +524,7 @@ _drm_destroy_output_for_device(drm_backend_state_t* drm, struct vt_output_t* out
 }
 
 static bool 
-_drm_terminate_for_device(drm_backend_state_t* drm) {
+_drm_terminate_for_device(struct drm_backend_state_t* drm) {
   if(!drm) return false;
   struct vt_compositor_t* comp = drm->comp; 
 
@@ -532,7 +534,7 @@ _drm_terminate_for_device(drm_backend_state_t* drm) {
       any_inflight = false;
       struct vt_output_t* output;
       wl_list_for_each(output, &drm->outputs, link_local) {
-        if (BACKEND_DATA(output, drm_output_state_t)->flip_inflight) {
+        if (BACKEND_DATA(output, struct drm_output_state_t)->flip_inflight) {
           any_inflight = true;
           break;
         }
@@ -590,12 +592,12 @@ void _drm_on_seat_disable(struct wl_listener* listener, void* data) {
     return;
 
   struct vt_session_t* session = (struct vt_session_t*)data;
-  drm_backend_master_state_t* drm_master =
-    BACKEND_DATA(session->comp->backend, drm_backend_master_state_t);
+  struct drm_backend_master_state_t* drm_master =
+    BACKEND_DATA(session->comp->backend, struct drm_backend_master_state_t);
 
   VT_TRACE(session->comp->log, "DRM: Seat disable event (VT switch away)");
 
-  drm_backend_state_t* drm;
+  struct drm_backend_state_t* drm;
   wl_list_for_each(drm, &drm_master->backends, link) {
     _drm_suspend(drm);
   }
@@ -609,12 +611,12 @@ void _drm_on_seat_enable(struct wl_listener *listener, void *data) {
     return;
 
   struct vt_session_t* session = (struct vt_session_t*)data;
-  drm_backend_master_state_t* drm_master =
-    BACKEND_DATA(session->comp->backend, drm_backend_master_state_t);
+  struct drm_backend_master_state_t* drm_master =
+    BACKEND_DATA(session->comp->backend, struct drm_backend_master_state_t);
 
   VT_TRACE(session->comp->log, "DRM: Seat enable event (VT switch back)");
 
-  drm_backend_state_t* drm;
+  struct drm_backend_state_t* drm;
   wl_list_for_each(drm, &drm_master->backends, link) {
     _drm_resume(drm);
   }
@@ -623,7 +625,7 @@ void _drm_on_seat_enable(struct wl_listener *listener, void *data) {
 }
 
 bool 
-_drm_handle_frame_for_device(drm_backend_state_t* drm, struct vt_output_t* output) {
+_drm_handle_frame_for_device(struct drm_backend_state_t* drm, struct vt_output_t* output) {
   if(!drm || !output) return false;
   struct vt_compositor_t* comp = drm->comp;
 
@@ -635,7 +637,7 @@ _drm_handle_frame_for_device(drm_backend_state_t* drm, struct vt_output_t* outpu
     return false;
   }
 
-  drm_output_state_t* drm_output = BACKEND_DATA(output, drm_output_state_t); 
+  struct drm_output_state_t* drm_output = BACKEND_DATA(output, struct drm_output_state_t); 
 
   // Retrieve the front buffer that we rendered to with the renderer 
   struct gbm_bo *bo = gbm_surface_lock_front_buffer(drm_output->gbm_surf);
@@ -751,11 +753,11 @@ _drm_handle_frame_for_device(drm_backend_state_t* drm, struct vt_output_t* outpu
 bool
 backend_init_drm(struct vt_backend_t* backend) {
   if(!backend || !backend->comp || !backend->comp->session) return false;
-  if(!(backend->user_data = VT_ALLOC(backend->comp, sizeof(drm_backend_master_state_t))))  {
+  if(!(backend->user_data = VT_ALLOC(backend->comp, sizeof(struct drm_backend_master_state_t))))  {
     return false;
   }
 
-  drm_backend_master_state_t* drm_master = BACKEND_DATA(backend, drm_backend_master_state_t); 
+  struct drm_backend_master_state_t* drm_master = BACKEND_DATA(backend, struct drm_backend_master_state_t); 
   drm_master->comp = backend->comp;
 
   wl_list_init(&drm_master->backends);
@@ -780,7 +782,7 @@ backend_init_drm(struct vt_backend_t* backend) {
   uint32_t n_gpus = vt_session_enumerate_cards_drm(backend->comp->session, gpus, max_gpus);
 
   for(uint32_t i = 0; i < n_gpus; i++) {
-    drm_backend_state_t* drm_backend = VT_ALLOC(backend->comp, sizeof(drm_backend_state_t));
+    struct drm_backend_state_t* drm_backend = VT_ALLOC(backend->comp, sizeof(struct drm_backend_state_t));
     drm_backend->root_backend = backend;
     if(!_drm_init_for_device(backend->comp, drm_backend, gpus[i]->fd, gpus[i]->path)) {
       VT_ERROR(backend->comp->log, "DRM: Failed to initialize DRM backend for GPU (%i).", gpus[i]->fd);
@@ -796,8 +798,8 @@ bool
 backend_handle_frame_drm(struct vt_backend_t* backend, struct vt_output_t* output) {
   if(!backend || !backend->user_data) return false;
 
-  drm_backend_master_state_t* drm_master = BACKEND_DATA(backend, drm_backend_master_state_t); 
-  drm_backend_state_t* drm;
+  struct drm_backend_master_state_t* drm_master = BACKEND_DATA(backend, struct drm_backend_master_state_t); 
+  struct drm_backend_state_t* drm;
   wl_list_for_each(drm, &drm_master->backends, link) {
     _drm_handle_frame_for_device(drm, output);
   }
@@ -807,8 +809,8 @@ backend_handle_frame_drm(struct vt_backend_t* backend, struct vt_output_t* outpu
 bool
 backend_terminate_drm(struct vt_backend_t* backend) {
   struct vt_device_drm_t* dev, *tmp_dev;
-  drm_backend_master_state_t* drm_master = BACKEND_DATA(backend, drm_backend_master_state_t); 
-  drm_backend_state_t* drm;
+  struct drm_backend_master_state_t* drm_master = BACKEND_DATA(backend, struct drm_backend_master_state_t); 
+  struct drm_backend_state_t* drm;
   wl_list_for_each(drm, &drm_master->backends, link) {
     _drm_terminate_for_device(drm);
   }
@@ -822,7 +824,7 @@ backend_terminate_drm(struct vt_backend_t* backend) {
 bool 
 backend_prepare_output_frame_drm(struct vt_backend_t* backend, struct vt_output_t* output) {
   (void)backend;
-  drm_output_state_t* drm_output = BACKEND_DATA(output, drm_output_state_t);
+  struct drm_output_state_t* drm_output = BACKEND_DATA(output, struct drm_output_state_t);
   if(drm_output->flip_inflight) return false;
   if(!output->needs_repaint && drm_output->modeset_bootstrapped) return false;
 
@@ -837,7 +839,7 @@ backend_implement_drm(struct vt_compositor_t* comp) {
 
   comp->backend->platform = VT_BACKEND_DRM_GBM; 
 
-  comp->backend->impl = (vt_backend_interface_t){
+  comp->backend->impl = (struct vt_backend_interface_t){
     .init = backend_init_drm,
     .handle_frame = backend_handle_frame_drm,
     .terminate = backend_terminate_drm,

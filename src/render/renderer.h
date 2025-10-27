@@ -1,12 +1,12 @@
 #pragma once
 
-#include "../core/backend.h"
+#include "../core/core_types.h"
 
-typedef enum {
+enum vt_rendering_backend_t {
   VT_RENDERING_BACKEND_EGL_OPENGL = 0,
-} vt_rendering_backend_t;
+};
 
-typedef struct {
+struct vt_renderer_interface_t {
   bool (*init)(struct vt_backend_t* backend, struct vt_renderer_t* r, void* native_handle);
   bool (*setup_renderable_output)(struct vt_renderer_t* r, struct vt_output_t* output);
   bool (*resize_renderable_output)(struct vt_renderer_t* r, struct vt_output_t* output, int32_t w, int32_t h);
@@ -26,12 +26,12 @@ typedef struct {
   void (*end_scene)(struct vt_renderer_t* r, struct vt_output_t* output);
   void (*end_frame)(struct vt_renderer_t* r, struct vt_output_t* output, const pixman_box32_t* damaged, int32_t n_damaged);
   bool (*destroy)(struct vt_renderer_t* r);
-} vt_renderer_interface_t;
+};
 
 struct vt_renderer_t {
-  vt_renderer_interface_t impl;
+  struct vt_renderer_interface_t impl;
 
-  vt_rendering_backend_t rendering_backend;
+  enum vt_rendering_backend_t rendering_backend;
   struct vt_compositor_t* comp;
   void *user_data;
 
@@ -40,4 +40,4 @@ struct vt_renderer_t {
   uint32_t _desired_render_buffer_format;
 };
 
-void vt_renderer_implement(struct vt_renderer_t* renderer, vt_rendering_backend_t backend);
+void vt_renderer_implement(struct vt_renderer_t* renderer, enum vt_rendering_backend_t backend);

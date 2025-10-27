@@ -3,14 +3,13 @@
 #define VT_MAX_FRAME_CBS 8 
 
 #include <stdint.h>
-#include "backend.h"
+#include "core_types.h"
 
-typedef struct {
+struct vt_frame_cb_pool {
   struct wl_resource* cbs[VT_MAX_FRAME_CBS];
   uint32_t n_cbs;
-} vt_frame_cb_pool;
+};
 
-typedef struct vt_surface_t vt_surface_t;
 struct vt_surface_t {
   struct wl_resource* surf_res;
   struct wl_resource* buf_res;
@@ -36,5 +35,5 @@ struct vt_surface_t {
   pixman_region32_t current_damage, pending_damage;
   bool damaged;
 
-  vt_frame_cb_pool cb_pool;
+  struct vt_frame_cb_pool cb_pool;
 };

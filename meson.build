@@ -57,11 +57,11 @@ runara_dep = runara_sp.get_variable('runara_dep')
 
 
 vortex_src = files('src/vortex.c', 
-'src/compositor.c', 
 'src/vortex.c', 
 'src/render/renderer.c', 
 'src/render/gl/egl_gl46.c', 
 'src/protocols/xdg_shell.c', 
+'src/core/compositor.c', 
 'src/core/util.c',
 'src/core/surface.c',
 'src/core/scene.c',

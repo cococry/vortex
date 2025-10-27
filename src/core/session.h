@@ -7,7 +7,7 @@ typedef enum {
   VT_BACKEND_SURFACELESS,
 } vt_backend_platform_t;
 
-#include "backend.h"
+#include "core_types.h"
 
 struct vt_session_t;
 

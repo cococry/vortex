@@ -22,14 +22,14 @@ vt_util_get_time_msec(void) {
 }
 
 void 
-vt_util_arena_init(vt_arena_t* a, size_t capacity) {
+vt_util_arena_init(struct vt_arena_t* a, size_t capacity) {
   a->base = (uint8_t*)malloc(capacity);
   a->offset = 0;
   a->capacity = capacity;
 }
 
 void*
-vt_util_alloc(vt_arena_t* a, size_t size)  {
+vt_util_alloc(struct vt_arena_t* a, size_t size)  {
   size = (size + 7u) & ~7u;
   if (a->offset + size > a->capacity) {
     fprintf(stderr, "[vortex]: warning: arena violated.\n");
@@ -43,12 +43,12 @@ vt_util_alloc(vt_arena_t* a, size_t size)  {
 }
 
 void
-vt_util_arena_reset(vt_arena_t* a) {
+vt_util_arena_reset(struct vt_arena_t* a) {
   a->offset = 0;
 }
 
 void 
-vt_util_arena_destroy(vt_arena_t* a) {
+vt_util_arena_destroy(struct vt_arena_t* a) {
   free(a->base);
   a->base = NULL;
   a->capacity = a->offset = 0;

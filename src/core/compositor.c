@@ -1,7 +1,6 @@
 #define _GNU_SOURCE
-#include "core/backend.h"
-#include "core/scene.h"
-#include "protocols/xdg_shell.h"
+#include "core_types.h"
+#include "src/protocols/xdg_shell.h"
 
 #include <linux/vt.h>
 #include <sys/ioctl.h>
@@ -14,14 +13,16 @@
 #include <glad.h>
 #include <wayland-server.h>
 
-#include "render/renderer.h"
+#include "src/render/renderer.h"
 #include "config.h"
+#include "scene.h"
+
+#include "compositor.h"
 
 static void _vt_comp_frame_handler(void* data);
 
 static bool _vt_comp_render_output(struct vt_compositor_t* c, struct vt_output_t* output);
 
-static const char* _vt_comp_handle_cmd_flags(struct vt_compositor_t* c, int argc, char** argv);
 
 static void _vt_comp_log_help();
 
@@ -30,11 +31,10 @@ static bool _vt_comp_wl_init(struct vt_compositor_t* c);
 static void  _vt_comp_wl_bind(struct wl_client *client, void *data,
                            uint32_t version, uint32_t id);
 
-static void _vt_comp_load_backend(struct vt_compositor_t* c, const char* backend_name, const char* backend_path);
 
-static void _vt_comp_associate_surface_with_output(struct vt_compositor_t* c, vt_surface_t* surf, struct vt_output_t* output);
+static void _vt_comp_associate_surface_with_output(struct vt_compositor_t* c, struct vt_surface_t* surf, struct vt_output_t* output);
 
-static struct vt_renderer_t* _vt_comp_get_renderer_from_surface(vt_surface_t* surf);
+static struct vt_renderer_t* _vt_comp_get_renderer_from_surface(struct vt_surface_t* surf);
 
 void _vt_comp_wl_surface_create(
   struct wl_client *client,
@@ -195,7 +195,7 @@ vt_comp_frame_done(struct vt_compositor_t *c, struct vt_output_t* output, uint32
   // wl_callback_send_done. 
   //
   // [!] This is the mechanism by which we achive vblank frame pacing.
-  vt_surface_t *surf;
+  struct vt_surface_t *surf;
   wl_list_for_each(surf, &c->surfaces, link) {
     if(!surf->needs_frame_done) continue; 
 
@@ -226,7 +226,7 @@ vt_comp_frame_done_all(struct vt_compositor_t *c, uint32_t t) {
   // each frame pending callback (since the last page flip) and 
   // let the client know we're done rendering their frames by calling 
   // wl_callback_send_done
-  vt_surface_t *surf;
+  struct vt_surface_t *surf;
   wl_list_for_each(surf, &c->surfaces, link) {
     if(!surf->needs_frame_done) continue; 
 
@@ -446,7 +446,7 @@ _vt_comp_load_backend(struct vt_compositor_t* c, const char* backend_name, const
   }
 }
 
-void _vt_comp_associate_surface_with_output(struct vt_compositor_t* c, vt_surface_t* surf, struct vt_output_t* output) {
+void _vt_comp_associate_surface_with_output(struct vt_compositor_t* c, struct vt_surface_t* surf, struct vt_output_t* output) {
   // Skip if surface and output don’t intersect
   if (surf->x + surf->width  <= output->x ||
     surf->x >= output->x + output->width ||
@@ -457,7 +457,7 @@ void _vt_comp_associate_surface_with_output(struct vt_compositor_t* c, vt_surfac
 }
 
 struct vt_renderer_t* 
-_vt_comp_get_renderer_from_surface(vt_surface_t* surf) {
+_vt_comp_get_renderer_from_surface(struct vt_surface_t* surf) {
   struct vt_output_t* output;
   wl_list_for_each(output, &surf->comp->outputs, link_global) {
     if(!(surf->_mask_outputs_visible_on & (1u << output->id))) continue;
@@ -474,7 +474,7 @@ _vt_comp_wl_surface_create(
   struct vt_compositor_t* c = wl_resource_get_user_data(resource);
   VT_TRACE(c->log, "Got compositor.surface_create: Started managing surface.")
   // Allocate the struct to store protocol information about the surface
-  vt_surface_t* surf = VT_ALLOC(c, sizeof(*surf));
+  struct vt_surface_t* surf = VT_ALLOC(c, sizeof(*surf));
   surf->comp = c;
   surf->x = 20;
   surf->y = 20;
@@ -515,7 +515,7 @@ _vt_comp_wl_surface_attach(
   int32_t y) {
   // When a client attaches an allocated buffer, store the resource handle 
   // in the surface struct
-  vt_surface_t* surf = wl_resource_get_user_data(resource);
+  struct vt_surface_t* surf = wl_resource_get_user_data(resource);
   if(!surf) {
     VT_ERROR(surf->comp->log, "compositor.surface_attach: No internal surface data allocated.")
     return;
@@ -528,7 +528,7 @@ void
 _vt_comp_wl_surface_commit(
   struct wl_client *client,
   struct wl_resource *resource) {
-  vt_surface_t* surf = wl_resource_get_user_data(resource);
+  struct vt_surface_t* surf = wl_resource_get_user_data(resource);
   if(!surf) {
     VT_ERROR(surf->comp->log, "compositor.surface_attach: No internal surface data allocated.")
     return;
@@ -621,7 +621,7 @@ _vt_comp_wl_surface_frame(
   struct wl_client *client,
   struct wl_resource *resource,
   uint32_t callback) {
-  vt_surface_t* surf = wl_resource_get_user_data(resource);
+  struct vt_surface_t* surf = wl_resource_get_user_data(resource);
   if(!surf) {
     VT_ERROR(surf->comp->log, "compositor.surface_frame: No internal surface data allocated.")
     return;
@@ -654,7 +654,7 @@ _vt_comp_wl_surface_damage(
   int32_t y,
   int32_t width,
   int32_t height) {
-  vt_surface_t* surf = wl_resource_get_user_data(resource);
+  struct vt_surface_t* surf = wl_resource_get_user_data(resource);
   if(!surf) {
     VT_ERROR(surf->comp->log, "compositor.surface_damage: No internal surface data allocated.")
     return;
@@ -674,7 +674,7 @@ _vt_comp_wl_surface_damage_buffer(struct wl_client *client,
                                int32_t y,
                                int32_t width,
                                int32_t height) {
-  vt_surface_t* surf = wl_resource_get_user_data(resource);
+  struct vt_surface_t* surf = wl_resource_get_user_data(resource);
   if(!surf) {
     VT_ERROR(surf->comp->log, "compositor.surface_damage: No internal surface data allocated.")
     return;
@@ -728,7 +728,7 @@ _vt_comp_wl_surface_offset(struct wl_client *client,
 void
 _vt_comp_wl_surface_destroy(struct wl_client *client,
                          struct wl_resource *resource) {
-  struct vt_surface_t* surf = ((vt_surface_t*)wl_resource_get_user_data(resource));
+  struct vt_surface_t* surf = ((struct vt_surface_t*)wl_resource_get_user_data(resource));
   
   VT_TRACE(surf->comp->log, 
             "Got surface.destroy: Destroying surface resource.")
@@ -738,7 +738,7 @@ _vt_comp_wl_surface_destroy(struct wl_client *client,
 
 void 
 _vt_comp_wl_surface_handle_resource_destroy(struct wl_resource* resource) {
-  vt_surface_t* surf = wl_resource_get_user_data(resource);
+  struct vt_surface_t* surf = wl_resource_get_user_data(resource);
   int32_t x = surf->x;
   int32_t y = surf->y;
   int32_t w = surf->width;
@@ -855,6 +855,7 @@ _vt_comp_wl_init(struct vt_compositor_t* c) {
   return true;
 }
 
+
 bool
 vt_comp_init(struct vt_compositor_t* c, int argc, char** argv) {
   vt_util_arena_init(&c->arena, 1024 * 1024 * 2);
@@ -904,7 +905,7 @@ vt_comp_init(struct vt_compositor_t* c, int argc, char** argv) {
     vt_comp_schedule_repaint(c, output);
   }
 
-  vt_scene_node_t* root = vt_scene_node_create(c, 0, 0, output->width, output->height);
+  struct vt_scene_node_t* root = vt_scene_node_create(c, 0, 0, output->width, output->height);
  
   vt_scene_node_add_child(c, root, vt_scene_node_create(c, 20, 20, 20, 20));
 
@@ -1008,7 +1009,7 @@ void vt_comp_repaint_scene(struct vt_compositor_t *c, struct vt_output_t *output
   r->impl.begin_scene(r, output);
   r->impl.set_clear_color(r, output, 0xffffff);
 
-  vt_surface_t* surf;
+  struct vt_surface_t* surf;
   wl_list_for_each_reverse(surf, &c->surfaces, link) {
     if(!surf->damaged) continue;
     if (surf->x + surf->width  <= output->x ||
@@ -1034,7 +1035,7 @@ void vt_comp_invalidate_all_surfaces(struct vt_compositor_t *comp) {
 
   VT_TRACE(comp->log, "Invalidating all surface GPU imports...");
 
-  vt_surface_t *surf, *tmp;
+  struct vt_surface_t *surf, *tmp;
   wl_list_for_each_safe(surf, tmp, &comp->surfaces, link) {
     // Destroy GPU texture if renderer has one
     if (surf->tex.id) {

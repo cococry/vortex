@@ -1,6 +1,6 @@
 #pragma once
 
-#include "../../core/backend.h"
+#include "../../core/core_types.h"
 
 bool backend_init_wl(struct vt_backend_t* backend);
 

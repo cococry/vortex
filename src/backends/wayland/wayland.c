@@ -12,6 +12,7 @@
 
 #include "xdg-shell-client-protocol.h"
 #include "../../render/renderer.h"
+#include "../../core/compositor.h"
 
 #define _WL_DEFAULT_OUTPUT_WIDTH 1280
 #define _WL_DEFAULT_OUTPUT_HEIGHT 720
@@ -288,7 +289,7 @@ backend_implement_wl(struct vt_compositor_t* comp) {
   VT_TRACE(comp->log, "WL: Implementing backend...");
 
   comp->backend->platform = VT_BACKEND_WAYLAND; 
-  comp->backend->impl = (vt_backend_interface_t){
+  comp->backend->impl = (struct vt_backend_interface_t){
     .init = backend_init_wl,
     .handle_frame = backend_handle_frame_wl,
     .terminate = backend_terminate_wl,

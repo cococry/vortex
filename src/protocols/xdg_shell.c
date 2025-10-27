@@ -2,7 +2,7 @@
 
 #include "xdg_shell.h"
 
-#include "../core/backend.h"
+#include "../core/core_types.h"
 #include "xdg-shell-protocol.h" 
 
 #include <string.h>
@@ -244,7 +244,7 @@ _xdg_wm_base_get_xdg_surface(struct wl_client *client,
   struct wl_resource* xdg_surf_res = wl_resource_create(client, &xdg_surface_interface,
                                                     wl_resource_get_version(resource), id);
 
-  vt_surface_t* surf =  wl_resource_get_user_data(surface_res);
+  struct vt_surface_t* surf =  wl_resource_get_user_data(surface_res);
   vt_xdg_surface_t* xdg_surf = VT_ALLOC(surf->comp, sizeof(*xdg_surf));
   xdg_surf->surf = surf;
   xdg_surf->xdg_surf_res = xdg_surf_res;
@@ -398,7 +398,7 @@ _xdg_toplevel_set_title(struct wl_client *client,
                                 struct wl_resource *resource,
                                 const char *title)
 {
-  vt_xdg_toplevel_t* top = wl_resource_get_user_data(resource);
+  struct vt_xdg_toplevel_t* top = wl_resource_get_user_data(resource);
   if (top->title)
     free(top->title);
   top->title = strdup(title ? title : "");
@@ -409,7 +409,7 @@ _xdg_toplevel_set_app_id(struct wl_client *client,
                                  struct wl_resource *resource,
                                  const char *app_id)
 {
-  vt_xdg_toplevel_t* top = wl_resource_get_user_data(resource);
+  struct vt_xdg_toplevel_t* top = wl_resource_get_user_data(resource);
   if (top->app_id)
     free(top->app_id);
   top->app_id = strdup(app_id ? app_id : "");

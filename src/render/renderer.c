@@ -4,9 +4,9 @@
 #include "gl/egl_gl46.h"
 
 void 
-vt_renderer_implement(struct vt_renderer_t* renderer, vt_rendering_backend_t backend) {
+vt_renderer_implement(struct vt_renderer_t* renderer, enum vt_rendering_backend_t backend) {
   if(backend == VT_RENDERING_BACKEND_EGL_OPENGL) {
-    renderer->impl = (vt_renderer_interface_t){
+    renderer->impl = (struct vt_renderer_interface_t){
       .init = renderer_init_egl, 
       .setup_renderable_output = renderer_setup_renderable_output_egl, 
       .resize_renderable_output = renderer_resize_renderable_output_egl,

@@ -75,20 +75,20 @@ void vt_util_log_header(FILE* stream, log_level_t lvl);
 
 char* vt_util_log_get_filepath();
 
-typedef struct vt_arena {
+struct vt_arena_t {
     uint8_t *base;
     size_t   offset;
     size_t   capacity;
-} vt_arena_t;
+};
 
 uint64_t vt_util_get_time_msec(void);
 
-void vt_util_arena_init(vt_arena_t *a, size_t capacity);
+void vt_util_arena_init(struct vt_arena_t *a, size_t capacity);
 
-void* vt_util_alloc(vt_arena_t *a, size_t size);
+void* vt_util_alloc(struct vt_arena_t *a, size_t size);
 
-void vt_util_arena_reset(vt_arena_t *a);
+void vt_util_arena_reset(struct vt_arena_t *a);
 
-void vt_util_arena_destroy(vt_arena_t *a);
+void vt_util_arena_destroy(struct vt_arena_t *a);
 
 void vt_util_emit_signal(struct wl_signal *signal, void *data);
