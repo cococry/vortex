@@ -1,8 +1,10 @@
 #define _GNU_SOURCE
+#include <string.h>
 #include "session_drm.h"
 
 #include <fcntl.h>
 #include <unistd.h>
+#include <stdlib.h>
 #include <stdlib.h>
 #include <errno.h>
 #include <stdarg.h>
@@ -11,8 +13,8 @@
 #include <drm/drm.h>
 #include <drm/drm_mode.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 
-#include <linux/input-event-codes.h>
 
 #include "../../core/core_types.h"
 
@@ -23,14 +25,10 @@ static void                   _vt_session_seat_enable(struct libseat *seat, void
 static void                   _vt_session_seat_disable(struct libseat *seat, void* userdata);
 static int32_t                _vt_session_seat_dispatch(int fd, uint32_t mask, void* data);
 
-static int32_t                _vt_session_input_open_restricted(const char* path, int32_t flags, void* user_data); 
-static void                   _vt_session_input_close_restricted(int32_t fd, void* user_data);
-static int32_t                _vt_session_input_dispatch(int fd, uint32_t mask, void *data);
-
 static bool                   _vt_session_drm_card_valid(const char* sysname);
 static int32_t                _vt_session_drm_udev_dispatch(int fd, uint32_t mask, void *data);
 static struct udev_enumerate* _vt_session_drm_udev_enumerate_cards(struct vt_session_t* session);
-static struct vt_device_drm_t*    _vt_session_drm_open_device_if_kms(struct vt_session_t* session, const char* path);
+static struct vt_device_t*    _vt_session_drm_open_device_if_kms(struct vt_session_t* session, const char* path);
 /*                            The two functions below are equivalent to drmIsKMS() and drmIoctl(), 
  *                            we are self implementing them as to not bring in libdrm as a hard dep.*/
 static bool                   _vt_session_drm_card_is_kms(int32_t fd);
@@ -67,10 +65,6 @@ struct wait_for_gpu_handler_t {
 };
 
 
-static const struct libinput_interface input_interface = {
-  .close_restricted = _vt_session_input_close_restricted,
-  .open_restricted = _vt_session_input_open_restricted
-};
 
 static struct vt_compositor_t* _log_comp_ptr = NULL;
 
@@ -141,69 +135,6 @@ _vt_session_seat_dispatch(int fd, uint32_t mask, void* data) {
   return 0;
 }
 
-int32_t 
-_vt_session_input_open_restricted(const char* path, int32_t flags, void* user_data) {
-  int fd = open(path, flags);
-  return fd < 0 ? -errno : fd;
-}
-
-void 
-_vt_session_input_close_restricted(int32_t fd, void* user_data) {
-  close(fd);
-}
-
-int32_t  
-_vt_session_input_dispatch(int fd, uint32_t mask, void *data) {
-  if(!data) return 0;
-  struct vt_session_t* session = data;
-  if(!session->active) return 0;
-  struct vt_session_drm_t* session_drm = BACKEND_DATA(session, struct vt_session_drm_t); 
-
-  static bool alt_down = false, ctrl_down = false;
-  libinput_dispatch(session_drm->input);
-
-  struct libinput_event *event;
-  while ((event = libinput_get_event(session_drm->input)) != NULL) {
-    enum libinput_event_type type = libinput_event_get_type(event);
-
-    switch (type) {
-      case LIBINPUT_EVENT_KEYBOARD_KEY: {
-        struct libinput_event_keyboard *kbevent =
-          libinput_event_get_keyboard_event(event);
-        uint32_t key = libinput_event_keyboard_get_key(kbevent);
-        enum libinput_key_state state =
-          libinput_event_keyboard_get_key_state(kbevent);
-
-        if (state == LIBINPUT_KEY_STATE_PRESSED && key == KEY_LEFTCTRL)
-          ctrl_down = true;
-        else if (state == LIBINPUT_KEY_STATE_RELEASED && key == KEY_LEFTCTRL)
-          ctrl_down = false;
-
-        if (state == LIBINPUT_KEY_STATE_PRESSED && key == KEY_LEFTALT)
-          alt_down = true;
-        else if (state == LIBINPUT_KEY_STATE_RELEASED && key == KEY_LEFTALT)
-          alt_down = false;
-
-        bool mods = (alt_down && ctrl_down &&
-          state == LIBINPUT_KEY_STATE_PRESSED);
-
-        if (mods) {
-          if(key >= KEY_F1 && key <= KEY_F12) {
-            libseat_switch_session(session_drm->seat, key - KEY_F1 + 1);
-          }
-        }
-        break;
-      }
-
-      default:
-        break;
-    }
-
-    libinput_event_destroy(event);
-  }
-
-  return 0;
-}
 
 // Taken from lé wlroots
 bool 
@@ -247,12 +178,12 @@ _vt_session_drm_udev_enumerate_cards(struct vt_session_t* session) {
   return enumerate;
 }
 
-struct vt_device_drm_t* 
+struct vt_device_t* 
 _vt_session_drm_open_device_if_kms(struct vt_session_t* session, const char* path) {
   if(!path) return NULL;
   struct vt_session_drm_t* session_drm = BACKEND_DATA(session, struct vt_session_drm_t); 
 
-  struct vt_device_drm_t* dev = VT_ALLOC(session->comp, sizeof(*dev));
+  struct vt_device_t* dev = VT_ALLOC(session->comp, sizeof(*dev));
   if(!vt_session_open_device_drm(session, dev, path) || !_vt_session_drm_card_is_kms(dev->fd)) {
     VT_TRACE(session->comp->log, "SESSION: Not using non-KMS device '%s'.\n", path); 
     return NULL;
@@ -296,7 +227,7 @@ _vt_session_drm_udev_dispatch(int fd, uint32_t mask, void *data) {
     vt_util_emit_signal(&session_drm->ev_drm_add_card, &ev);
   } else if (strcmp(action, "change") == 0 || strcmp(action, "remove") == 0) {
     dev_t devnum = udev_device_get_devnum(udev_dev);
-    struct vt_device_drm_t* dev;
+    struct vt_device_t* dev;
     wl_list_for_each(dev, &session_drm->devices, link) {
       if (dev->dev != devnum) {
         continue;
@@ -384,21 +315,11 @@ vt_session_init_drm(struct vt_session_t* session) {
     vt_session_terminate_drm(session);
     return false;
   }
-    
-  session_drm->input = libinput_udev_create_context(&input_interface, NULL, session_drm->udev);
 
-  if(!session_drm->input) {
-    VT_ERROR(session->comp->log, "INPUT: Failed to create libinput context.");
-    return false;
-  }
-  VT_TRACE(session->comp->log, "INPUT: Successfully created libinput context.");
-
-  libinput_udev_assign_seat(session_drm->input, session_drm->seat_name); 
-  libinput_dispatch(session_drm->input);
-
-  int li_fd = libinput_get_fd(session_drm->input);
-  wl_event_loop_add_fd(session->comp->wl.evloop, li_fd,
-                       WL_EVENT_READABLE, _vt_session_input_dispatch, session);
+  // populate the backend specific state for other subsystems like the input
+  // system to be used later 
+  session->native_handle = session_drm->udev; 
+  snprintf(session->name, sizeof(session->name), "%s", session_drm->seat_name);
 
   // drinking seed oils to this (edgy comment) 
   session_drm->udev_mon = udev_monitor_new_from_netlink(session_drm->udev, "udev");
@@ -449,7 +370,7 @@ vt_session_terminate_drm(struct vt_session_t* session) {
 }
 
 bool 
-vt_session_open_device_drm(struct vt_session_t* session, struct vt_device_drm_t* dev, const char* path) {
+vt_session_open_device_drm(struct vt_session_t* session, struct vt_device_t* dev, const char* path) {
   if(!dev || !session || !session->comp) return false;
   
   struct vt_session_drm_t* session_drm = BACKEND_DATA(session, struct vt_session_drm_t); 
@@ -477,7 +398,15 @@ vt_session_open_device_drm(struct vt_session_t* session, struct vt_device_drm_t*
 }
 
 bool 
-vt_session_close_device_drm(struct vt_session_t* session, struct vt_device_drm_t* dev) {
+vt_session_manage_device_drm(struct vt_session_t* session, struct vt_device_t* dev) {
+  if(!dev || !session || !session->user_data) return false;
+  struct vt_session_drm_t* session_drm = BACKEND_DATA(session, struct vt_session_drm_t); 
+  wl_list_insert(&session_drm->devices, &dev->link);
+  return true;
+}
+
+bool 
+vt_session_close_device_drm(struct vt_session_t* session, struct vt_device_t* dev) {
   if(!session || !dev) return false;
   
   struct vt_session_drm_t* session_drm = BACKEND_DATA(session, struct vt_session_drm_t); 
@@ -492,6 +421,27 @@ vt_session_close_device_drm(struct vt_session_t* session, struct vt_device_drm_t
 
   return true;
 }
+
+bool 
+vt_session_unmanage_device_drm(struct vt_session_t* session, struct vt_device_t* dev) {
+  if(!dev || !session || !session->user_data) return false;
+  struct vt_session_drm_t* session_drm = BACKEND_DATA(session, struct vt_session_drm_t); 
+  wl_list_remove(&dev->link);
+  return true;
+}
+
+struct vt_device_t* 
+vt_session_device_from_fd_drm(struct vt_session_t* session, uint32_t fd) {
+  if(!session || !session->user_data) return NULL;
+  struct vt_session_drm_t* session_drm = BACKEND_DATA(session, struct vt_session_drm_t); 
+  struct vt_device_t* dev;
+  wl_list_for_each(dev, &session_drm->devices, link) {
+    if (dev->fd != fd) continue;
+    return dev;
+  }
+  return NULL;
+}
+
 static void on_found_gpu(struct wl_listener *listener, void *data) {
   struct wait_for_gpu_handler_t* handler = wl_container_of(listener, handler, listener);
   handler->found = true;
@@ -499,7 +449,7 @@ static void on_found_gpu(struct wl_listener *listener, void *data) {
 
 // Largely inspired from lé wlroots backends/session/session.c
 uint32_t 
-vt_session_enumerate_cards_drm(struct vt_session_t* session, struct vt_device_drm_t** devs, const uint32_t max_devs) {
+vt_session_enumerate_cards_drm(struct vt_session_t* session, struct vt_device_t** devs, const uint32_t max_devs) {
   if(!session) return false;
   
   struct vt_session_drm_t* session_drm = BACKEND_DATA(session, struct vt_session_drm_t); 
@@ -569,7 +519,7 @@ vt_session_enumerate_cards_drm(struct vt_session_t* session, struct vt_device_dr
     }
 
     // Check if the device supports KMS and open it  
-    struct vt_device_drm_t* dev = _vt_session_drm_open_device_if_kms(session, udev_device_get_devnode(udev_dev));
+    struct vt_device_t* dev = _vt_session_drm_open_device_if_kms(session, udev_device_get_devnode(udev_dev));
     if (!dev) {
       udev_device_unref(udev_dev);
       continue;
@@ -584,7 +534,7 @@ vt_session_enumerate_cards_drm(struct vt_session_t* session, struct vt_device_dr
     // If the card is the boot VGA card, we insert it as the 
     // first card in our list (to show our love for it).
     if (is_boot_vga) {
-      struct vt_device_drm_t* tmp = devs[0];
+      struct vt_device_t* tmp = devs[0];
       devs[0] = devs[i];
       devs[i] = tmp;
     }
@@ -595,4 +545,17 @@ vt_session_enumerate_cards_drm(struct vt_session_t* session, struct vt_device_dr
 
   return i;
 
+}
+
+bool
+vt_session_switch_vt_drm(struct vt_session_t* session, uint32_t vt) {
+  if(!session) return false;
+  struct vt_session_drm_t* session_drm = BACKEND_DATA(session, struct vt_session_drm_t); 
+
+  if(libseat_switch_session(session_drm->seat, vt) < 0) {
+    VT_ERROR(session->comp->log, "SESSION: Failed to switch to VT session %i.", vt);
+    return false;
+  }
+
+  return true;
 }

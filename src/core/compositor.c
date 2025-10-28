@@ -1,4 +1,7 @@
 #define _GNU_SOURCE
+#define _POSIX_C_SOURCE 200809L
+#include "src/input/input.h"
+#include "src/input/wl_seat.h"
 #include "core_types.h"
 #include "src/protocols/xdg_shell.h"
 
@@ -16,6 +19,7 @@
 #include "src/render/renderer.h"
 #include "config.h"
 #include "scene.h"
+#include "surface.h"
 
 #include "compositor.h"
 
@@ -339,9 +343,9 @@ _vt_comp_handle_cmd_flags(struct vt_compositor_t* c, int argc, char** argv) {
           if(strcmp(backend_str, valid_backends[i]) == 0) { valid = true; break; }
         if(!valid) {
           VT_ERROR(c->log, "Invalid compositor backend: '%s'", backend_str);
-          fprintf(stderr, "Valid backends are: [ "); 
+          fprintf(stderr, " Valid options for backends are: [ "); 
           for(uint32_t i = 0; i < n; i++)
-            fprintf(stderr, "%s %s", valid_backends[i], i != n - 1 ? "," : "");
+            fprintf(stderr, "%s%s ", valid_backends[i], i != n - 1 ? "," : "");
           fprintf(stderr, "]\n"); 
           exit(1);
         }
@@ -386,11 +390,11 @@ void _vt_comp_log_help() {
   printf("%-30s %s\n", "-q, --quiet", "Run in quiet mode");
   printf("%-30s %s\n", "-vo, --virtual-outputs [val]", "Specify the number of virtual outputs (windows) in nested mode");
   printf("%-30s %s", "-b, --backend [val]", "Specifies the sink backend of the compositor.");
-  printf("Valid backends are: [ "); 
+  printf(" Valid options for backends are: [ "); 
   size_t n;
   char** valid_backends = _scan_valid_backends(&n);
   for(uint32_t i = 0; i < n; i++)
-    printf("%s %s", valid_backends[i], i != n - 1 ? "," : "");
+    printf("'%s'%s ", valid_backends[i], i != n - 1 ? "," : "");
   printf("]\n"); 
   free(valid_backends);
   printf("%-30s %s\n", "-bp, --backend-path [val]", "Specifies the path of the .so file to load as the compositor's sink backend");
@@ -434,16 +438,17 @@ _vt_comp_load_backend(struct vt_compositor_t* c, const char* backend_name, const
   backend_implement_func_t sym_ptr = dlsym(_vt_comp_dl_handle, sym);
 
   if(!sym_ptr) {
-    log_fatal(c->log, "Backend %s does not export backend_implement_%s.", path, backend_name);
     dlclose(_vt_comp_dl_handle);
+    log_fatal(c->log, "Backend %s does not export backend_implement_%s.", path, backend_name);
     return;
   }
 
   if(!sym_ptr(c)) {
-    log_fatal(c->log, "Backend %s failed to initialize.", path);
     dlclose(_vt_comp_dl_handle);
+    log_fatal(c->log, "backend %s failed to initialize.", path);
     return;
   }
+  VT_TRACE(c->log, "called implement function '%s' for backend '%s'", sym, backend_name);
 }
 
 void _vt_comp_associate_surface_with_output(struct vt_compositor_t* c, struct vt_surface_t* surf, struct vt_output_t* output) {
@@ -517,7 +522,8 @@ _vt_comp_wl_surface_attach(
   // in the surface struct
   struct vt_surface_t* surf = wl_resource_get_user_data(resource);
   if(!surf) {
-    VT_ERROR(surf->comp->log, "compositor.surface_attach: No internal surface data allocated.")
+    VT_ERROR(((struct vt_compositor_t*)wl_resource_get_user_data(resource))->log,
+             "surface_attach: NULL user_data");
     return;
   }
   VT_TRACE(surf->comp->log, "Got compositor.surface_attach.")
@@ -836,6 +842,9 @@ _vt_comp_wl_init(struct vt_compositor_t* c) {
 
   wl_display_init_shm(c->wl.dsp);
 
+  wl_display_add_shm_format(c->wl.dsp, WL_SHM_FORMAT_ARGB8888);
+  wl_display_add_shm_format(c->wl.dsp, WL_SHM_FORMAT_XRGB8888);
+
   wl_global_create(c->wl.dsp, &wl_compositor_interface, 4, c, _vt_comp_wl_bind); 
 
   if(!vt_xdg_shell_init(c)) {
@@ -855,10 +864,38 @@ _vt_comp_wl_init(struct vt_compositor_t* c) {
   return true;
 }
 
+#include <signal.h>
+#include <execinfo.h>
 
+static struct vt_compositor_t* vt_global_compositor;
+
+static void vt_sig_handler(int sig) {
+    void *trace[32];
+    size_t n = backtrace(trace, 32);
+    fprintf(stderr, "\n[VT] Caught signal %d (%s)\n", sig, strsignal(sig));
+
+    // Also log to compositor log file if open
+    FILE *f = vt_global_compositor && vt_global_compositor->log.stream 
+              ? vt_global_compositor->log.stream 
+              : stderr;
+    fprintf(f, "\n[VT] ===== Fatal signal %d (%s) =====\n", sig, strsignal(sig));
+    backtrace_symbols_fd(trace, n, fileno(f));
+    fflush(f);
+
+    // Re-raise so you still get a core dump if desired
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
 bool
 vt_comp_init(struct vt_compositor_t* c, int argc, char** argv) {
   vt_util_arena_init(&c->arena, 1024 * 1024 * 2);
+
+  vt_global_compositor = c;
+  signal(SIGSEGV, vt_sig_handler);
+  signal(SIGABRT, vt_sig_handler);
+  signal(SIGFPE,  vt_sig_handler);
+  signal(SIGILL,  vt_sig_handler);
+  signal(SIGBUS,  vt_sig_handler);
 
   wl_list_init(&c->outputs);
 
@@ -890,8 +927,26 @@ vt_comp_init(struct vt_compositor_t* c, int argc, char** argv) {
     return false;
   }
 
-  // Initialize session 
-  c->session->impl.init(c->session);
+  // Initialize session
+  if(c->session->impl.init)
+    c->session->impl.init(c->session);
+
+  c->input_backend = calloc(1, sizeof(*c->input_backend));
+  c->input_backend->comp = c;
+
+  if(c->backend->platform == VT_BACKEND_DRM_GBM)
+    vt_input_implement(c->input_backend, VT_INPUT_LIBINPUT); 
+
+  if(c->input_backend->impl.init)
+    c->input_backend->impl.init(c->input_backend, c->session->native_handle);
+
+  c->seat = calloc(1, sizeof(*c->seat));
+  c->seat->comp = c;
+
+  if(c->backend->platform == VT_BACKEND_DRM_GBM) // Temporary
+    vt_seat_init(c->seat);
+    
+  VT_TRACE(c->log, "Initialized wayland seat.");
   
   // Initialize backend 
   if(!c->backend->impl.init(c->backend)) {
@@ -941,6 +996,11 @@ vt_comp_terminate(struct vt_compositor_t *c) {
     return false;
   }
 
+  if(c->backend->platform == VT_BACKEND_DRM_GBM) // Temporary
+    vt_seat_terminate(c->seat);
+  
+  c->input_backend->impl.terminate(c->input_backend);
+
   c->session->impl.terminate(c->session);
 
   free(c->session);
@@ -963,6 +1023,8 @@ vt_comp_terminate(struct vt_compositor_t *c) {
   vt_util_arena_destroy(&c->arena); 
 
   dlclose(_vt_comp_dl_handle);
+
+  exit(0);
 }
 
 void 
@@ -976,7 +1038,6 @@ vt_comp_schedule_repaint(struct vt_compositor_t *c, struct vt_output_t* output) 
     return;
   }
   output->needs_repaint = true;
-  //if(!c->backend->impl.prepare_output_frame(c->backend, output)) return;
   if(!output->repaint_pending) {
     output->repaint_pending = true;
     output->repaint_source = wl_event_loop_add_idle(c->wl.evloop, _vt_comp_frame_handler, output);

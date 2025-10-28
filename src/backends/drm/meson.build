@@ -5,7 +5,7 @@ dep_seat            = dependency('libseat', required: true)
 dep_udev            = dependency('libudev', required: true)
 dep_libinput        = dependency('libinput', required: true)
 
-vortex_inc = include_directories('/usr/include/pixman-1/')
+vortex_inc = include_directories('../../', '/usr/include/pixman-1/')
 
 shared_module(
   'drm-backend',

@@ -7,15 +7,6 @@
 
 #include "../../core/session.h"
 
-struct vt_device_drm_t {
-  int32_t fd, device_id;
-  __dev_t dev;
-  struct wl_list link;
-  char path[64];
-
-  void* user_data;
-};
-
 struct vt_session_drm_t {
   struct libseat* seat;
   struct udev* udev;
@@ -30,8 +21,6 @@ struct vt_session_drm_t {
   bool _first_libseat_enable;
   
   struct wl_list devices;
-
-  struct libinput* input
 };
 
 struct vt_session_drm_event_t {
@@ -42,9 +31,17 @@ bool vt_session_init_drm(struct vt_session_t* session);
 
 bool vt_session_terminate_drm(struct vt_session_t* session);
 
-bool vt_session_open_device_drm(struct vt_session_t* session, struct vt_device_drm_t* dev, const char* path);
+bool vt_session_open_device_drm(struct vt_session_t* session, struct vt_device_t* dev, const char* path);
 
-bool vt_session_close_device_drm(struct vt_session_t* session, struct vt_device_drm_t* dev); 
+bool vt_session_manage_device_drm(struct vt_session_t* session, struct vt_device_t* dev);
 
-uint32_t vt_session_enumerate_cards_drm(struct vt_session_t* session, struct vt_device_drm_t** devs, const uint32_t max_devs);
+bool vt_session_close_device_drm(struct vt_session_t* session, struct vt_device_t* dev); 
+
+bool vt_session_unmanage_device_drm(struct vt_session_t* session, struct vt_device_t* dev);
+
+struct vt_device_t* vt_session_device_from_fd_drm(struct vt_session_t* session, uint32_t fd); 
+
+uint32_t vt_session_enumerate_cards_drm(struct vt_session_t* session, struct vt_device_t** devs, const uint32_t max_devs);
+
+bool vt_session_switch_vt_drm(struct vt_session_t* session, uint32_t vt); 
 

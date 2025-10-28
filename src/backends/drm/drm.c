@@ -1,6 +1,10 @@
+#include "input/wl_seat.h"
+#include <libinput.h>
+#include <xkbcommon/xkbcommon-keysyms.h>
 #define _GNU_SOURCE
 
 #include <xf86drmMode.h>
+#include "core/core_types.h"
 #include <xf86drm.h>
 #include <fcntl.h>
 #include <linux/kd.h>
@@ -15,6 +19,7 @@
 #include <sys/stat.h>
 #include <drm/drm_fourcc.h>
 #include <stdarg.h>
+#include <string.h>
 
 #include <errno.h>
 
@@ -22,8 +27,8 @@
 #include <wayland-util.h>
 #include <pthread.h>
 
-#include "../../render/renderer.h"
-#include "../../core/compositor.h"
+#include "render/renderer.h"
+#include "core/compositor.h"
 
 #include "./drm.h"
 #include "./session_drm.h"
@@ -100,6 +105,8 @@ static bool   _drm_terminate_for_device(struct drm_backend_state_t* drm);
 static void   _drm_on_session_terminate(struct wl_listener* listener, void* data); 
 static void   _drm_on_seat_enable(struct wl_listener* listener, void* data); 
 static void   _drm_on_seat_disable(struct wl_listener* listener, void* data); 
+
+static void   _drm_keybind_switch_vt(struct vt_compositor_t* comp, void* user_data); 
 
 void 
 _drm_page_flip_handler(int fd, unsigned int frame,
@@ -290,14 +297,6 @@ _drm_dispatch(int fd, uint32_t mask, void *data) {
   struct drm_backend_state_t* drm = (struct drm_backend_state_t*)data;
   drmHandleEvent(fd, &drm->evctx);
   return 0;
-}
-
-static struct vt_device_drm_t* _drm_find_device_by_gpu_path(struct vt_session_drm_t* session, const char* path) {
-  struct vt_device_drm_t* dev;
-  wl_list_for_each(dev, &session->devices, link) {
-    if(strcmp(dev->path, path) == 0) return dev;
-  }
-  return NULL;
 }
 
 bool _drm_init_for_device(struct vt_compositor_t* comp, struct drm_backend_state_t* drm, int32_t device_fd, const char* gpu_path) {
@@ -578,7 +577,7 @@ _drm_on_session_terminate(struct wl_listener* listener, void* data) {
   struct vt_session_t* session = (struct vt_session_t*)data;
   struct vt_session_drm_t* session_drm = BACKEND_DATA(session, struct vt_session_drm_t); 
 
-  struct vt_device_drm_t* dev, *tmp_dev;
+  struct vt_device_t* dev, *tmp_dev;
   wl_list_for_each_safe(dev, tmp_dev, &session_drm->devices, link) {
     vt_session_close_device_drm(session, dev);
   }
@@ -588,10 +587,10 @@ _drm_on_session_terminate(struct wl_listener* listener, void* data) {
 }
 
 void _drm_on_seat_disable(struct wl_listener* listener, void* data) {
-  if (!data)
-    return;
+  if (!data) return;
 
   struct vt_session_t* session = (struct vt_session_t*)data;
+
   struct drm_backend_master_state_t* drm_master =
     BACKEND_DATA(session->comp->backend, struct drm_backend_master_state_t);
 
@@ -602,13 +601,25 @@ void _drm_on_seat_disable(struct wl_listener* listener, void* data) {
     _drm_suspend(drm);
   }
 
+  struct vt_input_backend_t* input = session->comp->input_backend;
+  if(input && input->impl.suspend)
+    input->impl.suspend(input);
+
+  wl_list_init(&session->comp->seat->keyboards);
+
   VT_TRACE(session->comp->log, "DRM: Seat disable complete (devices paused, not closed).");
+}
+
+void   
+_drm_keybind_switch_vt(struct vt_compositor_t* comp, void* user_data) { 
+  if(!comp || !user_data) return;
+  uint32_t vt = *(uint32_t*)user_data;
+  vt_session_switch_vt_drm(comp->session, vt);
 }
 
 
 void _drm_on_seat_enable(struct wl_listener *listener, void *data) {
-  if (!data)
-    return;
+  if (!data) return;
 
   struct vt_session_t* session = (struct vt_session_t*)data;
   struct drm_backend_master_state_t* drm_master =
@@ -620,6 +631,10 @@ void _drm_on_seat_enable(struct wl_listener *listener, void *data) {
   wl_list_for_each(drm, &drm_master->backends, link) {
     _drm_resume(drm);
   }
+  
+  struct vt_input_backend_t* input = session->comp->input_backend;
+  if(input && input->impl.resume)
+    input->impl.resume(input);
 
   VT_TRACE(session->comp->log, "DRM: Seat enable complete (devices resumed).");
 }
@@ -752,7 +767,9 @@ _drm_handle_frame_for_device(struct drm_backend_state_t* drm, struct vt_output_t
 // ===================================================
 bool
 backend_init_drm(struct vt_backend_t* backend) {
-  if(!backend || !backend->comp || !backend->comp->session) return false;
+  if(!backend || !backend->comp || !backend->comp->session) {
+    return false;
+  }
   if(!(backend->user_data = VT_ALLOC(backend->comp, sizeof(struct drm_backend_master_state_t))))  {
     return false;
   }
@@ -778,7 +795,7 @@ backend_init_drm(struct vt_backend_t* backend) {
 
   // Create a DRM backend state for all the enumerated GPUs
   const uint8_t max_gpus = 8;
-  struct vt_device_drm_t* gpus[max_gpus];
+  struct vt_device_t* gpus[max_gpus];
   uint32_t n_gpus = vt_session_enumerate_cards_drm(backend->comp->session, gpus, max_gpus);
 
   for(uint32_t i = 0; i < n_gpus; i++) {
@@ -790,6 +807,19 @@ backend_init_drm(struct vt_backend_t* backend) {
     }
     wl_list_insert(&drm_master->backends, &drm_backend->link);
   }
+
+  // Keybinds for VT switching
+  struct vt_kb_modifiers_t mods = backend->comp->input_backend->mods;
+  for(uint32_t i = 0; i < 12; i++) {
+    uint32_t* vt = VT_ALLOC(backend->comp, sizeof(*vt));
+    *vt = i + 1;
+    vt_seat_add_global_keybind(backend->comp->seat, 
+                               XKB_KEY_XF86Switch_VT_1 + i,mods.ctrl|mods.alt, 
+                               _drm_keybind_switch_vt, 
+                               vt);
+  }
+  
+  VT_TRACE(backend->comp->log, "Successfully initialized DRM backend.");
 
   return true;
 }
@@ -808,7 +838,7 @@ backend_handle_frame_drm(struct vt_backend_t* backend, struct vt_output_t* outpu
 
 bool
 backend_terminate_drm(struct vt_backend_t* backend) {
-  struct vt_device_drm_t* dev, *tmp_dev;
+  struct vt_device_t* dev, *tmp_dev;
   struct drm_backend_master_state_t* drm_master = BACKEND_DATA(backend, struct drm_backend_master_state_t); 
   struct drm_backend_state_t* drm;
   wl_list_for_each(drm, &drm_master->backends, link) {
@@ -848,7 +878,12 @@ backend_implement_drm(struct vt_compositor_t* comp) {
 
   comp->session->impl = (struct vt_session_interface_t){
     .init = vt_session_init_drm,
-    .terminate = vt_session_terminate_drm
+    .close_device = vt_session_close_device_drm,
+    .open_device = vt_session_open_device_drm,
+    .manage_device = vt_session_manage_device_drm,
+    .unmanage_device = vt_session_unmanage_device_drm,
+    .device_from_fd = vt_session_device_from_fd_drm,
+    .terminate = vt_session_terminate_drm,
   };
 
   return true;

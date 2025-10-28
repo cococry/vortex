@@ -2,7 +2,8 @@
 
 #include "xdg_shell.h"
 
-#include "../core/core_types.h"
+#include "src/core/core_types.h"
+#include "src/core/surface.h"
 #include "xdg-shell-protocol.h" 
 
 #include <string.h>

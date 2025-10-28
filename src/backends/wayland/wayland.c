@@ -9,6 +9,7 @@
 #include <wayland-util.h>
 #include <sys/mman.h>
 #include <pthread.h>
+#include <string.h>
 
 #include "xdg-shell-client-protocol.h"
 #include "../../render/renderer.h"
@@ -66,10 +67,6 @@ static bool _wl_backend_destroy_output(struct vt_backend_t* backend, struct vt_o
 static bool _wl_backend_create_output(struct vt_backend_t* backend, struct vt_output_t* output, void* data);
 
 static bool _wl_backend_init_active_outputs(struct vt_backend_t* backend);
-
-static bool _wl_backend_init_session(struct vt_session_t* session);
-
-static bool _wl_backend_terminate_session(struct vt_session_t* session);
 
 static struct wl_callback_listener parent_surface_frame_listener = {
   .done = _wl_parent_frame_done 
@@ -298,8 +295,8 @@ backend_implement_wl(struct vt_compositor_t* comp) {
 
 
   comp->session->impl = (struct vt_session_interface_t){
-    .init = _wl_backend_init_session,
-    .terminate =_wl_backend_terminate_session 
+    .init = NULL,
+    .terminate = NULL 
   };
 }
 
@@ -361,18 +358,6 @@ _wl_backend_init_active_outputs(struct vt_backend_t* backend){
 }
 
 bool 
-_wl_backend_init_session(struct vt_session_t* session) {
-  // no-op
-  (void)session;
-}
-
-bool 
-_wl_backend_terminate_session(struct vt_session_t* session) {
-  // no-op
-  (void)session;
-}
-
-bool 
 backend_terminate_wl(struct vt_backend_t* backend){
   if(!backend || !backend->user_data) return false;
   
@@ -401,7 +386,7 @@ bool
 _wl_backend_create_output(struct vt_backend_t* backend, struct vt_output_t* output, void* data){
   if(!backend || !output) return false;
 
-  VT_TRACE(backend->comp->log, "DMR: Creating WL internal output.");
+  VT_TRACE(backend->comp->log, "WL: Creating WL internal output.");
   if(!(output->user_data = VT_ALLOC(backend->comp, sizeof(wayland_output_state_t)))) {
     return false;
   }

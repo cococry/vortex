@@ -2,16 +2,13 @@
 
 #include <stdbool.h>
 
-#include <libinput.h>
-#include <runara/runara.h>
-#include <wayland-server.h>
 #include <wayland-util.h>
 #include <pixman.h>
 
-#include "surface.h"
+#include "../input/input.h"
 #include "util.h"
-
 #include "session.h"
+#include "../input/wl_seat.h"
 
 
 #define BACKEND_DATA(b, type) ((type *)((b)->user_data))
@@ -35,12 +32,16 @@ struct wl_state_t {
   struct wl_compositor* compositor;
 };
 
+typedef enum {
+  VT_BACKEND_DRM_GBM = 0,
+  VT_BACKEND_WAYLAND,
+  VT_BACKEND_SURFACELESS,
+} vt_backend_platform_t;
 
-typedef bool (*backend_implement_func_t)(struct vt_compositor_t* comp);
+
 
 struct vt_backend_interface_t {
   bool (*init)(struct vt_backend_t* backend);
-  bool (*implement)(struct vt_compositor_t* comp);
   bool (*handle_frame)(struct vt_backend_t* backend, struct vt_output_t* output);
   bool (*prepare_output_frame)(struct vt_backend_t* backend, struct vt_output_t* output);
   bool (*terminate)(struct vt_backend_t* backend);
@@ -77,9 +78,9 @@ struct vt_output_t {
 }; 
 
 struct vt_compositor_t {
-  struct wl_state_t  wl;
-  struct libinput* input;
+  struct vt_arena_t arena;
 
+  struct wl_state_t  wl;
   struct vt_backend_t* backend;
   struct log_state_t log;
 
@@ -89,13 +90,14 @@ struct vt_compositor_t {
   bool sent_frame_cbs, any_frame_cb_pending;
 
   uint32_t n_virtual_outputs;
-
   const char* _cmd_line_backend_path;
 
   struct wl_list outputs;
 
-  struct vt_arena_t arena;
-  
   struct vt_session_t* session;
+  struct vt_seat_t* seat;
+  struct vt_input_backend_t* input_backend;
 };
+
+typedef bool (*backend_implement_func_t)(struct vt_compositor_t* comp);
 

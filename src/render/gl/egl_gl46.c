@@ -7,6 +7,7 @@
 #include "egl_gl46.h"
 
 #include "src/core/compositor.h"
+#include "src/core/surface.h"
 
 
 #include <EGL/egl.h>
@@ -463,6 +464,7 @@ bool renderer_import_buffer_egl(
   struct vt_renderer_t *r, struct vt_surface_t *surf,
   struct wl_resource *buffer_resource) {
   struct wl_shm_buffer* shmbuf = wl_shm_buffer_get(buffer_resource);
+  VT_TRACE(r->comp->log, "Importing buffer for surface %p", surf);
   if(shmbuf) {
     return _egl_gl_import_buffer_shm(r, surf, shmbuf); 
   }
