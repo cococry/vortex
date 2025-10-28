@@ -8,6 +8,7 @@
 enum vt_input_backend_platform_t {
   VT_INPUT_LIBINPUT = 0,
   VT_INPUT_WAYLAND,
+	VT_INPUT_UNKNOWN
 };
 
 enum vt_input_key_state_t {

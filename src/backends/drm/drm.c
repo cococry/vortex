@@ -807,26 +807,31 @@ backend_init_drm(struct vt_backend_t* backend) {
     }
     wl_list_insert(&drm_master->backends, &drm_backend->link);
   }
-
-  // Keybinds for VT switching
-  struct vt_kb_modifiers_t mods = backend->comp->input_backend->mods;
-  for(uint32_t i = 0; i < 12; i++) {
-    uint32_t* vt = VT_ALLOC(backend->comp, sizeof(*vt));
-    *vt = i + 1;
-    vt_seat_add_global_keybind(backend->comp->seat, 
-                               XKB_KEY_XF86Switch_VT_1 + i,mods.ctrl|mods.alt, 
-                               _drm_keybind_switch_vt, 
-                               vt);
-  }
   
   VT_TRACE(backend->comp->log, "Successfully initialized DRM backend.");
 
   return true;
 }
 
+static bool _added_global_keybinds = false; 
+
 bool 
 backend_handle_frame_drm(struct vt_backend_t* backend, struct vt_output_t* output) {
   if(!backend || !backend->user_data) return false;
+
+  if(!_added_global_keybinds) {
+    // Keybinds for VT switching
+    struct vt_kb_modifiers_t mods = backend->comp->input_backend->mods;
+    for(uint32_t i = 0; i < 12; i++) {
+      uint32_t* vt = VT_ALLOC(backend->comp, sizeof(*vt));
+      *vt = i + 1;
+      vt_seat_add_global_keybind(backend->comp->seat, 
+                                 XKB_KEY_XF86Switch_VT_1 + i,mods.ctrl|mods.alt, 
+                                 _drm_keybind_switch_vt, 
+                                 vt);
+    }
+    _added_global_keybinds = true;
+  }
 
   struct drm_backend_master_state_t* drm_master = BACKEND_DATA(backend, struct drm_backend_master_state_t); 
   struct drm_backend_state_t* drm;

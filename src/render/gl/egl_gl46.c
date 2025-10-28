@@ -456,7 +456,7 @@ renderer_destroy_renderable_output_egl(struct vt_renderer_t *r, struct vt_output
   }
   output->render_surface = NULL;
 
-  VT_TRACE(r->comp->log, "EGL: destroyed render surface."); 
+  VT_TRACE(r->comp->log, "EGL: Destroyed render surface."); 
   return true;
 }
 

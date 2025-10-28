@@ -1,3 +1,4 @@
+#include <wayland-server-protocol.h>
 #define _GNU_SOURCE
 #include "wayland.h"
 
@@ -20,9 +21,10 @@
 
 typedef struct {
   bool nested;
-  struct wl_display *parent_display;
-  struct wl_compositor *parent_compositor;
-  struct xdg_wm_base *parent_xdg_wm_base;
+  struct wl_display* parent_display;
+  struct wl_compositor* parent_compositor;
+  struct xdg_wm_base* parent_xdg_wm_base;
+  struct wl_seat* parent_seat;
   struct vt_compositor_t* comp;
 
   struct vt_renderer_t* renderer;
@@ -100,7 +102,10 @@ _wl_parent_registry_add(
     wl->parent_compositor = wl_registry_bind(reg, id, &wl_compositor_interface, 4);
   } else if (strcmp(iface, xdg_wm_base_interface.name) == 0) {
     wl->parent_xdg_wm_base = wl_registry_bind(reg, id, &xdg_wm_base_interface, 1);
-  } 
+  } else if (strcmp(iface, wl_seat_interface.name) == 0) {
+    wl->parent_seat = wl_registry_bind(reg, id, &wl_seat_interface, 7);
+    wl->comp->session->native_handle = wl->parent_seat;
+  }
 }
 
 void 
@@ -220,16 +225,10 @@ _wl_backend_destroy_output(struct vt_backend_t* backend, struct vt_output_t* out
 
   if(!wl_backend->renderer->impl.destroy_renderable_output(output->renderer, output)) return false;
 
-  free(output->user_data);
   output->user_data = NULL;
-    
+   
   wl_list_remove(&output->link_global);
-  free(output);
   output = NULL;
-
-  if(!wl_list_length(&backend->comp->outputs)) {
-    backend->comp->running = false;
-  }
 
   return true;
 }
@@ -244,6 +243,8 @@ backend_init_wl(struct vt_backend_t* backend) {
   struct vt_compositor_t* c = backend->comp;
   wayland_backend_state_t* wl = BACKEND_DATA(backend, wayland_backend_state_t); 
   wl->comp = backend->comp;
+
+  VT_TRACE(c->log, "WL: Initializing Wayland backend...");
 
   // Connect to lé display
   wl->parent_display = wl_display_connect(NULL);
@@ -260,6 +261,7 @@ backend_init_wl(struct vt_backend_t* backend) {
     VT_ERROR(c->log, "WL: Required globals not found.");
     return false;
   }
+  VT_TRACE(c->log, "WL: Found required globals.");
 
   xdg_wm_base_add_listener(wl->parent_xdg_wm_base, &parent_wm_listener, c);
 
@@ -274,6 +276,8 @@ backend_init_wl(struct vt_backend_t* backend) {
   wl->renderer->impl.init(c->backend, wl->renderer, wl->parent_display);
 
   _wl_backend_init_active_outputs(backend);
+  
+  VT_TRACE(c->log, "WL: Successfully initialized Wayland backend.");
 
   return true;
 
@@ -332,14 +336,12 @@ _wl_backend_init_active_outputs(struct vt_backend_t* backend){
     output->backend = backend;
     if (!_wl_backend_create_output(backend, output, NULL)) {
       VT_ERROR(backend->comp->log, "WL: Failed to setup internal WL output.");
-      free(output);
       continue;
     } 
     if(!wl_backend->renderer->impl.setup_renderable_output(wl_backend->renderer, output)) {
       VT_ERROR(backend->comp->log, "WL: Failed to setup renderable output for WL output (%ix%i@%.2f)",
                 output->width, output->height, output->refresh_rate);
       _wl_backend_destroy_output(backend, output);
-      free(output);
       continue;
     }
     vt_comp_schedule_repaint(backend->comp, output);
@@ -363,8 +365,8 @@ backend_terminate_wl(struct vt_backend_t* backend){
   
   wayland_backend_state_t* wl = BACKEND_DATA(backend, wayland_backend_state_t);
 
-  struct vt_output_t* output;
-  wl_list_for_each(output, &backend->comp->outputs, link_global) {
+  struct vt_output_t* output, *tmp;
+  wl_list_for_each_safe(output, tmp, &backend->comp->outputs, link_global) {
     _wl_backend_destroy_output(backend, output);
   }
 

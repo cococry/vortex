@@ -930,23 +930,6 @@ vt_comp_init(struct vt_compositor_t* c, int argc, char** argv) {
   // Initialize session
   if(c->session->impl.init)
     c->session->impl.init(c->session);
-
-  c->input_backend = calloc(1, sizeof(*c->input_backend));
-  c->input_backend->comp = c;
-
-  if(c->backend->platform == VT_BACKEND_DRM_GBM)
-    vt_input_implement(c->input_backend, VT_INPUT_LIBINPUT); 
-
-  if(c->input_backend->impl.init)
-    c->input_backend->impl.init(c->input_backend, c->session->native_handle);
-
-  c->seat = calloc(1, sizeof(*c->seat));
-  c->seat->comp = c;
-
-  if(c->backend->platform == VT_BACKEND_DRM_GBM) // Temporary
-    vt_seat_init(c->seat);
-    
-  VT_TRACE(c->log, "Initialized wayland seat.");
   
   // Initialize backend 
   if(!c->backend->impl.init(c->backend)) {
@@ -954,6 +937,32 @@ vt_comp_init(struct vt_compositor_t* c, int argc, char** argv) {
     return false;
   }
 
+  c->input_backend = calloc(1, sizeof(*c->input_backend));
+  c->input_backend->comp = c;
+
+  enum vt_input_backend_platform_t input_backend = VT_INPUT_UNKNOWN;
+  switch(c->backend->platform) {
+    case VT_BACKEND_DRM_GBM: 
+      input_backend = VT_INPUT_LIBINPUT;
+      break;
+    case VT_BACKEND_WAYLAND:
+      input_backend = VT_INPUT_WAYLAND;
+      break;
+  }
+  vt_input_implement(c->input_backend, input_backend); 
+
+  if(c->input_backend->impl.init) { 
+    c->input_backend->impl.init(c->input_backend, 
+                                c->session->native_handle);
+  }
+
+  c->seat = calloc(1, sizeof(*c->seat));
+  c->seat->comp = c;
+
+  vt_seat_init(c->seat);
+    
+  VT_TRACE(c->log, "Initialized wayland seat.");
+  
   struct vt_output_t* output;
   wl_list_for_each(output, &c->outputs, link_global) {
     output->repaint_pending = false;
@@ -996,12 +1005,12 @@ vt_comp_terminate(struct vt_compositor_t *c) {
     return false;
   }
 
-  if(c->backend->platform == VT_BACKEND_DRM_GBM) // Temporary
-    vt_seat_terminate(c->seat);
+  vt_seat_terminate(c->seat);
   
   c->input_backend->impl.terminate(c->input_backend);
 
-  c->session->impl.terminate(c->session);
+  if(c->session->impl.terminate)
+    c->session->impl.terminate(c->session);
 
   free(c->session);
 
