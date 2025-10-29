@@ -4,6 +4,7 @@
 #include "src/core/session.h"
 #include "src/core/util.h"
 #include "src/input/input.h"
+#include "src/input/wl_seat.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <libinput.h>

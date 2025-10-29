@@ -6,6 +6,7 @@
 void 
 vt_input_implement(struct vt_input_backend_t* backend, enum vt_input_backend_platform_t platform) {
   if(!backend) return;
+    backend->platform = platform;
 
   if(platform == VT_INPUT_LIBINPUT) {
     backend->impl = (struct vt_input_backend_interface_t){

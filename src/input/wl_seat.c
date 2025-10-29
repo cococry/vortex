@@ -5,6 +5,7 @@
 #include "input.h"
 
 #include <wayland-server-core.h>
+#include <wayland-client-core.h>
 #include <wayland-server-protocol.h>
 #include <unistd.h>
 #include <string.h>
@@ -25,6 +26,8 @@ static void _wl_seat_get_touch(struct wl_client* client, struct wl_resource* sea
 
 static void _wl_seat_release_kb(struct wl_client *client, struct wl_resource *resource);
 static void _wl_keyboard_destroy(struct wl_resource *res);
+
+static struct vt_kb_modifier_states_t _wl_kb_get_mod_states(struct xkb_state* state);
 
 static const struct wl_seat_interface seat_impl = {
     .get_pointer  = _wl_seat_get_pointer,
@@ -56,10 +59,6 @@ int
 _wl_create_keymap_fd(struct vt_keyboard_t* kbd) {
   struct xkb_keymap *keymap = kbd->seat->comp->input_backend->keymap;
   xkb_keymap_ref(keymap);
-  kbd->xkb_keymap = keymap;
-
-  kbd->xkb_state = kbd->seat->comp->input_backend->kb_state;
-  xkb_state_ref(kbd->xkb_state);
 
   char *keymap_str = xkb_keymap_get_as_string(keymap, XKB_KEYMAP_FORMAT_TEXT_V1);
   size_t size = strlen(keymap_str) + 1;
@@ -78,7 +77,7 @@ _wl_create_keymap_fd(struct vt_keyboard_t* kbd) {
 
 void 
 _wl_keyboard_send_initial_state(struct vt_keyboard_t *kbd) {
-  struct xkb_state *state = kbd->xkb_state;
+  struct xkb_state *state = kbd->seat->comp->input_backend->kb_state;
 
   uint32_t depressed = xkb_state_serialize_mods(state, XKB_STATE_MODS_DEPRESSED);
   uint32_t latched   = xkb_state_serialize_mods(state, XKB_STATE_MODS_LATCHED);
@@ -99,6 +98,7 @@ _wl_handle_global_keybind(struct vt_seat_t* seat, uint32_t keycode, uint32_t sta
     if(!keybind->callback) continue;
     char buf[64];
     xkb_keysym_get_name(sym, buf, sizeof(buf));
+    VT_TRACE(seat->comp->log, "Checking keybind: %s\n", buf);
     if(keybind->sym == sym && (mods_mask & keybind->mods) == keybind->mods) {
       keybind->callback(seat->comp, keybind->user_data);
       return true;
@@ -172,8 +172,21 @@ _wl_keyboard_destroy(struct wl_resource *res) {
   // when a client destroys it's keyboard, we need to update our list to 
   // reflect that aswell as free resources associated with the keyboard.
   wl_list_remove(&kbd->link);
-  if (kbd->xkb_keymap) xkb_keymap_unref(kbd->xkb_keymap);
-  if (kbd->xkb_state) xkb_state_unref(kbd->xkb_state);
+}
+
+struct vt_kb_modifier_states_t 
+_wl_kb_get_mod_states(struct xkb_state* state) {
+  uint32_t depressed = xkb_state_serialize_mods(state, XKB_STATE_MODS_DEPRESSED);
+  uint32_t latched   = xkb_state_serialize_mods(state, XKB_STATE_MODS_LATCHED);
+  uint32_t locked    = xkb_state_serialize_mods(state, XKB_STATE_MODS_LOCKED);
+  uint32_t group     = xkb_state_serialize_layout(state, XKB_STATE_LAYOUT_EFFECTIVE);
+
+  return (struct vt_kb_modifier_states_t){
+    .depressed = depressed,
+    .latched = latched,
+    .locked = locked,
+    .group = group,
+  };
 }
 
 bool 
@@ -185,8 +198,6 @@ vt_seat_init(struct vt_seat_t* seat) {
   wl_list_init(&seat->keybinds);
   seat->serial = 1;
 
-  vt_seat_add_global_keybind(seat, XKB_KEY_Escape, seat->comp->input_backend->mods.alt, _wl_handle_keybind_exit, NULL);
-  vt_seat_add_global_keybind(seat, XKB_KEY_e, seat->comp->input_backend->mods.alt, _wl_handle_keybind_term, NULL);
 
   // advertise chair 
   seat->global = wl_global_create(
@@ -197,6 +208,11 @@ vt_seat_init(struct vt_seat_t* seat) {
     _wl_seat_bind
     );
 
+  if(seat->comp->input_backend->platform == VT_INPUT_LIBINPUT) {
+    vt_seat_bind_global_keybinds(seat);
+    printf("Doign th at.\n");
+  }
+  
   return true;
 }
 
@@ -211,37 +227,32 @@ vt_seat_handle_key(struct vt_seat_t* seat, uint32_t keycode, uint32_t state, uin
     if (!kbd->resource) continue;
     if (!wl_resource_get_client(kbd->resource)) {
       wl_list_remove(&kbd->link);
-      if (kbd->xkb_keymap) xkb_keymap_unref(kbd->xkb_keymap);
-      if (kbd->xkb_state) xkb_state_unref(kbd->xkb_state);
       continue;
     }
   }
 
-  uint32_t depressed = 0, latched = 0, locked = 0, group = 0;
-
   struct vt_input_backend_t* backend = seat->comp->input_backend;
   xkb_state_update_key(backend->kb_state, keycode,
                        state == VT_KEY_STATE_PRESSED ? XKB_KEY_DOWN : XKB_KEY_UP);
+  struct vt_kb_modifier_states_t mod_states = _wl_kb_get_mod_states(backend->kb_state);
 
-  depressed = xkb_state_serialize_mods(backend->kb_state, XKB_STATE_MODS_DEPRESSED);
-  latched   = xkb_state_serialize_mods(backend->kb_state, XKB_STATE_MODS_LATCHED);
-  locked    = xkb_state_serialize_mods(backend->kb_state, XKB_STATE_MODS_LOCKED);
-  group     = xkb_state_serialize_layout(backend->kb_state, XKB_STATE_LAYOUT_EFFECTIVE);
+  printf(
+           "INPUT: Got key event: keycode: %i, state: %i, mods: %08x\n",
+           keycode, state, mod_states.depressed);
 
-  VT_TRACE(seat->comp->log,
-           "INPUT: Got key event: keycode: %i, state: %i, mods: %08x",
-           keycode, state, depressed);
-
-  if(_wl_handle_global_keybind(seat, keycode, state, depressed)) return;
+  if(_wl_handle_global_keybind(seat, keycode, state, mod_states.depressed)) return;
 
   wl_list_for_each(kbd, &seat->keyboards, link) {
     if(
-      seat->_last_mods.depressed  != depressed ||
-      seat->_last_mods.latched    != latched ||
-      seat->_last_mods.locked     != locked ||
-      seat->_last_mods.group      != group) {
-      wl_keyboard_send_modifiers(kbd->resource,
-                                 seat->serial++, depressed, latched, locked, group);
+      seat->_last_mods.depressed  != mod_states.depressed ||
+      seat->_last_mods.latched    != mod_states.latched ||
+      seat->_last_mods.locked     != mod_states.locked ||
+      seat->_last_mods.group      != mod_states.group) {
+      wl_keyboard_send_modifiers(
+        kbd->resource,
+        seat->serial++, 
+        mod_states.depressed, mod_states.latched, 
+        mod_states.locked, mod_states.group);
     }
 
     wl_keyboard_send_key(
@@ -254,10 +265,7 @@ vt_seat_handle_key(struct vt_seat_t* seat, uint32_t keycode, uint32_t state, uin
       : WL_KEYBOARD_KEY_STATE_RELEASED);
   }
   
-  seat->_last_mods.depressed  = depressed;
-  seat->_last_mods.latched    = latched;
-  seat->_last_mods.locked     = locked;
-  seat->_last_mods.group      = group;
+  seat->_last_mods = mod_states;
 
 }
 
@@ -271,6 +279,7 @@ vt_seat_add_global_keybind(
   if(!seat || !seat->comp) return NULL;
   struct vt_keybind_t* keybind = VT_ALLOC(seat->comp, sizeof(*keybind));
   keybind->mods = mods;
+  printf("Mods: %i\n", mods);
   keybind->sym = sym;
   keybind->callback = callback;
   keybind->user_data = user_data;
@@ -280,17 +289,60 @@ vt_seat_add_global_keybind(
   return keybind;
 }
 
+void 
+vt_seat_set_keyboard_focus(
+    struct vt_seat_t* seat, 
+    struct vt_surface_t* surface
+    ) {
+  if(seat->focused.surf == surface) return; 
+
+  struct wl_client* client = wl_resource_get_client(surface->surf_res);
+
+  if(seat->focused.keyboard) {
+    // send leave to previously focused client
+    wl_keyboard_send_leave(seat->focused.keyboard->resource, seat->serial++,
+                           seat->focused.surf->surf_res);
+  }
+
+  seat->focused.surf = surface;
+  seat->focused.keyboard = NULL;
+
+  struct vt_keyboard_t* kbd, *tmp; 
+  wl_list_for_each_safe(kbd, tmp, &seat->keyboards, link) {
+    if(wl_resource_get_client(kbd->resource) != client) continue;
+    seat->focused.keyboard = kbd;
+    break;
+  }
+  if(!seat->focused.keyboard) return;
+
+  struct vt_input_backend_t* backend = seat->comp->input_backend;
+  struct vt_kb_modifier_states_t mod_states = _wl_kb_get_mod_states(backend->kb_state);
+
+  // send enter event to the new focused client 
+  struct wl_array keys;
+  wl_array_init(&keys);
+  wl_keyboard_send_enter(
+    seat->focused.keyboard->resource, seat->serial++,
+    surface->surf_res, &keys);
+  wl_array_release(&keys);
+
+  wl_keyboard_send_modifiers(
+    seat->focused.keyboard->resource, seat->serial++,
+    mod_states.depressed, mod_states.latched, 
+    mod_states.locked, mod_states.group);
+}
+
+void 
+vt_seat_bind_global_keybinds(struct vt_seat_t* seat) {
+  if(!seat) return;
+  struct vt_kb_modifiers_t mods = seat->comp->input_backend->mods; 
+  vt_seat_add_global_keybind(seat, XKB_KEY_Escape, mods.alt, _wl_handle_keybind_exit, NULL);
+  vt_seat_add_global_keybind(seat, XKB_KEY_e, mods.alt, _wl_handle_keybind_term, NULL);
+}
+
 bool
 vt_seat_terminate(struct vt_seat_t* seat) {
   if (!seat) return false;
-
-  struct vt_keyboard_t* kbd,* tmp;
-  wl_list_for_each_safe(kbd, tmp, &seat->keyboards, link) {
-    wl_list_remove(&kbd->link);
-    if (kbd->xkb_keymap) xkb_keymap_unref(kbd->xkb_keymap);
-    if (kbd->xkb_state) xkb_state_unref(kbd->xkb_state);
-  }
-
   if (seat->global)
     wl_global_destroy(seat->global);
 

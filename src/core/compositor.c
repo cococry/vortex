@@ -498,6 +498,8 @@ _vt_comp_wl_surface_create(
   surf->surf_res = res;
 
   VT_TRACE(c->log, "compositor.surface_create: Setting surface implementation.")
+
+  vt_seat_set_keyboard_focus(c->seat, surf);
 }
 
 void 
@@ -541,12 +543,22 @@ _vt_comp_wl_surface_commit(
   }
 
   VT_TRACE(surf->comp->log, "Got compositor.surface_commit.")
-
+    
   if (!surf) { VT_ERROR(surf->comp->log, "surface_commit: NULL user_data"); return; }
 
-  // No buffer attached, this commit is illegal  
-  if (!surf->buf_res) {
-    VT_WARN(surf->comp->log, "compositor.surface_commit: Got commit request without attached buffer.")
+  surf->has_buffer = (surf->buf_res != NULL);
+  if (!surf->mapped && surf->has_buffer && surf->xdg_surf && surf->xdg_surf->toplevel.xdg_toplevel_res) {
+    // surface is becoming visible
+    surf->mapped = true;
+    vt_surface_mapped(surf);
+  } else if (surf->mapped && !surf->has_buffer) {
+    // surface lost its buffer (unmapped)
+    surf->mapped = false;
+    vt_surface_unmapped(surf);
+  }
+
+  // no buffer attached, this commit has no contents 
+  if (!surf->has_buffer) {
     return;
   }
 

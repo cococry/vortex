@@ -28,6 +28,8 @@ struct vt_surface_t {
 
   bool needs_frame_done;
 
+  bool has_buffer, mapped;
+
   uint32_t _mask_outputs_visible_on;
   uint32_t _mask_outputs_presented_on;
 
@@ -38,3 +40,7 @@ struct vt_surface_t {
 
   struct vt_frame_cb_pool cb_pool;
 };
+
+void vt_surface_mapped(struct vt_surface_t* surf);
+
+void vt_surface_unmapped(struct vt_surface_t* surf);

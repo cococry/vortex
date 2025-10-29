@@ -6,6 +6,12 @@
 #include <string.h>
 #include <sys/mman.h>
 
+#define _VT_XKB_GET_MOD_MASK(keymap, name) ({ \
+    int idx = xkb_keymap_mod_get_index((keymap), (name)); \
+    idx == XKB_MOD_INVALID ? 0 : (1u << idx); \
+})
+
+
 struct vt_input_backend_wl_t {
   struct wl_seat* wl_seat;
   struct wl_keyboard* wl_keyboard;
@@ -66,6 +72,14 @@ _wl_keyboard_keymap(void* data, struct wl_keyboard* wl_keyboard,
 
   ibackend->keymap = keymap;
   ibackend->kb_state = state;
+
+  ibackend->mods.shift = _VT_XKB_GET_MOD_MASK(ibackend->keymap, XKB_MOD_NAME_SHIFT);
+  ibackend->mods.ctrl  = _VT_XKB_GET_MOD_MASK(ibackend->keymap, XKB_MOD_NAME_CTRL);
+  ibackend->mods.alt   = _VT_XKB_GET_MOD_MASK(ibackend->keymap, XKB_MOD_NAME_ALT);
+  ibackend->mods.super = _VT_XKB_GET_MOD_MASK(ibackend->keymap, XKB_MOD_NAME_LOGO);
+  ibackend->mods.caps  = _VT_XKB_GET_MOD_MASK(ibackend->keymap, XKB_MOD_NAME_CAPS);
+
+  vt_seat_bind_global_keybinds(wl->comp->seat);
 }
 
 void 
