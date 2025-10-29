@@ -498,8 +498,8 @@ _xdg_toplevel_set_minimized(struct wl_client *client,
 // =================== PUBLIC API ====================
 // ===================================================
 bool
-vt_xdg_shell_init(struct vt_compositor_t* c) {
-  if(!(xdg_wm_base = wl_global_create(c->wl.dsp, &xdg_wm_base_interface, 1, NULL, _xdg_wm_base_bind))) {
+vt_proto_xdg_shell_init(struct vt_compositor_t* c, uint32_t version) {
+  if(!(xdg_wm_base = wl_global_create(c->wl.dsp, &xdg_wm_base_interface, version, NULL, _xdg_wm_base_bind))) {
     VT_ERROR(c->log, "XDG: Cannot implement XDG base interface.");
     return false;
   }

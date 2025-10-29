@@ -1,9 +1,11 @@
 #define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
+
 #include "src/input/input.h"
 #include "src/input/wl_seat.h"
-#include "core_types.h"
 #include "src/protocols/xdg_shell.h"
+#include "src/protocols/linux_dmabuf.h"
+#include "src/render/renderer.h"
 
 #include <linux/vt.h>
 #include <sys/ioctl.h>
@@ -16,10 +18,10 @@
 #include <glad.h>
 #include <wayland-server.h>
 
-#include "src/render/renderer.h"
 #include "config.h"
 #include "scene.h"
 #include "surface.h"
+#include "core_types.h"
 
 #include "compositor.h"
 
@@ -864,8 +866,12 @@ _vt_comp_wl_init(struct vt_compositor_t* c) {
 
   wl_global_create(c->wl.dsp, &wl_compositor_interface, 4, c, _vt_comp_wl_bind); 
 
-  if(!vt_xdg_shell_init(c)) {
-    VT_ERROR(c->log, "Cannot initialize XDG shell.");
+  if(!vt_proto_xdg_shell_init(c, 1)) {
+    VT_ERROR(c->log, "Cannot initialize XDG shell protocol.");
+    return false;
+  }
+  if(!vt_proto_linux_dmabuf_v1_init(c, 4)) {
+    VT_ERROR(c->log, "Cannot initialize linux-dmabuf-v1 protocol.");
     return false;
   }
 

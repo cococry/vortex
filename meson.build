@@ -35,6 +35,7 @@ dep_libinput        = dependency('libinput',          required: false)
 wayland_scanner = find_program('wayland-scanner', required: true)
 protocols_dir = dep_wayland_protos.get_variable(pkgconfig: 'pkgdatadir')
 xdg_shell_xml = join_paths(protocols_dir, 'stable', 'xdg-shell', 'xdg-shell.xml')
+dma_buf_xml    = join_paths(protocols_dir, 'stable', 'linux-dmabuf', 'linux-dmabuf-v1.xml')
 
 xdg_server_header = custom_target(
   'xdg-shell-server-header',
@@ -51,6 +52,20 @@ xdg_server_code = custom_target(
   command: [wayland_scanner, 'code', '@INPUT@', '@OUTPUT@'],
   install: false
 )
+dma_buf_header = custom_target(
+  'linux-dmabuf-header',
+  input: dma_buf_xml,
+  output: 'linux-dmabuf-v1-server-protocol.h',
+  command: [wayland_scanner, 'server-header', '@INPUT@', '@OUTPUT@'],
+  install: false
+)
+dma_buf_code = custom_target(
+  'linux-dmabuf-code',
+  input: dma_buf_xml,
+  output: 'linux-dmabuf-v1-protocol.c',
+  command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'],
+  install: false
+)
 
 runara_sp  = subproject('runara')
 runara_dep = runara_sp.get_variable('runara_dep')
@@ -64,6 +79,8 @@ vortex_src = files('src/vortex.c',
 'src/render/gl/egl_gl46.h', 
 'src/protocols/xdg_shell.c', 
 'src/protocols/xdg_shell.h', 
+'src/protocols/linux_dmabuf.c', 
+'src/protocols/linux_dmabuf.h', 
 'src/input/input.c', 
 'src/input/input.h', 
 'src/input/wl_seat.c', 
@@ -111,6 +128,8 @@ vortex_exe = executable(
     vortex_src,
     xdg_server_header,
     xdg_server_code,
+    dma_buf_header,
+    dma_buf_code,
   ],
   include_directories: vortex_inc,
   link_args: ['-Wl,-E'], 

@@ -25,5 +25,5 @@ struct vt_xdg_surface_t {
     struct vt_xdg_toplevel_t toplevel;
 };
 
-bool vt_xdg_shell_init(struct vt_compositor_t* c);
+bool vt_proto_xdg_shell_init(struct vt_compositor_t* c, uint32_t version);
 
