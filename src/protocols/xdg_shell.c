@@ -249,6 +249,7 @@ _xdg_wm_base_get_xdg_surface(struct wl_client *client,
   vt_xdg_surface_t* xdg_surf = VT_ALLOC(surf->comp, sizeof(*xdg_surf));
   xdg_surf->surf = surf;
   xdg_surf->xdg_surf_res = xdg_surf_res;
+  surf->xdg_surf = xdg_surf;
 
   wl_resource_set_implementation(xdg_surf_res, &xdg_surface_impl, xdg_surf, NULL);
 }

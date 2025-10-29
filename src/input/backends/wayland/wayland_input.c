@@ -3,7 +3,6 @@
 #include <wayland-client.h>
 #include <xkbcommon/xkbcommon.h>
 #include <unistd.h>
-#include <string.h>
 #include <sys/mman.h>
 
 #define _VT_XKB_GET_MOD_MASK(keymap, name) ({ \

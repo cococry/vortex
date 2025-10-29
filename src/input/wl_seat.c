@@ -294,14 +294,19 @@ vt_seat_set_keyboard_focus(
     struct vt_seat_t* seat, 
     struct vt_surface_t* surface
     ) {
-  if(seat->focused.surf == surface) return; 
+  if(seat->focused.surf == surface)  {
+    return; 
+  }
 
   struct wl_client* client = wl_resource_get_client(surface->surf_res);
 
-  if(seat->focused.keyboard) {
+  if(seat->focused.surf && seat->focused.keyboard) {
     // send leave to previously focused client
-    wl_keyboard_send_leave(seat->focused.keyboard->resource, seat->serial++,
-                           seat->focused.surf->surf_res);
+    if (wl_resource_get_client(seat->focused.keyboard) ==
+      wl_resource_get_client(seat->focused.surf->surf_res)) {
+      wl_keyboard_send_leave(seat->focused.keyboard, seat->serial++,
+                             seat->focused.surf->surf_res);
+    }
   }
 
   seat->focused.surf = surface;
@@ -310,7 +315,7 @@ vt_seat_set_keyboard_focus(
   struct vt_keyboard_t* kbd, *tmp; 
   wl_list_for_each_safe(kbd, tmp, &seat->keyboards, link) {
     if(wl_resource_get_client(kbd->resource) != client) continue;
-    seat->focused.keyboard = kbd;
+    seat->focused.keyboard = kbd->resource;
     break;
   }
   if(!seat->focused.keyboard) return;
@@ -322,12 +327,12 @@ vt_seat_set_keyboard_focus(
   struct wl_array keys;
   wl_array_init(&keys);
   wl_keyboard_send_enter(
-    seat->focused.keyboard->resource, seat->serial++,
+    seat->focused.keyboard, seat->serial++,
     surface->surf_res, &keys);
   wl_array_release(&keys);
 
   wl_keyboard_send_modifiers(
-    seat->focused.keyboard->resource, seat->serial++,
+    seat->focused.keyboard, seat->serial++,
     mod_states.depressed, mod_states.latched, 
     mod_states.locked, mod_states.group);
 }

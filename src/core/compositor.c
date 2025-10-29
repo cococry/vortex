@@ -498,8 +498,6 @@ _vt_comp_wl_surface_create(
   surf->surf_res = res;
 
   VT_TRACE(c->log, "compositor.surface_create: Setting surface implementation.")
-
-  vt_seat_set_keyboard_focus(c->seat, surf);
 }
 
 void 
@@ -545,6 +543,7 @@ _vt_comp_wl_surface_commit(
   VT_TRACE(surf->comp->log, "Got compositor.surface_commit.")
     
   if (!surf) { VT_ERROR(surf->comp->log, "surface_commit: NULL user_data"); return; }
+
 
   surf->has_buffer = (surf->buf_res != NULL);
   if (!surf->mapped && surf->has_buffer && surf->xdg_surf && surf->xdg_surf->toplevel.xdg_toplevel_res) {
@@ -747,7 +746,7 @@ void
 _vt_comp_wl_surface_destroy(struct wl_client *client,
                          struct wl_resource *resource) {
   struct vt_surface_t* surf = ((struct vt_surface_t*)wl_resource_get_user_data(resource));
-  
+    
   VT_TRACE(surf->comp->log, 
             "Got surface.destroy: Destroying surface resource.")
   wl_resource_destroy(resource);
@@ -757,6 +756,12 @@ _vt_comp_wl_surface_destroy(struct wl_client *client,
 void 
 _vt_comp_wl_surface_handle_resource_destroy(struct wl_resource* resource) {
   struct vt_surface_t* surf = wl_resource_get_user_data(resource);
+ 
+  if (surf->mapped) {
+    vt_surface_unmapped(surf);
+    surf->mapped = false;
+  }
+
   int32_t x = surf->x;
   int32_t y = surf->y;
   int32_t w = surf->width;

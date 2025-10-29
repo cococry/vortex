@@ -25,7 +25,7 @@ struct vt_seat_t {
   struct wl_list pointers;
   union {
     struct vt_surface_t* surf;
-    struct vt_keyboard_t* keyboard;
+    struct wl_resource* keyboard;
   } focused;
   struct vt_compositor_t* comp;
 
