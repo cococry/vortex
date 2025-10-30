@@ -26,8 +26,6 @@ typedef struct {
   struct xdg_wm_base* parent_xdg_wm_base;
   struct wl_seat* parent_seat;
   struct vt_compositor_t* comp;
-
-  struct vt_renderer_t* renderer;
 } wayland_backend_state_t;
 
 typedef struct {
@@ -223,7 +221,7 @@ _wl_backend_destroy_output(struct vt_backend_t* backend, struct vt_output_t* out
     wl_output->parent_surface = NULL;
   }
 
-  if(!wl_backend->renderer->impl.destroy_renderable_output(backend->comp->renderer, output)) return false;
+  if(!backend->comp->renderer->impl.destroy_renderable_output(backend->comp->renderer, output)) return false;
 
   output->user_data = NULL;
    
@@ -269,11 +267,8 @@ backend_init_wl(struct vt_backend_t* backend) {
   wl_event_loop_add_fd(c->wl.evloop, pfd,
                        WL_EVENT_READABLE, _wl_parent_dispatch, wl);
 
-  wl->renderer = VT_ALLOC(c, sizeof(struct vt_renderer_t));
-  wl->renderer->comp = c;
-  vt_renderer_implement(wl->renderer, VT_RENDERING_BACKEND_EGL_OPENGL);
 
-  wl->renderer->impl.init(c->backend, wl->renderer, wl->parent_display);
+  backend->comp->renderer->impl.init(c->backend, backend->comp->renderer, wl->parent_display);
 
   _wl_backend_init_active_outputs(backend);
   
@@ -325,7 +320,7 @@ _wl_backend_init_active_outputs(struct vt_backend_t* backend){
   
   wayland_backend_state_t* wl_backend = BACKEND_DATA(backend, wayland_backend_state_t);
 
-  if (!wl_backend->renderer || !wl_backend->renderer->impl.setup_renderable_output) {
+  if (!backend->comp->renderer || !backend->comp->renderer->impl.setup_renderable_output) {
     VT_ERROR(backend->comp->log, "WL: Renderer backend not initialized before output setup.");
     return false;
   }
@@ -338,7 +333,7 @@ _wl_backend_init_active_outputs(struct vt_backend_t* backend){
       VT_ERROR(backend->comp->log, "WL: Failed to setup internal WL output.");
       continue;
     } 
-    if(!wl_backend->renderer->impl.setup_renderable_output(wl_backend->renderer, output)) {
+    if(!backend->comp->renderer->impl.setup_renderable_output(backend->comp->renderer, output)) {
       VT_ERROR(backend->comp->log, "WL: Failed to setup renderable output for WL output (%ix%i@%.2f)",
                 output->width, output->height, output->refresh_rate);
       _wl_backend_destroy_output(backend, output);
@@ -354,7 +349,7 @@ _wl_backend_init_active_outputs(struct vt_backend_t* backend){
 
   // Nested backend must not wait for the vblank of the compositor for 
   // frame pacing, as the parent compositor already waits.
-  wl_backend->renderer->impl.set_vsync(wl_backend->renderer, false);
+  backend->comp->renderer->impl.set_vsync(backend->comp->renderer, false);
 
   return true;
 }

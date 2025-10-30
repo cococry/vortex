@@ -1,4 +1,5 @@
 #include "src/core/core_types.h"
+#include "src/core/util.h"
 #include "src/render/dmabuf.h"
 #include "src/render/renderer.h"
 #include <EGL/eglplatform.h>
@@ -269,18 +270,17 @@ _egl_gl_create_output_fbo(struct vt_output_t *output) {
   return true;
 }
 
-bool _egl_create_display(
+EGLDisplay _egl_create_display(
   struct vt_compositor_t* comp,
   enum vt_backend_platform_t platform,
   void *native_handle,
-  EGLDisplay dsp,
   bool log_error
 ) {
   PFNEGLGETPLATFORMDISPLAYEXTPROC eglGetPlatformDisplayEXT =
     (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress("eglGetPlatformDisplayEXT");
   if (!eglGetPlatformDisplayEXT) {
     if(log_error) VT_ERROR(comp->log, "EGL_EXT_platform_base not supported.");
-    return false;
+    return NULL;
   }
 
   int32_t egl_platform = -1;
@@ -290,25 +290,25 @@ bool _egl_create_display(
     case VT_BACKEND_SURFACELESS: egl_platform = EGL_PLATFORM_SURFACELESS_MESA; break;
     default: {
       log_fatal(comp->log, "Using invalid compositor backend.");
-      return false;
+      return NULL;
     }
   }
-  dsp = eglGetPlatformDisplayEXT(egl_platform, native_handle, NULL);
+  EGLDisplay dsp = eglGetPlatformDisplayEXT(egl_platform, native_handle, NULL);
   if (dsp == EGL_NO_DISPLAY) {
     if(log_error) {
       EGLint err = eglGetError();
       VT_ERROR(comp->log, "eglGetPlatformDisplayEXT failed: 0x%04x (%s)", err, _egl_err_str(err));
     }
-    return false;
+    return NULL;
   }
 
   if (!eglInitialize(dsp, NULL, NULL)) {
     EGLint err = eglGetError();
     if(log_error) VT_ERROR(comp->log, "eglInitialize failed: 0x%04x (%s)", err, _egl_err_str(err));
-    return false;
+    return NULL;
   }
 
-  return true;
+  return dsp;
 }
 
 bool 
@@ -320,8 +320,11 @@ _egl_create_renderer(
   renderer->user_data = VT_ALLOC(renderer->comp, sizeof(struct egl_backend_state_t));
   struct egl_backend_state_t* egl = BACKEND_DATA(renderer, struct egl_backend_state_t);
 
-  _egl_create_display(renderer->comp, platform, native_handle, egl->egl_dsp, log_error);  
-
+  if(!(egl->egl_dsp = _egl_create_display(renderer->comp, platform, native_handle, log_error))) {
+    VT_ERROR(renderer->comp->log, "EGL: Failed to create EGL display.");
+    return false;
+  }
+  return true;
 }
 
 
@@ -363,10 +366,10 @@ renderer_init_egl(struct vt_backend_t* backend, struct vt_renderer_t *r, void* n
   }
 
 
-  const char *vendor  = eglQueryString(egl->egl_dsp, EGL_VENDOR);
-  const char *version = eglQueryString(egl->egl_dsp, EGL_VERSION);
+  const char* vendor  = eglQueryString(egl->egl_dsp, EGL_VENDOR);
+  const char* version = eglQueryString(egl->egl_dsp, EGL_VERSION);
 
-  const char *exts = eglQueryString(egl->egl_dsp, EGL_EXTENSIONS);
+  const char* exts = eglQueryString(egl->egl_dsp, EGL_EXTENSIONS);
   if(strstr(exts, "EGL_EXT_swap_buffers_with_damage")) {
     eglSwapBuffersWithDamageEXT_ptr =
       (PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC)
@@ -401,7 +404,10 @@ renderer_query_dmabuf_formats_egl(struct vt_compositor_t* comp, void* native_han
   }
 
   EGLDisplay egl_dsp;
-  if(!_egl_create_display(comp, comp->backend->platform, native_handle, egl_dsp, false)) return false;
+  if(!(egl_dsp = _egl_create_display(comp, comp->backend->platform, native_handle, false))) {
+    VT_ERROR(comp->log, "EGL: Failed to create EGL display.");
+    return false;
+  }
 
   wl_array_init(formats);
 
