@@ -57,7 +57,7 @@ vortex [option:s] (value:s)
 | `-lf, --logfile` | Write logs to a logfile located in:<br>`~/.local/state/vortex/logs/` or `$XDG_STATE_HOME/vortex/logs` |
 | `-q, --quiet` | Run in quiet mode (no logging) |
 | `-vo, --virtual-outputs [val]` | Specify the number of virtual outputs (windows) in nested mode |
-| `-b, --backend [val]` | Specify the compositor’s rendering or sink backend.<br>Valid options: `drm`, `wl`. Example:<br>`vortex -b drm` |
+| `-b, --backend [val]` | Specify the compositor’s sink backend.<br>Valid options: `drm`, `wl`. Example:<br>`vortex -b drm` |
 | `-bp, --backend-path [val]` | Specify the **path to a `.so` file** to load as a custom sink backend |
 
 
