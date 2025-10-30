@@ -92,3 +92,8 @@ void vt_util_arena_reset(struct vt_arena_t *a);
 void vt_util_arena_destroy(struct vt_arena_t *a);
 
 void vt_util_emit_signal(struct wl_signal *signal, void *data);
+
+int vt_util_allocate_shm_file(struct vt_compositor_t* comp, size_t size);
+
+struct vt_compositor_t;
+bool vt_util_allocate_shm_rwro_pair(struct vt_compositor_t* comp, size_t size, int* rw_fd, int* ro_fd);

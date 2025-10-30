@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../core/core_types.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -12,6 +13,7 @@ enum vt_dmabuf_tranche_flags_t {
 }; 
 
 struct vt_dmabuf_feedback_t {
+  struct vt_compositor_t* comp;
   dev_t dev_main;
   struct wl_array tranches; // array of vt_dmabuf_tranche_t 
 };

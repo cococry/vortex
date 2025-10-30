@@ -500,8 +500,9 @@ _xdg_toplevel_set_minimized(struct wl_client *client,
 bool
 vt_proto_xdg_shell_init(struct vt_compositor_t* c, uint32_t version) {
   if(!(xdg_wm_base = wl_global_create(c->wl.dsp, &xdg_wm_base_interface, version, NULL, _xdg_wm_base_bind))) {
-    VT_ERROR(c->log, "XDG: Cannot implement XDG base interface.");
+    VT_ERROR(c->log, "VT_PROTO_XDG_SHELL: Cannot implement XDG base interface.");
     return false;
   }
+  VT_TRACE(c->log, "VT_PROTO_XDG_SHELL: Initialized XDG shell protocol.");
   return true;
 }

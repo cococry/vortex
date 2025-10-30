@@ -1067,11 +1067,27 @@ backend_init_drm(struct vt_backend_t* backend) {
   if(!drm_master->main_drm) {
     log_fatal(drm_master->comp->log, "DRM: Failed to find renderable DRM device.");
   }
+
+  // initialize the dmabuf protocol with default feedback
   struct vt_dmabuf_feedback_t* default_feedback = calloc(1, sizeof(*default_feedback));
-  _drm_build_dmabuf_feedback(drm_master, default_feedback);
-  vt_proto_linux_dmabuf_v1_init(drm_master->comp, default_feedback, 4);
+  default_feedback->comp = drm_master->comp;
+
+  if(!(_drm_build_dmabuf_feedback(drm_master, default_feedback))) {
+    VT_ERROR(backend->comp->log, "DRM: Failed to build default DMABUF feedback.");
+    free(default_feedback);
+  } else {
+    vt_proto_linux_dmabuf_v1_init(drm_master->comp, default_feedback, 4);
+  }
+
+  // cleanup the feedback
+  struct vt_dmabuf_tranche_t* tranche;
+  wl_array_for_each(tranche, &default_feedback->tranches) {
+    wl_array_release(&tranche->formats);
+  }
+  wl_array_release(&default_feedback->tranches);
+  free(default_feedback);
   
-  VT_TRACE(backend->comp->log, "Successfully initialized DRM backend.");
+  VT_TRACE(backend->comp->log, "DRM: Successfully initialized DRM backend.");
 
   return true;
 }

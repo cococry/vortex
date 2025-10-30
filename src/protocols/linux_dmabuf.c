@@ -1,7 +1,9 @@
 #include "linux_dmabuf.h"
 #include "../render/dmabuf.h"
 
+#include <errno.h>
 #include <linux-dmabuf-v1-server-protocol.h>
+#include <sys/mman.h>
 #include <unistd.h>
 #include <wayland-server-core.h>
 #include <wayland-util.h>
@@ -17,21 +19,27 @@ struct vt_linux_dmabuf_v1_params_t {
   struct vt_dmbuf_attr_t attr;
 };
 
-struct vt_linux_dmabuf_v1_feedback_v1_tranche_t {
+struct vt_linux_dmabuf_v1_packed_feedback_tranche_t {
 	dev_t target_device;
 	uint32_t flags; 
 	struct wl_array indices;
 };
 
-struct vt_linux_dmabuf_v1_feedback_v1_t {
-	dev_t main_device;
-	int table_fd;
-	size_t table_size;
+struct vt_linux_dmabuf_v1_packed_feedback_t {
+	dev_t dev_main;
+	int entries_fd;
+	size_t entries_size;
 
-	size_t tranches_len;
-	struct vt_linux_dmabuf_v1_feedback_v1_tranche_t tranches[];
+	size_t n_tranches;
+	struct vt_linux_dmabuf_v1_packed_feedback_tranche_t* tranches;
 };
 
+
+struct vt_linux_dmabuf_v1_packed_feedback_entry_t {
+	uint64_t mod;
+	uint32_t format;
+	uint32_t pad; // unused
+};
 
 static void _proto_linux_dmabuf_v1_bind(struct wl_client *client, void *data,
                                         uint32_t version, uint32_t id);
@@ -98,8 +106,13 @@ static void _linux_dmabuf_v1_feedback_destroy(
   struct wl_resource *resource
 );
 
-static void _linux_dmabuf_send_feedback(
+static bool _linux_dmabuf_set_default_feedback(
+  struct vt_dmabuf_feedback_t* feedback
+);
 
+static bool _linux_dmabuf_pack_feedback(
+  struct vt_dmabuf_feedback_t* feedback,
+  struct vt_linux_dmabuf_v1_packed_feedback_t* o_packed
 );
 
 static struct vt_proto_linux_dmabuf_v1_t* _proto;
@@ -280,6 +293,93 @@ _linux_dmabuf_v1_feedback_destroy(
   wl_resource_destroy(resource);
 }
 
+bool
+_linux_dmabuf_set_default_feedback(
+  struct vt_dmabuf_feedback_t* feedback
+) {
+  struct vt_linux_dmabuf_v1_packed_feedback_t packed;
+  if(!_linux_dmabuf_pack_feedback(feedback, &packed)) {
+    VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Failed to pack default DMABUF feedback.");
+    return false;
+  }
+}
+
+static bool 
+_format_exists(struct wl_array* fmts, struct vt_dmabuf_drm_format_t* find) {
+  struct vt_dmabuf_drm_format_t* fmt;
+  wl_array_for_each(fmt, fmts) {
+    if(memcmp(fmt, find, sizeof(*find)) == 0) return true;
+  }
+  return false;
+}
+
+bool 
+_linux_dmabuf_pack_feedback(
+  struct vt_dmabuf_feedback_t* feedback,
+  struct vt_linux_dmabuf_v1_packed_feedback_t* o_packed
+) {
+  if(!feedback) return false;
+  struct wl_array all_formats;
+  wl_array_init(&all_formats);
+
+  size_t entries_len = 0, entries_size = 0;
+  struct vt_dmabuf_tranche_t* tranche;
+  wl_array_for_each(tranche, &feedback->tranches) {
+    if(!tranche) continue;
+    struct vt_dmabuf_drm_format_t* fmt;
+    wl_array_for_each(fmt, &tranche->formats) {
+      if(!fmt) continue;
+      if(!_format_exists(&all_formats, fmt)) {
+        struct vt_dmabuf_drm_format_t* fmt_add = wl_array_add(&all_formats, sizeof(*fmt_add));
+        memcpy(fmt_add, fmt, sizeof(*fmt_add));
+        entries_len += fmt->len;
+      }
+    }
+  }
+  if(!entries_len) {
+    VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Format entries of packed DMABUF feedback is empty.");
+    wl_array_release(&all_formats);
+    return false;
+  }
+  entries_size = entries_len * sizeof(struct vt_linux_dmabuf_v1_packed_feedback_entry_t);
+
+  int rw_fd, ro_fd;
+  if(!(vt_util_allocate_shm_rwro_pair(feedback->comp, entries_size, &rw_fd, &ro_fd))) {
+    VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Failed to allocate SHM pair for packed DMABUF feedback format entries.");
+    wl_array_release(&all_formats);
+    return false;
+  }
+
+  struct vt_linux_dmabuf_v1_packed_feedback_entry_t* entries = mmap(
+    NULL, entries_size, PROT_READ | PROT_WRITE, MAP_SHARED, rw_fd, 0);
+  if(entries == MAP_FAILED) {
+    VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Failed to mmap SHM for packed DMABUF feedback format entries: %s.", strerror(errno));
+    wl_array_release(&all_formats);
+    return false;
+  }
+
+	close(rw_fd);
+
+  struct vt_dmabuf_drm_format_t* fmt;
+  uint32_t n_entries = 0;
+  wl_array_for_each(fmt, &all_formats) {
+    if(!fmt) continue;
+    for(uint32_t i = 0; i < fmt->len; i++) {
+      entries[n_entries++] = (struct vt_linux_dmabuf_v1_packed_feedback_entry_t){
+        .format = fmt->format,
+        .mod    = fmt->mods[i].mod,
+      };
+    }
+  }
+  if(n_entries != entries_len) {
+    VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Mapped entries of DMABUF feedback entries does not match internal format entries."); 
+    return false;
+    wl_array_release(&all_formats);
+  }
+	munmap(entries, entries_size);
+
+  return true;
+}
 
 
 
@@ -296,5 +396,10 @@ vt_proto_linux_dmabuf_v1_init(struct vt_compositor_t* comp, struct vt_dmabuf_fee
 
   _proto->dsp_destroy.notify = _proto_linux_dmabuf_v1_handle_dsp_destroy;
   wl_display_add_destroy_listener(comp->wl.dsp, &_proto->dsp_destroy);
+
+
+  VT_TRACE(comp->log, "VT_PROTO_LINUX_DMABUF_V1: Initialized DMABUF protocol.");
+
+  return true;
 
 }

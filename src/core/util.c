@@ -4,11 +4,15 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "../core/core_types.h"
 #include "util.h"
+#include <fcntl.h>
+#include <errno.h>
 #include <stdbool.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <sys/mman.h>
 
 
 // ===================================================
@@ -161,4 +165,48 @@ vt_util_emit_signal(struct wl_signal *signal, void *data) {
 
 	wl_list_remove(&cursor.link);
 	wl_list_remove(&end.link);
+}
+
+int 
+vt_util_allocate_shm_file(struct vt_compositor_t* comp, size_t size) {
+  int fd;
+  if ((fd = memfd_create("vortex-shm", MFD_CLOEXEC | MFD_ALLOW_SEALING)) < 0) {
+    VT_ERROR(comp->log, "UTIL: vt_util_allocate_shm_file: memfd_create() failed: %s", strerror(errno));
+    return -1;
+  }
+  if (ftruncate(fd, size) < 0) {
+    VT_ERROR(comp->log, "UTIL: vt_util_allocate_shm_file: ftruncate() failed: %s", strerror(errno));
+    close(fd);
+    return -1;
+  }
+  return fd;
+}
+
+bool 
+vt_util_allocate_shm_rwro_pair(struct vt_compositor_t* comp, size_t size, int* rw_fd, int* ro_fd) {
+  *rw_fd = -1;
+  *ro_fd = -1;
+
+  *rw_fd = vt_util_allocate_shm_file(comp, size);
+  if(*rw_fd < 0) {
+    VT_ERROR(comp->log, "UTIL: vt_util_allocate_shm_rwro_pair: failed to allocate read-write shm file."); 
+    return false;
+  }
+
+  *ro_fd = dup(*rw_fd);
+  if (*ro_fd < 0) {
+    perror("dup failed");
+    close(*rw_fd);
+    return false;
+  }
+
+  if (fcntl(*ro_fd, F_ADD_SEALS,
+            F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE) < 0) {
+    perror("fcntl(F_ADD_SEALS) failed");
+    close(*ro_fd);
+    close(*rw_fd);
+    return false;
+  }
+
+  return true;
 }
