@@ -1,5 +1,6 @@
 #pragma once
 
+#include <sys/types.h>
 #include "core_types.h"
 
 struct vt_session_t;

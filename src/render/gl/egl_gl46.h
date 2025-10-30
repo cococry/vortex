@@ -2,8 +2,15 @@
 
 
 #include "../renderer.h"
+#include "../../core/core_types.h"
 
 bool renderer_init_egl(struct vt_backend_t* backend, struct vt_renderer_t* r, void* native_handle);
+
+bool renderer_is_handle_renderable_egl(struct vt_renderer_t* renderer, void* native_handle);
+
+bool renderer_query_dmabuf_formats_egl(struct vt_compositor_t* comp, void* native_handle, struct wl_array* formats);
+
+bool renderer_query_dmabuf_formats_with_renderer_egl(struct vt_renderer_t* renderer, struct wl_array* formats);
 
 bool renderer_setup_renderable_output_egl(struct vt_renderer_t* r, struct vt_output_t* output);
   

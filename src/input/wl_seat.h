@@ -36,7 +36,7 @@ struct vt_seat_t {
 
 struct vt_keyboard_t {
   struct vt_seat_t* seat;
-  struct wl_resource* resource;  
+  struct wl_resource* res;  
   struct wl_list link;
 
   uint32_t _keymap_size;

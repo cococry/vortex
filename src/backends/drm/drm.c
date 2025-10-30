@@ -1,6 +1,3 @@
-#include "input/wl_seat.h"
-#include <libinput.h>
-#include <xkbcommon/xkbcommon-keysyms.h>
 #define _GNU_SOURCE
 
 #include <xf86drmMode.h>
@@ -27,23 +24,21 @@
 #include <wayland-util.h>
 #include <pthread.h>
 
-#include "render/renderer.h"
 #include "core/compositor.h"
+#include "render/renderer.h"
 
 #include "./drm.h"
 #include "./session_drm.h"
 
+#include "core/session.h"
+#include "input/wl_seat.h"
+#include "protocols/linux_dmabuf.h"
+#include "render/dmabuf.h"
+#include <libinput.h>
+#include <xkbcommon/xkbcommon-keysyms.h>
+
 #include <linux/input-event-codes.h>
 
-struct drm_backend_master_state_t {
-  struct wl_list backends;
-  uint32_t x_ptr;
-  int32_t vt_fd;
-  struct vt_compositor_t* comp;
-
-  struct wl_listener session_terminate_listener,
-  seat_disable_listener, seat_enable_listener;
-};
 
 struct drm_backend_state_t {
   int drm_fd;
@@ -58,14 +53,27 @@ struct drm_backend_state_t {
 
   struct wl_list link;
 
-  struct vt_renderer_t* renderer;
 
   struct vt_backend_t* root_backend;
 
-  char gpu_path[64];
+  struct vt_device_t* dev;
 
   struct wl_event_source *event_source 
 };
+
+struct drm_backend_master_state_t {
+  struct wl_list backends;
+  uint32_t x_ptr;
+  int32_t vt_fd;
+  struct vt_compositor_t* comp;
+
+  struct wl_listener session_terminate_listener,
+  seat_disable_listener, seat_enable_listener;
+
+  struct drm_backend_state_t* main_drm;
+  uint32_t n_drm;
+};
+
 
 struct drm_output_state_t {
   struct gbm_bo *current_bo;
@@ -76,6 +84,8 @@ struct drm_output_state_t {
   uint32_t current_fb;
   uint32_t pending_fb;
   uint32_t prev_fb;
+
+  struct drm_backend_state_t* drm_backend;
 
   bool needs_modeset;
   bool flip_inflight;
@@ -90,12 +100,13 @@ struct drm_output_state_t {
 
 static void   _drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec, unsigned int usec, void *data);
 static void   _drm_release_all_scanout(struct vt_output_t* output);
-static void   _drm_handle_vt_release(int sig);
-static void   _drm_handle_vt_acquire(int sig);
+static bool   _drm_devices_equal(drmDevicePtr a, drmDevicePtr b);
+static bool   _drm_can_share_dmabuf(struct vt_device_t* main_dev, struct vt_device_t* dev);
+static bool   _drm_build_dmabuf_feedback(struct drm_backend_master_state_t* master, struct vt_dmabuf_feedback_t* feedback); 
 static bool   _drm_suspend(struct drm_backend_state_t* backend);
 static bool   _drm_resume(struct drm_backend_state_t* backend);
 static int    _drm_dispatch(int fd, uint32_t mask, void *data);
-static bool   _drm_init_for_device(struct vt_compositor_t* comp, struct drm_backend_state_t* drm, int32_t device_fd, const char* gpu_path);
+static bool   _drm_init_for_device(struct vt_compositor_t* comp, struct drm_backend_state_t* drm, struct vt_device_t* dev); 
 static bool   _drm_init_active_outputs_for_device(struct drm_backend_state_t* drm);
 static bool   _drm_handle_frame_for_device(struct drm_backend_state_t* drm, struct vt_output_t* output);
 static bool   _drm_create_output_for_device(struct drm_backend_state_t* drm, struct vt_output_t* output, void* data);
@@ -172,6 +183,162 @@ _drm_release_all_scanout(struct vt_output_t* output) {
     gbm_surface_release_buffer(drm_output->gbm_surf, drm_output->prev_bo);
     drm_output->prev_bo = NULL; drm_output->prev_fb = 0;
   }
+}
+
+static bool _drm_devices_equal(drmDevicePtr a, drmDevicePtr b) {
+    if (!a || !b) return false;
+    if (a->bustype != b->bustype) return false;
+    return memcmp(&a->businfo, &b->businfo, sizeof(a->businfo)) == 0;
+}
+
+static bool _drm_can_share_dmabuf(struct vt_device_t* main_dev, struct vt_device_t* dev) {
+    if (!main_dev || !dev)
+        return false;
+
+  drmDevicePtr main_dev_drm = NULL, dev_drm = NULL;
+
+  if (drmGetDevice(main_dev->fd, &main_dev_drm) != 0 ||
+    drmGetDevice(dev->fd, &dev_drm) != 0) {
+    fprintf(stderr, "drmGetDevice() failed\n");
+    if (main_dev_drm) drmFreeDevice(&main_dev_drm);
+    if (dev_drm) drmFreeDevice(&dev_drm);
+    return false;
+  }
+
+  if(_drm_devices_equal(dev_drm, main_dev_drm)) {
+    drmFreeDevice(&main_dev_drm);
+    drmFreeDevice(&dev_drm);
+    return true;
+  }
+
+  bool compatible = false;
+
+  // if the devices do not have the same bustype, they cannot share memory 
+  if (dev_drm->bustype == main_dev_drm->bustype) {
+    if (main_dev_drm->bustype == DRM_BUS_PCI) {
+      if(
+        main_dev_drm->businfo.pci && dev_drm->businfo.pci &&
+        main_dev_drm->businfo.pci->domain == dev_drm->businfo.pci->domain &&
+        main_dev_drm->businfo.pci->bus == dev_drm->businfo.pci->bus &&
+        main_dev_drm->businfo.pci->dev == dev_drm->businfo.pci->dev &&
+        main_dev_drm->businfo.pci->func == dev_drm->businfo.pci->func) {
+        compatible = true;
+      }
+    } else if(memcmp(&main_dev_drm->businfo, &dev_drm->businfo, sizeof(dev_drm->businfo)) == 0) { 
+      compatible = true;
+    }
+  } 
+
+
+  if(!compatible) {
+    char card_main_dev[64], card_dev[64];
+    // the card paths are '/dev/dri/cardX', we need to get only 'cardX':
+    const char* base_main = strrchr(main_dev->path, '/');
+    const char* base_other = strrchr(dev->path, '/');
+    if (!base_main || !base_other) {
+      compatible = false;
+    } else {
+      // If the devices share the same IOMMU group, they can share dmabufs 
+      snprintf(card_main_dev, sizeof(card_main_dev), "%s", base_main + 1);
+      snprintf(card_dev, sizeof(card_dev), "%s", base_other + 1);
+      char path_a[256], path_b[256];
+      snprintf(path_a, sizeof(path_a), "/sys/class/drm/%s/device/iommu_group", card_main_dev);
+      snprintf(path_b, sizeof(path_b), "/sys/class/drm/%s/device/iommu_group", card_dev);
+
+      char link_a[256], link_b[256];
+      ssize_t len_a = readlink(path_a, link_a, sizeof(link_a) - 1);
+      ssize_t len_b = readlink(path_b, link_b, sizeof(link_b) - 1);
+      if (len_a < 0 || len_b < 0) {
+        compatible = false;
+      } else {
+        link_a[len_a] = 0;
+        link_b[len_b] = 0;
+        compatible = strcmp(link_a, link_b) == 0;
+      }
+    }
+  }
+
+  drmFreeDevice(&main_dev_drm);
+  drmFreeDevice(&dev_drm);
+  return compatible;
+}
+
+bool 
+_drm_build_dmabuf_feedback(
+  struct drm_backend_master_state_t* master,
+  struct vt_dmabuf_feedback_t* feedback
+) {
+  if(!feedback || !master || !master->comp || !master->comp->renderer) return false; 
+  drmDevicePtr dev_main_drm = NULL;
+  drmGetDevice(master->main_drm->dev->fd, &dev_main_drm); 
+
+  feedback->dev_main = master->main_drm->dev->dev;
+  wl_array_init(&feedback->tranches);
+
+  uint32_t n_devs = 0;
+  drmDevicePtr devs[master->n_drm];
+  // add the tranches
+  struct drm_backend_state_t* drm;
+  wl_list_for_each(drm, &master->backends, link) {
+    struct vt_device_t* dev = drm->dev;
+    if(!drm->dev) continue;
+    drmDevicePtr dev_drm = NULL;
+    if (drmGetDevice(dev->fd, &dev_drm) != 0) {
+      if (dev_drm) drmFreeDevice(&dev_drm);
+      continue;
+    }
+    devs[n_devs++] = dev_drm;
+
+    // skip devices without any render nodes
+    if (!(dev_drm->available_nodes & (1 << DRM_NODE_RENDER))) continue;
+    // skip non-shareable GPUs
+    if (!_drm_can_share_dmabuf(master->main_drm->dev, dev)) continue;  
+
+    struct vt_dmabuf_tranche_t* tranche = wl_array_add(&feedback->tranches, sizeof(*tranche));
+    tranche->target_device = dev->dev;
+
+    tranche->flags = _drm_devices_equal(dev_main_drm, dev_drm)
+      ? VT_DMABUF_TRANCHE_FLAG_DIRECT_SCANOUT 
+      : 0;
+
+    // Add the formats that the device supports, as we got told by the 
+    // renderer, to the tranche
+    struct vt_renderer_t* r = master->comp->renderer;
+    if(dev == master->main_drm->dev) { 
+      if(r->impl.query_dmabuf_formats_with_renderer) {
+        if(!master->comp->renderer->impl.query_dmabuf_formats_with_renderer(r, &tranche->formats)) {
+          wl_array_init(&tranche->formats);
+          continue;
+        }
+      }
+    } else { 
+      if(r->impl.query_dmabuf_formats) {
+        if(!master->comp->renderer->impl.query_dmabuf_formats(master->comp, drm->gbm_dev,  &tranche->formats)) {
+          wl_array_init(&tranche->formats);
+          continue;
+        }
+      }
+    }
+  }
+  // Adding a generic fallback tranche (LINEAR DRM_FORMAT_ARGB8888) 
+  struct vt_dmabuf_tranche_t* fallback = wl_array_add(&feedback->tranches, sizeof(*fallback));
+
+  fallback->target_device = feedback->dev_main;
+  fallback->flags = 0;
+  wl_array_init(&fallback->formats);
+
+  struct vt_dmabuf_drm_format_t* fmt = wl_array_add(&fallback->formats, sizeof(*fmt));
+  fmt->format = DRM_FORMAT_ARGB8888;
+  fmt->len = 1;
+  fmt->mods = calloc(1, sizeof(struct vt_dmabuf_format_modifier_t));
+  fmt->mods[0].mod = DRM_FORMAT_MOD_LINEAR;
+
+  drmFreeDevice(&dev_main_drm);
+  for (int i = 0; i < n_devs; i++) {
+    drmFreeDevice(&devs[i]);
+  }
+
+  return true;
 }
 
 bool 
@@ -299,12 +466,12 @@ _drm_dispatch(int fd, uint32_t mask, void *data) {
   return 0;
 }
 
-bool _drm_init_for_device(struct vt_compositor_t* comp, struct drm_backend_state_t* drm, int32_t device_fd, const char* gpu_path) {
+bool _drm_init_for_device(struct vt_compositor_t* comp, struct drm_backend_state_t* drm, struct vt_device_t* dev) {
   if(!drm) return false;
   wl_list_init(&drm->outputs);
 
-  drm->drm_fd = device_fd;
-  snprintf(drm->gpu_path, sizeof(drm->gpu_path), "%s", gpu_path);
+  drm->drm_fd = dev->fd;
+  drm->dev = dev;
   drm->comp = comp;
 
   VT_TRACE(comp->log, "DRM: Initializing DRM/KMS backend...");
@@ -322,18 +489,27 @@ bool _drm_init_for_device(struct vt_compositor_t* comp, struct drm_backend_state
   drm->evctx.page_flip_handler = _drm_page_flip_handler;
   drm->evctx.vblank_handler = NULL;
 
-  drm->event_source = wl_event_loop_add_fd(comp->wl.evloop, device_fd, WL_EVENT_READABLE, _drm_dispatch, drm);
+  drm->event_source = wl_event_loop_add_fd(comp->wl.evloop, drm->drm_fd, WL_EVENT_READABLE, _drm_dispatch, drm);
 
   drm->native_handle = drm->gbm_dev;
 
-  drm->renderer = VT_ALLOC(comp, sizeof(struct vt_renderer_t));
-  drm->renderer->comp = comp;
-  vt_renderer_implement(drm->renderer, VT_RENDERING_BACKEND_EGL_OPENGL);
+  struct drm_backend_master_state_t* drm_master = BACKEND_DATA(drm->root_backend, struct drm_backend_master_state_t);
 
-  drm->renderer->impl.init(comp->backend, drm->renderer, drm->native_handle);
+  if(!comp->renderer) {
+    log_fatal(comp->log, "DRM: Must allocate renderer before initializing backend.");
+  }
+  if(!drm_master->main_drm && comp->renderer->impl.is_handle_renderable(comp->renderer, drm->native_handle)) {
+    comp->renderer->impl.init(comp->backend, comp->renderer, drm->native_handle);
+    drm_master->main_drm = drm;
+
+    struct vt_dmabuf_feedback_t* default_feedback = calloc(1, sizeof(*default_feedback));
+    _drm_build_dmabuf_feedback(drm_master, default_feedback);
+    vt_proto_linux_dmabuf_v1_init(comp, default_feedback, 4);
+  }
+
   _drm_init_active_outputs_for_device(drm);
 
-  VT_TRACE(comp->log, "DRM: Successfully initialized DRM/KMS backend for GPU %i.", device_fd);
+  VT_TRACE(comp->log, "DRM: Successfully initialized DRM/KMS backend for GPU %i.", drm->drm_fd);
 
   return true;
 }
@@ -345,7 +521,7 @@ _drm_init_active_outputs_for_device(struct drm_backend_state_t* drm) {
 
   VT_TRACE(comp->log, "DRM: Initializing active outputs.");
 
-  if (!drm->renderer || !drm->renderer->impl.setup_renderable_output) {
+  if (!comp->renderer || !comp->renderer->impl.setup_renderable_output) {
     VT_ERROR(comp->log, "DRM: Renderer backend not initialized before output setup.");
     return false;
   }
@@ -362,6 +538,8 @@ _drm_init_active_outputs_for_device(struct drm_backend_state_t* drm) {
     if (!conn) continue;
     if (conn->connection == DRM_MODE_CONNECTED && conn->count_modes > 0) {
       struct vt_output_t* output = VT_ALLOC(comp, sizeof(struct vt_output_t));
+      wl_list_init(&output->link_local);
+      wl_list_init(&output->link_global);
       if (!output) {
         VT_ERROR(comp->log, "DRM: allocation failed for output.");
         drmModeFreeConnector(conn);
@@ -371,12 +549,15 @@ _drm_init_active_outputs_for_device(struct drm_backend_state_t* drm) {
       output->backend = comp->backend;
       if (!_drm_create_output_for_device(drm, output, conn)) {
         VT_ERROR(comp->log, "DRM: Failed to setup internal DRM output output.");
+        _drm_destroy_output_for_device(drm, output);
+        drmModeFreeConnector(conn);
         continue;
       } 
-      if(!drm->renderer->impl.setup_renderable_output(drm->renderer, output)) {
+      if(!comp->renderer->impl.setup_renderable_output(comp->renderer, output)) {
         VT_ERROR(comp->log, "DRM: Failed to setup renderable output for DRM output (%ix%i@%.2f)",
                  output->width, output->height, output->refresh_rate);
         _drm_destroy_output_for_device(drm, output);
+        drmModeFreeConnector(conn);
         continue;
       }
     }
@@ -424,6 +605,7 @@ _drm_create_output_for_device(struct drm_backend_state_t* drm, struct vt_output_
   drm_output->mode = preferred_mode;
   drm_output->needs_modeset = true;
   drm_output->conn_id = conn->connector_id;
+  drm_output->drm_backend = drm;
 
   drmModeEncoder *enc = NULL;
 
@@ -457,7 +639,7 @@ _drm_create_output_for_device(struct drm_backend_state_t* drm, struct vt_output_
     return false;
   }
 
-  const uint32_t desired_format = drm->renderer->_desired_render_buffer_format;
+  const uint32_t desired_format = comp->renderer->_desired_render_buffer_format;
   if(!(drm_output->gbm_surf = gbm_surface_create(
     drm->gbm_dev,
     drm_output->mode.hdisplay, drm_output->mode.vdisplay,
@@ -485,7 +667,6 @@ _drm_create_output_for_device(struct drm_backend_state_t* drm, struct vt_output_
   output->native_window = drm_output->gbm_surf;
   output->format = desired_format; 
   output->id = drm_output->conn_id;
-  output->renderer = drm->renderer;
 
   drm_master->x_ptr += output->width;
 
@@ -508,10 +689,9 @@ _drm_destroy_output_for_device(struct drm_backend_state_t* drm, struct vt_output
   if (drm_output->gbm_surf) {
     gbm_surface_destroy(drm_output->gbm_surf);
     drm_output->gbm_surf = NULL;
+  
+    if(!drm->comp->renderer->impl.destroy_renderable_output(drm->comp->renderer, output)) return false;
   }
-
-  if(!drm->renderer->impl.destroy_renderable_output(drm->renderer, output)) return false;
-
 
   output->user_data = NULL;
 
@@ -552,7 +732,7 @@ _drm_terminate_for_device(struct drm_backend_state_t* drm) {
     _drm_destroy_output_for_device(drm, output);
   }
 
-  drm->renderer->impl.destroy(drm->renderer);
+  comp->renderer->impl.destroy(comp->renderer);
 
   if (drm->gbm_dev) {
     gbm_device_destroy(drm->gbm_dev);
@@ -647,7 +827,7 @@ _drm_handle_frame_for_device(struct drm_backend_state_t* drm, struct vt_output_t
   VT_TRACE(comp->log, "DRM: Handling frame...");
   vt_comp_repaint_scene(comp, output);
 
-  if (!drm->renderer) {
+  if (!comp->renderer) {
     VT_ERROR(comp->log, "DRM: Renderer backend not initialized before handling frame.");
     return false;
   }
@@ -794,14 +974,14 @@ backend_init_drm(struct vt_backend_t* backend) {
   wl_signal_add(&session_drm->ev_seat_disable, &drm_master->seat_disable_listener);
 
   // Create a DRM backend state for all the enumerated GPUs
-  const uint8_t max_gpus = 8;
+  const uint8_t max_gpus = 16;
   struct vt_device_t* gpus[max_gpus];
-  uint32_t n_gpus = vt_session_enumerate_cards_drm(backend->comp->session, gpus, max_gpus);
+  drm_master->n_drm = vt_session_enumerate_cards_drm(backend->comp->session, gpus, max_gpus);
 
-  for(uint32_t i = 0; i < n_gpus; i++) {
+  for(uint32_t i = 0; i < drm_master->n_drm; i++) {
     struct drm_backend_state_t* drm_backend = VT_ALLOC(backend->comp, sizeof(struct drm_backend_state_t));
     drm_backend->root_backend = backend;
-    if(!_drm_init_for_device(backend->comp, drm_backend, gpus[i]->fd, gpus[i]->path)) {
+    if(!_drm_init_for_device(backend->comp, drm_backend, gpus[i])) {
       VT_ERROR(backend->comp->log, "DRM: Failed to initialize DRM backend for GPU (%i).", gpus[i]->fd);
       return false;
     }
@@ -834,10 +1014,12 @@ backend_handle_frame_drm(struct vt_backend_t* backend, struct vt_output_t* outpu
   }
 
   struct drm_backend_master_state_t* drm_master = BACKEND_DATA(backend, struct drm_backend_master_state_t); 
-  struct drm_backend_state_t* drm;
-  wl_list_for_each(drm, &drm_master->backends, link) {
-    _drm_handle_frame_for_device(drm, output);
+
+  if (!drm_master->main_drm) {
+    VT_ERROR(backend->comp->log, "DRM: No main render device available for frame handling.");
+    return false;
   }
+  return _drm_handle_frame_for_device(drm_master->main_drm, output);
 }
 
 

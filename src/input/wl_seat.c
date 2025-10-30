@@ -84,7 +84,7 @@ _wl_keyboard_send_initial_state(struct vt_keyboard_t *kbd) {
   uint32_t locked    = xkb_state_serialize_mods(state, XKB_STATE_MODS_LOCKED);
   uint32_t group     = xkb_state_serialize_layout(state, XKB_STATE_LAYOUT_EFFECTIVE);
 
-  wl_keyboard_send_modifiers(kbd->resource,
+  wl_keyboard_send_modifiers(kbd->res,
                              0, depressed, latched, locked, group);
 }
 
@@ -143,7 +143,7 @@ _wl_seat_get_keyboard(struct wl_client* client, struct wl_resource* seat_res, ui
 
   struct vt_keyboard_t* kbd = calloc(1, sizeof(*kbd));
   kbd->seat = seat;
-  kbd->resource = kbd_res;
+  kbd->res = kbd_res;
   wl_resource_set_implementation(kbd_res, &keyboard_impl, kbd, _wl_keyboard_destroy);
 
   wl_list_insert(&seat->keyboards, &kbd->link);
@@ -224,8 +224,8 @@ vt_seat_handle_key(struct vt_seat_t* seat, uint32_t keycode, uint32_t state, uin
   // safety to not use any keyboards of clients that don't exist anymore
   struct vt_keyboard_t* kbd, *tmp; 
   wl_list_for_each_safe(kbd, tmp, &seat->keyboards, link) {
-    if (!kbd->resource) continue;
-    if (!wl_resource_get_client(kbd->resource)) {
+    if (!kbd->res) continue;
+    if (!wl_resource_get_client(kbd->res)) {
       wl_list_remove(&kbd->link);
       continue;
     }
@@ -249,14 +249,14 @@ vt_seat_handle_key(struct vt_seat_t* seat, uint32_t keycode, uint32_t state, uin
       seat->_last_mods.locked     != mod_states.locked ||
       seat->_last_mods.group      != mod_states.group) {
       wl_keyboard_send_modifiers(
-        kbd->resource,
+        kbd->res,
         seat->serial++, 
         mod_states.depressed, mod_states.latched, 
         mod_states.locked, mod_states.group);
     }
 
     wl_keyboard_send_key(
-      kbd->resource,
+      kbd->res,
       seat->serial++,
       time,
       keycode - 8, // wayland expects evdev codes
@@ -314,8 +314,8 @@ vt_seat_set_keyboard_focus(
 
   struct vt_keyboard_t* kbd, *tmp; 
   wl_list_for_each_safe(kbd, tmp, &seat->keyboards, link) {
-    if(wl_resource_get_client(kbd->resource) != client) continue;
-    seat->focused.keyboard = kbd->resource;
+    if(wl_resource_get_client(kbd->res) != client) continue;
+    seat->focused.keyboard = kbd->res;
     break;
   }
   if(!seat->focused.keyboard) return;

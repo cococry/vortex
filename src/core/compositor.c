@@ -40,8 +40,6 @@ static void  _vt_comp_wl_bind(struct wl_client *client, void *data,
 
 static void _vt_comp_associate_surface_with_output(struct vt_compositor_t* c, struct vt_surface_t* surf, struct vt_output_t* output);
 
-static struct vt_renderer_t* _vt_comp_get_renderer_from_surface(struct vt_surface_t* surf);
-
 void _vt_comp_wl_surface_create(
   struct wl_client *client,
   struct wl_resource *resource,
@@ -463,16 +461,6 @@ void _vt_comp_associate_surface_with_output(struct vt_compositor_t* c, struct vt
 
 }
 
-struct vt_renderer_t* 
-_vt_comp_get_renderer_from_surface(struct vt_surface_t* surf) {
-  struct vt_output_t* output;
-  wl_list_for_each(output, &surf->comp->outputs, link_global) {
-    if(!(surf->_mask_outputs_visible_on & (1u << output->id))) continue;
-    return output->renderer;
-  }
-  return NULL;
-}
-
 void 
 _vt_comp_wl_surface_create(
   struct wl_client *client,
@@ -609,20 +597,20 @@ _vt_comp_wl_surface_commit(
   VT_TRACE(surf->comp->log, "compositor.surface_commit: Scheduling repaint to render commited buffer.");
 
   // Schedule a repaint for all outputs that the surface intersects with
-  bool imported_buf = false;
   struct vt_output_t* output;
+
+  // importing the buffer
+  struct vt_renderer_t* r = surf->comp->renderer;
+  if(r && r->impl.import_buffer) {
+    r->impl.import_buffer(r, surf, surf->buf_res);
+    // Tell the client we're finsied uploading its buffer
+    wl_buffer_send_release(surf->buf_res);
+  }
+
   wl_list_for_each(output, &surf->comp->outputs, link_global) {
     if(!(surf->_mask_outputs_visible_on & (1u << output->id))) {
       VT_WARN(surf->comp->log, "Not rerendering for surface %p because not on output %p.\n", surf, output);
       continue;
-    }
-    if(!imported_buf) {
-      if(output->renderer && output->renderer->impl.import_buffer) {
-        output->renderer->impl.import_buffer(output->renderer, surf, surf->buf_res);
-        imported_buf = true;
-        // Tell the client we're finsied uploading its buffer
-        wl_buffer_send_release(surf->buf_res);
-      }
     }
     pixman_box32_t ext = *pixman_region32_extents(&surf->current_damage);
     pixman_region32_union_rect(&output->damage, &output->damage,
@@ -778,15 +766,15 @@ _vt_comp_wl_surface_handle_resource_destroy(struct wl_resource* resource) {
 
   // Schedule a repaint for all outputs that the surface intersects with
   struct vt_output_t* output;
-  bool destroyed_render_res = false;
+  struct vt_renderer_t* r = surf->comp->renderer;
+  if(r && r->impl.destroy_surface_texture) {
+    r->impl.destroy_surface_texture(r, surf);
+  }
+
   wl_list_for_each(output, &surf->comp->outputs, link_global) {
     if(!(surf->_mask_outputs_visible_on & (1u << output->id))) continue;
     // Destory surface texture with the renderer associated with the first output 
     // the surface is on
-    if(!destroyed_render_res && output->renderer && output->renderer->impl.destroy_surface_texture) {
-      output->renderer->impl.destroy_surface_texture(output->renderer, surf);
-      destroyed_render_res = true;
-    }
     // Damage the part of the screen where the surface was located 
     // and schedule a repaint
     pixman_region32_union_rect(
@@ -870,10 +858,6 @@ _vt_comp_wl_init(struct vt_compositor_t* c) {
     VT_ERROR(c->log, "Cannot initialize XDG shell protocol.");
     return false;
   }
-  if(!vt_proto_linux_dmabuf_v1_init(c, 4)) {
-    VT_ERROR(c->log, "Cannot initialize linux-dmabuf-v1 protocol.");
-    return false;
-  }
 
   const char *socket_name = wl_display_add_socket_auto(c->wl.dsp);
   if (!socket_name) {
@@ -926,11 +910,21 @@ vt_comp_init(struct vt_compositor_t* c, int argc, char** argv) {
   c->log.verbose = false;
   c->log.quiet = false;
 
-  c->backend = calloc(1, sizeof(*c->backend));
+  c->backend = VT_ALLOC(c, sizeof(*c->backend));
   c->backend->comp = c;
   
-  c->session = calloc(1, sizeof(*c->session));
+  c->session = VT_ALLOC(c, sizeof(*c->session));
   c->session->comp = c;
+  
+  c->renderer = VT_ALLOC(c, sizeof(*c->renderer));
+  c->renderer->comp = c;
+  vt_renderer_implement(c->renderer, VT_RENDERING_BACKEND_EGL_OPENGL);
+  
+  c->input_backend = VT_ALLOC(c, sizeof(*c->input_backend));
+  c->input_backend->comp = c;
+  
+  c->seat = VT_ALLOC(c, sizeof(*c->seat));
+  c->seat->comp = c;
 
   const char* backend_str = _vt_comp_handle_cmd_flags(c, argc, argv);
   if(!backend_str) {
@@ -960,9 +954,6 @@ vt_comp_init(struct vt_compositor_t* c, int argc, char** argv) {
     return false;
   }
 
-  c->input_backend = calloc(1, sizeof(*c->input_backend));
-  c->input_backend->comp = c;
-
   enum vt_input_backend_platform_t input_backend = VT_INPUT_UNKNOWN;
   switch(c->backend->platform) {
     case VT_BACKEND_DRM_GBM: 
@@ -979,8 +970,6 @@ vt_comp_init(struct vt_compositor_t* c, int argc, char** argv) {
                                 c->session->native_handle);
   }
 
-  c->seat = calloc(1, sizeof(*c->seat));
-  c->seat->comp = c;
 
   vt_seat_init(c->seat);
     
@@ -1079,9 +1068,9 @@ vt_comp_schedule_repaint(struct vt_compositor_t *c, struct vt_output_t* output) 
 
 }
 void vt_comp_repaint_scene(struct vt_compositor_t *c, struct vt_output_t *output) {
-  if (!c || !output || !c->backend || !output->renderer) return;
+  if (!c || !output || !c->backend || !c->renderer) return;
 
-  struct vt_renderer_t* r = output->renderer;
+  struct vt_renderer_t* r = c->renderer;
   r->impl.begin_frame(r, output);
 
   pixman_box32_t damage_boxes[VT_MAX_DAMAGE_RECTS];
@@ -1130,9 +1119,9 @@ void vt_comp_invalidate_all_surfaces(struct vt_compositor_t *comp) {
 
   struct vt_surface_t *surf, *tmp;
   wl_list_for_each_safe(surf, tmp, &comp->surfaces, link) {
-    // Destroy GPU texture if renderer has one
+    // Destroy GPU texture if surface has one
     if (surf->tex.id) {
-      struct vt_renderer_t* r = _vt_comp_get_renderer_from_surface(surf);
+      struct vt_renderer_t* r = comp->renderer; 
       if ( r && r->impl.destroy_surface_texture) {
         r->impl.destroy_surface_texture(r, surf);
       }

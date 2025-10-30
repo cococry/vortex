@@ -8,6 +8,9 @@ vt_renderer_implement(struct vt_renderer_t* renderer, enum vt_rendering_backend_
   if(backend == VT_RENDERING_BACKEND_EGL_OPENGL) {
     renderer->impl = (struct vt_renderer_interface_t){
       .init = renderer_init_egl, 
+      .is_handle_renderable = renderer_is_handle_renderable_egl, 
+      .query_dmabuf_formats = renderer_query_dmabuf_formats_egl, 
+      .query_dmabuf_formats_with_renderer = renderer_query_dmabuf_formats_with_renderer_egl, 
       .setup_renderable_output = renderer_setup_renderable_output_egl, 
       .resize_renderable_output = renderer_resize_renderable_output_egl,
       .destroy_renderable_output = renderer_destroy_renderable_output_egl,

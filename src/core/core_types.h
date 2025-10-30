@@ -32,11 +32,11 @@ struct wl_state_t {
   struct wl_compositor* compositor;
 };
 
-typedef enum {
+enum vt_backend_platform_t {
   VT_BACKEND_DRM_GBM = 0,
   VT_BACKEND_WAYLAND,
   VT_BACKEND_SURFACELESS,
-} vt_backend_platform_t;
+} ;
 
 
 
@@ -53,13 +53,12 @@ struct vt_backend_t {
 
   struct vt_compositor_t* comp;
 
-  vt_backend_platform_t platform;
+  enum vt_backend_platform_t platform;
 };
 
 struct vt_output_t {
   struct wl_list link_local, link_global; 
   struct vt_backend_t* backend;
-  struct vt_renderer_t* renderer;
   void* native_window;
   void* render_surface;
 
@@ -82,6 +81,7 @@ struct vt_compositor_t {
 
   struct wl_state_t  wl;
   struct vt_backend_t* backend;
+  struct vt_renderer_t* renderer;
   struct log_state_t log;
 
   struct wl_list surfaces; 

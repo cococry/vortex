@@ -132,7 +132,7 @@ _wl_parent_xdg_toplevel_configure(void *data,
   if(!wl_output) return;
   
   if(w != output->width || h != output->height) {
-    struct vt_renderer_t* r = output->renderer;
+    struct vt_renderer_t* r = output->backend->comp->renderer;
     if (r && r->impl.resize_renderable_output && output->native_window)
       r->impl.resize_renderable_output(r, output, w, h);
 
@@ -155,7 +155,7 @@ _wl_parent_xdg_surface_configure(void *data,
   int h = output->height > 0 ? output->height : _WL_DEFAULT_OUTPUT_HEIGHT;
   
   // Handle resize output in renderer
-  struct vt_renderer_t* r = output->renderer;
+  struct vt_renderer_t* r = output->backend->comp->renderer;
   if (r && r->impl.resize_renderable_output && output->native_window)
     r->impl.resize_renderable_output(r, output, w, h);
   output->width = w;
@@ -223,7 +223,7 @@ _wl_backend_destroy_output(struct vt_backend_t* backend, struct vt_output_t* out
     wl_output->parent_surface = NULL;
   }
 
-  if(!wl_backend->renderer->impl.destroy_renderable_output(output->renderer, output)) return false;
+  if(!wl_backend->renderer->impl.destroy_renderable_output(backend->comp->renderer, output)) return false;
 
   output->user_data = NULL;
    
@@ -411,8 +411,6 @@ _wl_backend_create_output(struct vt_backend_t* backend, struct vt_output_t* outp
   wl_output->parent_frame_cb = wl_surface_frame(wl_output->parent_surface);
   wl_callback_add_listener(wl_output->parent_frame_cb, &parent_surface_frame_listener, output);
  
-  // Set renderer
-  output->renderer = wl->renderer;
   vt_comp_schedule_repaint(backend->comp, output);
 
   // Trigger initial configure
