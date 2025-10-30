@@ -394,6 +394,7 @@ renderer_is_handle_renderable_egl(struct vt_renderer_t* renderer, void* native_h
 
 bool 
 renderer_query_dmabuf_formats_egl(struct vt_compositor_t* comp, void* native_handle, struct wl_array* formats) {
+  if(!comp || !native_handle || !formats) return false; 
     PFNEGLQUERYDMABUFFORMATSEXTPROC eglQueryDmaBufFormatsEXT =
         (void*) eglGetProcAddress("eglQueryDmaBufFormatsEXT");
     PFNEGLQUERYDMABUFMODIFIERSEXTPROC eglQueryDmaBufModifiersEXT =
@@ -472,7 +473,7 @@ renderer_query_dmabuf_formats_egl(struct vt_compositor_t* comp, void* native_han
 
 bool 
 renderer_query_dmabuf_formats_with_renderer_egl(struct vt_renderer_t* renderer, struct wl_array* formats) {
-  if(!renderer || !renderer->user_data || formats) return false; 
+  if(!renderer || !renderer->user_data || !formats) return false; 
 
     PFNEGLQUERYDMABUFFORMATSEXTPROC eglQueryDmaBufFormatsEXT =
         (void*) eglGetProcAddress("eglQueryDmaBufFormatsEXT");

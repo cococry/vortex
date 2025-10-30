@@ -96,9 +96,6 @@ _wl_handle_global_keybind(struct vt_seat_t* seat, uint32_t keycode, uint32_t sta
   struct vt_keybind_t* keybind;
   wl_list_for_each(keybind, &seat->keybinds, link) {
     if(!keybind->callback) continue;
-    char buf[64];
-    xkb_keysym_get_name(sym, buf, sizeof(buf));
-    VT_TRACE(seat->comp->log, "Checking keybind: %s\n", buf);
     if(keybind->sym == sym && (mods_mask & keybind->mods) == keybind->mods) {
       keybind->callback(seat->comp, keybind->user_data);
       return true;

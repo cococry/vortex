@@ -1024,8 +1024,6 @@ vt_comp_terminate(struct vt_compositor_t *c) {
   if(c->session->impl.terminate)
     c->session->impl.terminate(c->session);
 
-  free(c->session);
-
   // Shut down wayland 
   if (c->wl.dsp) {
     wl_display_destroy_clients(c->wl.dsp);

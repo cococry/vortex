@@ -263,6 +263,68 @@ static bool _drm_can_share_dmabuf(struct vt_device_t* main_dev, struct vt_device
   return compatible;
 }
 
+static const char* 
+_fourcc_to_str(uint32_t fmt) {
+  static char str[5];
+  str[0] = fmt & 0xFF;
+  str[1] = (fmt >> 8) & 0xFF;
+  str[2] = (fmt >> 16) & 0xFF;
+  str[3] = (fmt >> 24) & 0xFF;
+  str[4] = '\0';
+  return str;
+}
+
+static const char* 
+_modifier_to_str(uint64_t mod, char* buf, size_t len) {
+  if (mod == DRM_FORMAT_MOD_INVALID)
+    snprintf(buf, len, "INVALID");
+  else if (mod == DRM_FORMAT_MOD_LINEAR)
+    snprintf(buf, len, "LINEAR");
+  else
+    snprintf(buf, len, "0x%016" PRIx64, mod);
+  return buf;
+}
+
+void 
+_log_dmabuf_tranche(struct vt_compositor_t *comp,
+                         const struct vt_dmabuf_tranche_t *tranche,
+                         const char *device_path) {
+  char dev_path[64];
+  snprintf(dev_path, sizeof(dev_path), "%s", device_path);
+
+  VT_TRACE(comp->log,
+           "DRM: ========== Added DMABUF Tranche for device '%s'  ========== ", dev_path);
+
+  VT_TRACE(comp->log,
+           "      target_device: %u:%u  (dev_t: 0x%lx)",
+           major(tranche->target_device),
+           minor(tranche->target_device),
+           (unsigned long)tranche->target_device);
+
+  VT_TRACE(comp->log, "      flags: 0x%x%s",
+           tranche->flags,
+           tranche->flags ? " (preferred/scanout)" : "");
+
+  size_t n_formats = tranche->formats.size / sizeof(struct vt_dmabuf_drm_format_t);
+  VT_TRACE(comp->log, "      formats: %zu total", n_formats);
+
+  struct vt_dmabuf_drm_format_t *fmt;
+  wl_array_for_each(fmt, &tranche->formats) {
+    VT_TRACE(comp->log, "        • %s (%4.4s), %zu modifiers:",
+             drmGetFormatName(fmt->format), _fourcc_to_str(fmt->format), fmt->len);
+
+    for (size_t j = 0; j < fmt->len; j++) {
+      char mod_str[32];
+      _modifier_to_str(fmt->mods[j].mod, mod_str, sizeof(mod_str));
+      VT_TRACE(comp->log, "            - %s%s",
+               mod_str,
+               fmt->mods[j]._egl_ext_only ? " (EXT_ONLY)" : "");
+    }
+  }
+
+  VT_TRACE(comp->log, "DRM: =========================================================== ", dev_path);
+}
+
 bool 
 _drm_build_dmabuf_feedback(
   struct drm_backend_master_state_t* master,
@@ -275,24 +337,39 @@ _drm_build_dmabuf_feedback(
   feedback->dev_main = master->main_drm->dev->dev;
   wl_array_init(&feedback->tranches);
 
+  VT_TRACE(master->comp->log, "DRM: Building default DMABUF feedback...");
+
   uint32_t n_devs = 0;
   drmDevicePtr devs[master->n_drm];
   // add the tranches
   struct drm_backend_state_t* drm;
   wl_list_for_each(drm, &master->backends, link) {
     struct vt_device_t* dev = drm->dev;
-    if(!drm->dev) continue;
+    VT_TRACE(master->comp->log, "DRM: Iterating possible DMABUF tranche device '%s' (FD: %i)...", dev->path, dev->fd);
+    if(!drm->dev) {
+      VT_TRACE(master->comp->log, "DRM: Skipping possible tranche device '%s': No device associated.", dev->path);
+      continue;
+    }
     drmDevicePtr dev_drm = NULL;
     if (drmGetDevice(dev->fd, &dev_drm) != 0) {
+      VT_WARN(master->comp->log, "DRM: Failed to retrieve DRM device pointer from internal DRM device '%s'", dev->path);
       if (dev_drm) drmFreeDevice(&dev_drm);
       continue;
     }
     devs[n_devs++] = dev_drm;
 
     // skip devices without any render nodes
-    if (!(dev_drm->available_nodes & (1 << DRM_NODE_RENDER))) continue;
+    if (!(dev_drm->available_nodes & (1 << DRM_NODE_RENDER))) {
+      VT_TRACE(master->comp->log, "DRM: Skipping possible tranche device '%s': Has no available render nodes.", dev->path);
+      continue;
+    }
     // skip non-shareable GPUs
-    if (!_drm_can_share_dmabuf(master->main_drm->dev, dev)) continue;  
+    if (!_drm_can_share_dmabuf(master->main_drm->dev, dev)) {
+      VT_TRACE(
+        master->comp->log, "DRM: Skipping possible tranche device '%s': Cannot share DMABUFs with main device '%s'.",
+        dev->path, master->main_drm->dev->path);
+      continue;  
+    }
 
     struct vt_dmabuf_tranche_t* tranche = wl_array_add(&feedback->tranches, sizeof(*tranche));
     tranche->target_device = dev->dev;
@@ -307,6 +384,7 @@ _drm_build_dmabuf_feedback(
     if(dev == master->main_drm->dev) { 
       if(r->impl.query_dmabuf_formats_with_renderer) {
         if(!master->comp->renderer->impl.query_dmabuf_formats_with_renderer(r, &tranche->formats)) {
+          VT_WARN(master->comp->log, "DRM: Cannot query DMABUF formats for main device '%s' from EGL.", dev->path);
           wl_array_init(&tranche->formats);
           continue;
         }
@@ -314,11 +392,13 @@ _drm_build_dmabuf_feedback(
     } else { 
       if(r->impl.query_dmabuf_formats) {
         if(!master->comp->renderer->impl.query_dmabuf_formats(master->comp, drm->gbm_dev,  &tranche->formats)) {
+          VT_WARN(master->comp->log, "DRM: Cannot query DMABUF formats for tranche device '%s' from EGL.", dev->path);
           wl_array_init(&tranche->formats);
           continue;
         }
       }
     }
+    _log_dmabuf_tranche(master->comp, tranche, dev->path);
   }
   // Adding a generic fallback tranche (LINEAR DRM_FORMAT_ARGB8888) 
   struct vt_dmabuf_tranche_t* fallback = wl_array_add(&feedback->tranches, sizeof(*fallback));
@@ -501,10 +581,6 @@ bool _drm_init_for_device(struct vt_compositor_t* comp, struct drm_backend_state
   if(!drm_master->main_drm && comp->renderer->impl.is_handle_renderable(comp->renderer, drm->native_handle)) {
     comp->renderer->impl.init(comp->backend, comp->renderer, drm->native_handle);
     drm_master->main_drm = drm;
-
-    struct vt_dmabuf_feedback_t* default_feedback = calloc(1, sizeof(*default_feedback));
-    _drm_build_dmabuf_feedback(drm_master, default_feedback);
-    vt_proto_linux_dmabuf_v1_init(comp, default_feedback, 4);
   }
 
   _drm_init_active_outputs_for_device(drm);
@@ -987,6 +1063,13 @@ backend_init_drm(struct vt_backend_t* backend) {
     }
     wl_list_insert(&drm_master->backends, &drm_backend->link);
   }
+
+  if(!drm_master->main_drm) {
+    log_fatal(drm_master->comp->log, "DRM: Failed to find renderable DRM device.");
+  }
+  struct vt_dmabuf_feedback_t* default_feedback = calloc(1, sizeof(*default_feedback));
+  _drm_build_dmabuf_feedback(drm_master, default_feedback);
+  vt_proto_linux_dmabuf_v1_init(drm_master->comp, default_feedback, 4);
   
   VT_TRACE(backend->comp->log, "Successfully initialized DRM backend.");
 
