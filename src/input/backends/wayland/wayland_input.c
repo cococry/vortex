@@ -149,6 +149,7 @@ bool input_backend_init_wl(struct vt_input_backend_t* backend, void* native_hand
   wl->comp->input_backend->kb_context = wl->kb_context;
 
   wl->wl_seat = native_handle;
+  printf("Got here.\n");
   wl->wl_keyboard = wl_seat_get_keyboard(wl->wl_seat);
   wl_keyboard_add_listener(wl->wl_keyboard, &keyboard_listener, wl);
 

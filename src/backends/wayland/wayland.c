@@ -255,7 +255,7 @@ backend_init_wl(struct vt_backend_t* backend) {
   struct wl_registry *reg = wl_display_get_registry(wl->parent_display);
   wl_registry_add_listener(reg, &parent_registry_listener, wl);
   wl_display_roundtrip(wl->parent_display);
-  if (!wl->parent_compositor || !wl->parent_xdg_wm_base) {
+  if (!wl->parent_compositor || !wl->parent_xdg_wm_base || !wl->comp->session->native_handle) {
     VT_ERROR(c->log, "WL: Required globals not found.");
     return false;
   }
@@ -292,11 +292,8 @@ backend_implement_wl(struct vt_compositor_t* comp) {
     .prepare_output_frame = backend_prepare_output_frame_wl,
   };
 
-
-  comp->session->impl = (struct vt_session_interface_t){
-    .init = NULL,
-    .terminate = NULL 
-  };
+  // No session in Wayland nested
+  memset(&comp->session->impl, 0, sizeof(comp->session->impl));
 }
 
 bool 

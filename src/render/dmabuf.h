@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../core/core_types.h"
+#include "../core/session.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -14,12 +15,12 @@ enum vt_dmabuf_tranche_flags_t {
 
 struct vt_dmabuf_feedback_t {
   struct vt_compositor_t* comp;
-  dev_t dev_main;
+  struct vt_device_t* dev_main;
   struct wl_array tranches; // array of vt_dmabuf_tranche_t 
 };
 
 struct vt_dmabuf_tranche_t {
-	dev_t target_device;
+	struct vt_device_t* target_device;
 	enum vt_dmabuf_tranche_flags_t flags;
 	struct wl_array formats; // array of vt_dmabuf_drm_format_t
 };

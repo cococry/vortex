@@ -38,7 +38,16 @@ bool vt_session_manage_device_drm(struct vt_session_t* session, struct vt_device
 bool vt_session_close_device_drm(struct vt_session_t* session, struct vt_device_t* dev); 
 
 bool vt_session_unmanage_device_drm(struct vt_session_t* session, struct vt_device_t* dev);
+  
+void* vt_session_get_native_handle_drm(struct vt_session_t* session, struct vt_device_t* dev);
 
+bool vt_session_finish_native_handle_drm(struct vt_session_t* session, void* handle);
+  
+const char* vt_session_get_native_handle_render_node(struct vt_session_t* session, void* handle);
+
+// =======================
+// ====== DRM ONLY =======
+// =======================
 struct vt_device_t* vt_session_device_from_fd_drm(struct vt_session_t* session, uint32_t fd); 
 
 uint32_t vt_session_enumerate_cards_drm(struct vt_session_t* session, struct vt_device_t** devs, const uint32_t max_devs);

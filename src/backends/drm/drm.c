@@ -297,8 +297,8 @@ _log_dmabuf_tranche(struct vt_compositor_t *comp,
 
   VT_TRACE(comp->log,
            "      target_device: %u:%u  (dev_t: 0x%lx)",
-           major(tranche->target_device),
-           minor(tranche->target_device),
+           major(tranche->target_device->dev),
+           minor(tranche->target_device->dev),
            (unsigned long)tranche->target_device);
 
   VT_TRACE(comp->log, "      flags: 0x%x%s",
@@ -334,7 +334,7 @@ _drm_build_dmabuf_feedback(
   drmDevicePtr dev_main_drm = NULL;
   drmGetDevice(master->main_drm->dev->fd, &dev_main_drm); 
 
-  feedback->dev_main = master->main_drm->dev->dev;
+  feedback->dev_main = master->main_drm->dev;
   wl_array_init(&feedback->tranches);
 
   VT_TRACE(master->comp->log, "DRM: Building default DMABUF feedback...");
@@ -372,7 +372,7 @@ _drm_build_dmabuf_feedback(
     }
 
     struct vt_dmabuf_tranche_t* tranche = wl_array_add(&feedback->tranches, sizeof(*tranche));
-    tranche->target_device = dev->dev;
+    tranche->target_device = dev;
 
     tranche->flags = _drm_devices_equal(dev_main_drm, dev_drm)
       ? VT_DMABUF_TRANCHE_FLAG_DIRECT_SCANOUT 
@@ -417,6 +417,7 @@ _drm_build_dmabuf_feedback(
   for (int i = 0; i < n_devs; i++) {
     drmFreeDevice(&devs[i]);
   }
+  VT_TRACE(master->comp->log, "DRM: Added default fallback tranhe (LINEAR DRM_FORMAT_ARGB8888).\n");
 
   return true;
 }
@@ -1076,7 +1077,9 @@ backend_init_drm(struct vt_backend_t* backend) {
     VT_ERROR(backend->comp->log, "DRM: Failed to build default DMABUF feedback.");
     free(default_feedback);
   } else {
-    vt_proto_linux_dmabuf_v1_init(drm_master->comp, default_feedback, 4);
+    if(!vt_proto_linux_dmabuf_v1_init(drm_master->comp, default_feedback, 4)) {
+      VT_ERROR(backend->comp->log, "DRM: Failed to initialize DMABUF protocol.");
+    }
   }
 
   // cleanup the feedback
@@ -1169,6 +1172,9 @@ backend_implement_drm(struct vt_compositor_t* comp) {
     .manage_device = vt_session_manage_device_drm,
     .unmanage_device = vt_session_unmanage_device_drm,
     .device_from_fd = vt_session_device_from_fd_drm,
+    .get_native_handle = vt_session_get_native_handle_drm,
+    .finish_native_handle = vt_session_finish_native_handle_drm,
+    .get_native_handle_render_node = vt_session_get_native_handle_render_node,
     .terminate = vt_session_terminate_drm,
   };
 

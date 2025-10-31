@@ -1,23 +1,18 @@
+#define _GNU_SOURCE
 #include "linux_dmabuf.h"
 #include "../render/dmabuf.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <linux-dmabuf-v1-server-protocol.h>
+#include <stdbool.h>
+#include <stdint.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #include <wayland-server-core.h>
 #include <wayland-util.h>
 
-struct vt_proto_linux_dmabuf_v1_t {
-  struct wl_global* global;
-  struct wl_listener dsp_destroy;
-  struct vt_compositor_t* comp;
-};
-
-struct vt_linux_dmabuf_v1_params_t {
-  struct wl_resource* res;
-  struct vt_dmbuf_attr_t attr;
-};
+#include "../core/util.h"
 
 struct vt_linux_dmabuf_v1_packed_feedback_tranche_t {
 	dev_t target_device;
@@ -31,7 +26,7 @@ struct vt_linux_dmabuf_v1_packed_feedback_t {
 	size_t entries_size;
 
 	size_t n_tranches;
-	struct vt_linux_dmabuf_v1_packed_feedback_tranche_t* tranches;
+	struct vt_linux_dmabuf_v1_packed_feedback_tranche_t tranches[];
 };
 
 
@@ -40,6 +35,22 @@ struct vt_linux_dmabuf_v1_packed_feedback_entry_t {
 	uint32_t format;
 	uint32_t pad; // unused
 };
+
+struct vt_proto_linux_dmabuf_v1_t {
+  struct wl_global* global;
+  struct wl_listener dsp_destroy;
+  struct vt_compositor_t* comp;
+
+  struct wl_array default_formats;
+  struct vt_linux_dmabuf_v1_packed_feedback_t* default_feedback; 
+  int32_t fd_main_dev;
+};
+
+struct vt_linux_dmabuf_v1_params_t {
+  struct wl_resource* res;
+  struct vt_dmbuf_attr_t attr;
+};
+
 
 static void _proto_linux_dmabuf_v1_bind(struct wl_client *client, void *data,
                                         uint32_t version, uint32_t id);
@@ -107,12 +118,13 @@ static void _linux_dmabuf_v1_feedback_destroy(
 );
 
 static bool _linux_dmabuf_set_default_feedback(
+  struct vt_proto_linux_dmabuf_v1_t* proto,
   struct vt_dmabuf_feedback_t* feedback
 );
 
 static bool _linux_dmabuf_pack_feedback(
   struct vt_dmabuf_feedback_t* feedback,
-  struct vt_linux_dmabuf_v1_packed_feedback_t* o_packed
+  struct vt_linux_dmabuf_v1_packed_feedback_t** o_packed
 );
 
 static struct vt_proto_linux_dmabuf_v1_t* _proto;
@@ -154,9 +166,22 @@ _proto_linux_dmabuf_v1_bind(struct wl_client *client, void *data,
 		proto, NULL);
 }
 
+void _free_formats(struct wl_array *formats) {
+  if (!formats)
+    return;
+
+  struct vt_dmabuf_drm_format_t *fmt;
+  wl_array_for_each(fmt, formats) {
+    free(fmt->mods);
+    fmt->mods = NULL;
+  }
+
+  wl_array_release(formats);
+}
+
 void 
 _proto_linux_dmabuf_v1_destroy(struct vt_proto_linux_dmabuf_v1_t* dmabuf) {
-  // TODO
+  _free_formats(&dmabuf->default_formats);
 }
 
 void 
@@ -293,49 +318,163 @@ _linux_dmabuf_v1_feedback_destroy(
   wl_resource_destroy(resource);
 }
 
-bool
-_linux_dmabuf_set_default_feedback(
-  struct vt_dmabuf_feedback_t* feedback
-) {
-  struct vt_linux_dmabuf_v1_packed_feedback_t packed;
-  if(!_linux_dmabuf_pack_feedback(feedback, &packed)) {
-    VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Failed to pack default DMABUF feedback.");
-    return false;
-  }
-}
-
-static bool 
-_format_exists(struct wl_array* fmts, struct vt_dmabuf_drm_format_t* find) {
+static bool
+_format_exists(struct wl_array* fmts, struct vt_dmabuf_drm_format_t* find)  {
   struct vt_dmabuf_drm_format_t* fmt;
   wl_array_for_each(fmt, fmts) {
-    if(memcmp(fmt, find, sizeof(*find)) == 0) return true;
+    if (fmt->format != find->format || fmt->len != find->len)
+      continue;
+
+    bool match = true;
+    for (size_t i = 0; i < fmt->len; i++) {
+      if (fmt->mods[i].mod != find->mods[i].mod) {
+        match = false;
+        break;
+      }
+    }
+    if (match)
+      return true;
   }
   return false;
 }
 
-bool 
-_linux_dmabuf_pack_feedback(
-  struct vt_dmabuf_feedback_t* feedback,
-  struct vt_linux_dmabuf_v1_packed_feedback_t* o_packed
-) {
-  if(!feedback) return false;
-  struct wl_array all_formats;
-  wl_array_init(&all_formats);
-
-  size_t entries_len = 0, entries_size = 0;
+static bool _accumulate_tranche_formats(
+  struct wl_array* all_formats, struct wl_array* tranches, 
+  size_t* n_formats, bool persistent) {
+  if(!all_formats || !tranches) return false;
   struct vt_dmabuf_tranche_t* tranche;
-  wl_array_for_each(tranche, &feedback->tranches) {
+  wl_array_for_each(tranche, tranches) {
     if(!tranche) continue;
     struct vt_dmabuf_drm_format_t* fmt;
     wl_array_for_each(fmt, &tranche->formats) {
       if(!fmt) continue;
-      if(!_format_exists(&all_formats, fmt)) {
-        struct vt_dmabuf_drm_format_t* fmt_add = wl_array_add(&all_formats, sizeof(*fmt_add));
-        memcpy(fmt_add, fmt, sizeof(*fmt_add));
-        entries_len += fmt->len;
+      if(!_format_exists(all_formats, fmt)) {
+        struct vt_dmabuf_drm_format_t* fmt_add = wl_array_add(all_formats, sizeof(*fmt_add));
+        if(!fmt_add) {
+          if(n_formats) *n_formats = 0;
+          return false;
+        }
+        if (persistent) {
+          // deep copy
+          fmt_add->format = fmt->format;
+          fmt_add->len = fmt->len;
+
+          if (fmt->len > 0 && fmt->mods) {
+            fmt_add->mods = calloc(fmt->len,
+                                   sizeof(*fmt_add->mods));
+            if (!fmt_add->mods) {
+              // Rollback allocation
+              wl_array_release(all_formats);
+              if (n_formats)
+                *n_formats = 0;
+              return false;
+            }
+            memcpy(fmt_add->mods, fmt->mods,
+                   fmt->len * sizeof(*fmt->mods));
+          } else {
+            fmt_add->mods = NULL;
+          }
+        } else {
+          // shallow copy 
+          memcpy(fmt_add, fmt, sizeof(*fmt_add));
+        }
+        if(n_formats) *n_formats += fmt->len;
       }
     }
   }
+  return true;
+}
+
+bool
+_linux_dmabuf_set_default_feedback(
+  struct vt_proto_linux_dmabuf_v1_t* proto,
+  struct vt_dmabuf_feedback_t* feedback
+) {
+  if(!feedback || !feedback->comp || !feedback->comp->session) return false;
+
+  struct vt_linux_dmabuf_v1_packed_feedback_t* packed = NULL;
+  if(!_linux_dmabuf_pack_feedback(feedback, &packed)) {
+    VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Failed to pack default DMABUF feedback.");
+    return false;
+  }
+
+  struct vt_session_t* s = feedback->comp->session;
+
+  if(!s->impl.get_native_handle || !s->impl.finish_native_handle || !s->impl.get_native_handle_render_node) {
+    VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Session backend does not implement required functionality for DMABUF.");
+    return false;
+  }
+
+  void* native_main_dev = s->impl.get_native_handle(s, feedback->dev_main);
+
+  int32_t fd_main_dev = -1;
+  const char* native_render_node = s->impl.get_native_handle_render_node(s, native_main_dev);
+  if(native_render_node) {
+    fd_main_dev = open(native_render_node,  O_RDWR | O_CLOEXEC);
+    if(fd_main_dev < 0) {
+      VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Failed to open render node '%s': %s",feedback->dev_main->path, strerror(errno)); 
+      free(packed);
+      s->impl.finish_native_handle(s, native_main_dev);
+      return false;
+    }
+    s->impl.finish_native_handle(s, native_main_dev);
+  } else {
+    VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: No render node attached to main device, cannot use DMABUFs.");
+    s->impl.finish_native_handle(s, native_main_dev);
+    free(packed);
+    return false;
+  }
+
+  if(proto->default_formats.size != 0)
+    _free_formats(&proto->default_formats);
+
+  wl_array_init(&proto->default_formats);
+  if(!_accumulate_tranche_formats(&proto->default_formats, &feedback->tranches, NULL, true)) {
+    VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Failed to accumulate default formats.");
+    s->impl.finish_native_handle(s, native_main_dev);
+    close(fd_main_dev);
+    free(packed);
+    return false;
+  }
+
+  if(proto->default_feedback) {
+    free(proto->default_feedback);
+  }
+  proto->default_feedback = packed;
+
+  if (proto->fd_main_dev >= 0) close(proto->fd_main_dev);
+  proto->fd_main_dev = fd_main_dev;
+
+  VT_TRACE(feedback->comp->log,
+          "VT_PROTO_LINUX_DMABUF_V1: Default feedback set: %i formats, render node %s",
+          proto->default_formats.size / sizeof(struct vt_dmabuf_drm_format_t),
+          native_render_node);
+
+  return true;
+
+}
+
+
+bool 
+_linux_dmabuf_pack_feedback(
+  struct vt_dmabuf_feedback_t* feedback,
+  struct vt_linux_dmabuf_v1_packed_feedback_t** o_packed
+) {
+  if(!feedback) return false;
+  if(!feedback->tranches.size) return false;
+ 
+
+  VT_TRACE(feedback->comp->log,
+           "VT_PROTO_LINUX_DMABUF_V1: Packing feedback...");
+
+  struct wl_array all_formats;
+  wl_array_init(&all_formats);
+  size_t entries_len = 0, entries_size = 0;
+  _accumulate_tranche_formats(&all_formats, &feedback->tranches, &entries_len, false);
+  
+  VT_TRACE(feedback->comp->log,
+           "VT_PROTO_LINUX_DMABUF_V1: Accumulated all formats of all tranches.");
+
   if(!entries_len) {
     VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Format entries of packed DMABUF feedback is empty.");
     wl_array_release(&all_formats);
@@ -343,6 +482,9 @@ _linux_dmabuf_pack_feedback(
   }
   entries_size = entries_len * sizeof(struct vt_linux_dmabuf_v1_packed_feedback_entry_t);
 
+  // Allocate a read-only-read-write pair of file descriptors for the feedback data:
+  // We write our data into the readwrite FD once and then use the readonly FD as the table FD 
+  // so that clients can only read (not write to) the feedback data.
   int rw_fd, ro_fd;
   if(!(vt_util_allocate_shm_rwro_pair(feedback->comp, entries_size, &rw_fd, &ro_fd))) {
     VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Failed to allocate SHM pair for packed DMABUF feedback format entries.");
@@ -350,16 +492,23 @@ _linux_dmabuf_pack_feedback(
     return false;
   }
 
+  VT_TRACE(feedback->comp->log,
+           "VT_PROTO_LINUX_DMABUF_V1: Allocated SHM for the packed feedback data..");
+
+  // map the entries 
   struct vt_linux_dmabuf_v1_packed_feedback_entry_t* entries = mmap(
     NULL, entries_size, PROT_READ | PROT_WRITE, MAP_SHARED, rw_fd, 0);
   if(entries == MAP_FAILED) {
     VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Failed to mmap SHM for packed DMABUF feedback format entries: %s.", strerror(errno));
+    close(ro_fd);
+    close(rw_fd);
     wl_array_release(&all_formats);
     return false;
-  }
+  }	
 
-	close(rw_fd);
-
+  VT_TRACE(feedback->comp->log,
+           "VT_PROTO_LINUX_DMABUF_V1: mmap()ed the packed feedback data.");
+  // fill the table 
   struct vt_dmabuf_drm_format_t* fmt;
   uint32_t n_entries = 0;
   wl_array_for_each(fmt, &all_formats) {
@@ -373,14 +522,103 @@ _linux_dmabuf_pack_feedback(
   }
   if(n_entries != entries_len) {
     VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Mapped entries of DMABUF feedback entries does not match internal format entries."); 
-    return false;
     wl_array_release(&all_formats);
+    close(ro_fd);
+    return false;
   }
-	munmap(entries, entries_size);
+  
+  VT_TRACE(feedback->comp->log,
+           "VT_PROTO_LINUX_DMABUF_V1: Filled the table of packed feedback data.");
+  
+  // unmap the table (we are finished reading to it) 
+  munmap(entries, entries_size);
+
+  // seal the read-write FD so that clients cannot do weird shit
+  if (fcntl(rw_fd, F_ADD_SEALS,
+            F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE) < 0) {
+    VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: fcntl(F_ADD_SEALS) failed: %s", strerror(errno));
+    close(ro_fd);
+    close(rw_fd);
+    return false;
+  }
+  
+  VT_TRACE(feedback->comp->log,
+           "VT_PROTO_LINUX_DMABUF_V1: Sealed RW FD for packed  feedback data.");
+
+  // after sealing, close the read-write FD
+  close(rw_fd);
+
+  
+  VT_TRACE(feedback->comp->log,
+           "VT_PROTO_LINUX_DMABUF_V1: Building packed feedback...");
+
+  struct vt_linux_dmabuf_v1_packed_feedback_t* packed = calloc(
+    1, sizeof(*packed) + feedback->tranches.size);
+  if(!packed) {
+    VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Out of memory."); 
+    close(ro_fd);
+    wl_array_release(&all_formats);
+    return false;
+  }
+
+  // build the packed feedback
+  packed->dev_main      = feedback->dev_main->dev;
+  packed->n_tranches    = feedback->tranches.size / sizeof(struct vt_dmabuf_tranche_t);
+  packed->entries_size  = entries_size;
+  packed->entries_fd    = ro_fd; 
+ 
+  
+  VT_TRACE(feedback->comp->log,
+           "VT_PROTO_LINUX_DMABUF_V1: Building packed feedback tranches (Total Tranches: %i)...", packed->n_tranches);
+
+
+  // we need to get the all_fmt_data as a struct vt_dmabuf_drm_format_t* to correctly loop 
+  // over its bytes
+  struct vt_dmabuf_drm_format_t* all_fmt_data = all_formats.data;
+  size_t n_all_formats = all_formats.size / sizeof(struct vt_dmabuf_drm_format_t);
+  if (all_formats.size % sizeof(struct vt_dmabuf_drm_format_t) != 0) {
+    VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Corrupted all_formats array: misaligned size %i", all_formats.size);
+    wl_array_release(&all_formats);
+    close(ro_fd);
+    return false;
+  }
+
+  struct vt_dmabuf_tranche_t *tranches = feedback->tranches.data;
+  for (uint32_t i = 0; i < packed->n_tranches; i++) {
+    VT_TRACE(feedback->comp->log,
+             "VT_PROTO_LINUX_DMABUF_V1: Building packed feedback tranche %u...", i);
+
+    struct vt_linux_dmabuf_v1_packed_feedback_tranche_t* tranche_packed = &packed->tranches[i];
+    struct vt_dmabuf_tranche_t* tranche = &tranches[i];
+
+    tranche_packed->target_device = tranche->target_device->dev;
+    tranche_packed->flags = tranche->flags;
+    wl_array_init(&tranche_packed->indices);
+
+    for (size_t j = 0; j < n_all_formats; j++) {
+      if (_format_exists(&tranche->formats, &all_fmt_data[j])) {
+        uint16_t* add = wl_array_add(&tranche_packed->indices, sizeof(*add));
+        if (!add) {
+          VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Out of memory.");
+          close(ro_fd);
+          wl_array_release(&all_formats);
+          return false;
+        }
+        *add = j;
+      }
+    }
+  }
+
+  *o_packed = packed;
+
+  close(packed->entries_fd);
+  wl_array_release(&all_formats);
+
+  VT_TRACE(feedback->comp->log,
+           "VT_PROTO_LINUX_DMABUF_V1: Successfully packed default feedback.");
 
   return true;
 }
-
 
 
 // ===================================================
@@ -393,10 +631,17 @@ vt_proto_linux_dmabuf_v1_init(struct vt_compositor_t* comp, struct vt_dmabuf_fee
 
   if(!(_proto->global = wl_global_create(comp->wl.dsp, &zwp_linux_dmabuf_v1_interface,
      4, _proto, _proto_linux_dmabuf_v1_bind))) return false;
+  _proto->fd_main_dev = -1;
 
   _proto->dsp_destroy.notify = _proto_linux_dmabuf_v1_handle_dsp_destroy;
   wl_display_add_destroy_listener(comp->wl.dsp, &_proto->dsp_destroy);
 
+
+  if(!_linux_dmabuf_set_default_feedback(_proto, default_feedback)) {
+  VT_TRACE(comp->log, "VT_PROTO_LINUX_DMABUF_V1: Failed to set default feedback.");
+    wl_global_destroy(_proto->global);
+    return false;
+  }
 
   VT_TRACE(comp->log, "VT_PROTO_LINUX_DMABUF_V1: Initialized DMABUF protocol.");
 

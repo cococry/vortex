@@ -10,8 +10,6 @@ struct vt_device_t {
   __dev_t dev;
   struct wl_list link;
   char path[64];
-
-  void* user_data;
 };
 
 struct vt_session_interface_t {
@@ -21,6 +19,9 @@ struct vt_session_interface_t {
   bool (*manage_device)(struct vt_session_t* session, struct vt_device_t* dev);
   bool (*close_device)(struct vt_session_t* session, struct vt_device_t* dev); 
   bool (*unmanage_device)(struct vt_session_t* session, struct vt_device_t* dev);
+  void* (*get_native_handle)(struct vt_session_t* session, struct vt_device_t* dev);
+  bool (*finish_native_handle)(struct vt_session_t* session, void* handle);
+  const char* (*get_native_handle_render_node)(struct vt_session_t* session, void* handle);
   struct vt_device_t* (*device_from_fd)(struct vt_session_t* session, uint32_t fd); 
 };
 

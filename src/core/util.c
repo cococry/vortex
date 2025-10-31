@@ -200,13 +200,5 @@ vt_util_allocate_shm_rwro_pair(struct vt_compositor_t* comp, size_t size, int* r
     return false;
   }
 
-  if (fcntl(*ro_fd, F_ADD_SEALS,
-            F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE) < 0) {
-    perror("fcntl(F_ADD_SEALS) failed");
-    close(*ro_fd);
-    close(*rw_fd);
-    return false;
-  }
-
   return true;
 }

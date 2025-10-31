@@ -2,16 +2,12 @@
 #include <string.h>
 #include "session_drm.h"
 
-#include <fcntl.h>
+#include <xf86drmMode.h>
+#include <xf86drm.h>
 #include <unistd.h>
-#include <stdlib.h>
-#include <stdlib.h>
-#include <errno.h>
-#include <stdarg.h>
 
-#include <linux/types.h>
-#include <drm/drm.h>
-#include <drm/drm_mode.h>
+#include <errno.h>
+
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 
@@ -428,6 +424,35 @@ vt_session_unmanage_device_drm(struct vt_session_t* session, struct vt_device_t*
   struct vt_session_drm_t* session_drm = BACKEND_DATA(session, struct vt_session_drm_t); 
   wl_list_remove(&dev->link);
   return true;
+}
+
+void*
+vt_session_get_native_handle_drm(struct vt_session_t* session, struct vt_device_t* dev) {
+  if(!session || !dev) return NULL;
+  drmDevice *device = NULL;
+  if (drmGetDeviceFromDevId(dev->dev, 0, &device) != 0) {
+    VT_ERROR(session->comp->log, "SESSION: Failed to get native handle of device '%s': drmGetDeviceFromDevId failed.", dev->path);
+    return NULL;
+  }
+  return device;
+}
+
+bool 
+vt_session_finish_native_handle_drm(struct vt_session_t* session, void* handle) {
+  if(!session || !handle) return false;
+  drmFreeDevice((drmDevice **)&handle);
+  return true;
+}
+
+const char* 
+vt_session_get_native_handle_render_node(struct vt_session_t* session, void* handle) {
+  if(!session || !handle) return NULL;
+  drmDevice* native = (drmDevice*)handle;
+  if(!(native->available_nodes & (1 << DRM_NODE_RENDER))) {
+    return NULL;
+  }
+  const char* name = native->nodes[DRM_NODE_RENDER];
+  return name;
 }
 
 struct vt_device_t* 
