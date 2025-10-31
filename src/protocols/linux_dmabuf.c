@@ -12,6 +12,9 @@
 #include <wayland-server-core.h>
 #include <wayland-util.h>
 
+#include <xf86drmMode.h>
+#include <xf86drm.h>
+
 #include "../core/util.h"
 
 struct vt_linux_dmabuf_v1_packed_feedback_tranche_t {
@@ -48,7 +51,8 @@ struct vt_proto_linux_dmabuf_v1_t {
 
 struct vt_linux_dmabuf_v1_params_t {
   struct wl_resource* res;
-  struct vt_dmbuf_attr_t attr;
+  struct vt_dmabuf_attr_t attr;
+  bool has_mod;
 };
 
 
@@ -112,10 +116,17 @@ static void _linux_dmabuf_v1_params_handle_res_destroy(
   struct wl_resource *resource
 );
 
+static void _linux_dmabuf_v1_buffer_handle_res_destroy(
+  struct wl_resource *resource
+);
+
 static void _linux_dmabuf_v1_feedback_destroy(
   struct wl_client *client,
   struct wl_resource *resource
 );
+
+static void _linux_dmabuf_v1_buffer_destroy(struct wl_client *client,
+		struct wl_resource *resource);
 
 static bool _linux_dmabuf_set_default_feedback(
   struct vt_proto_linux_dmabuf_v1_t* proto,
@@ -125,6 +136,13 @@ static bool _linux_dmabuf_set_default_feedback(
 static bool _linux_dmabuf_pack_feedback(
   struct vt_dmabuf_feedback_t* feedback,
   struct vt_linux_dmabuf_v1_packed_feedback_t** o_packed
+);
+
+static bool _linux_dmabuf_is_importable(
+  struct vt_dmabuf_attr_t* attr
+);
+static bool _linux_dmabuf_close_params(
+  struct vt_linux_dmabuf_v1_params_t* params
 );
 
 static struct vt_proto_linux_dmabuf_v1_t* _proto;
@@ -147,6 +165,11 @@ static const struct zwp_linux_buffer_params_v1_interface _dmabuf_params_impl = {
 static const struct zwp_linux_dmabuf_feedback_v1_interface _dmabuf_feedback_impl = {
 	.destroy = _linux_dmabuf_v1_feedback_destroy,
 };
+
+static const struct wl_buffer_interface wl_buffer_impl = {
+	.destroy = _linux_dmabuf_v1_buffer_destroy,
+};
+
 
 // ===================================================
 // ================ GLOBAL PROTOCOL ==================
@@ -245,6 +268,7 @@ _linux_dmabuf_v1_get_surface_feedback(
   struct wl_resource *resource,
   uint32_t id,
   struct wl_resource *surface) {
+	struct vt_surface_t* surf = wl_resource_get_user_data(resource);
 
 }
 
@@ -265,6 +289,240 @@ _linux_dmabuf_v1_params_add(
   uint32_t stride,
   uint32_t modifier_hi,
   uint32_t modifier_lo) {
+  struct vt_linux_dmabuf_v1_params_t* params = wl_resource_get_user_data(resource);
+  if (!params) {
+    wl_resource_post_error(
+      resource,
+      ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_ALREADY_USED,
+      "params was already used to create a wl_buffer");
+    close(fd);
+    return;
+  }
+
+  if (plane_idx >= VT_DMABUF_PLANES_CAP) {
+    wl_resource_post_error(
+      resource,
+      ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_PLANE_IDX,
+      "plane index %u > planes cap: %u", plane_idx, VT_DMABUF_PLANES_CAP);
+    close(fd);
+    return;
+  }
+  if (params->attr.fds[plane_idx] != -1) {
+    wl_resource_post_error(
+      resource,
+      ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_PLANE_SET,
+      "a dmabuf with FD %d has already been added for plane %u",
+      params->attr.fds[plane_idx], plane_idx);
+    close(fd);
+    return;
+  }
+
+  // all planes must have the same modifier 
+  uint64_t mod = ((uint64_t)modifier_hi << 32) | modifier_lo;
+  if (params->has_mod && mod != params->attr.mod) {
+    wl_resource_post_error(
+      resource,
+      ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INVALID_FORMAT,
+      "sent modifier %" PRIu64 " for plane %u, expected"
+      " modifier %" PRIu64 " like other planes",
+      mod, plane_idx, params->attr.mod);
+    close(fd);
+    return;
+  }
+
+	params->attr.mod = mod;
+	params->has_mod  = true;
+
+	params->attr.fds[plane_idx] = fd;
+	params->attr.offsets[plane_idx] = offset;
+	params->attr.strides[plane_idx] = stride;
+	params->attr.num_planes++;
+
+}
+
+void
+_linux_dmabuf_params_create(
+  struct wl_resource* resource,
+  uint32_t buf_id,
+  int32_t width,
+  int32_t height,
+  uint32_t format,
+  uint32_t flags) {
+  struct vt_linux_dmabuf_v1_params_t* params = wl_resource_get_user_data(resource);
+  if (!params) {
+    wl_resource_post_error(
+      resource,
+      ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_ALREADY_USED,
+      "params was already used to create a wl_buffer");
+    return;
+  }
+
+  // we used up those params to create a buffer
+  wl_resource_set_user_data(resource, NULL);
+	free(params);
+
+  if (!params->attr.num_planes) {
+    wl_resource_post_error(
+      resource,
+      ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INCOMPLETE,
+      "no dmabuf has been added to the params");
+
+	}
+
+  if (params->attr.fds[0] == -1) {
+    wl_resource_post_error(
+      resource,
+      ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INCOMPLETE,
+      "no dmabuf has been added for plane 0");
+    _linux_dmabuf_close_params(params);
+  }
+
+  bool has_gap = false;
+  int highest_plane = -1;
+
+  for (int i = 0; i < VT_DMABUF_PLANES_CAP; i++) {
+    if (params->attr.fds[i] >= 0) {
+      highest_plane = i;
+    }
+  }
+
+  for (int i = 0; i < highest_plane; i++) {
+    if (params->attr.fds[i] < 0) {
+      has_gap = true;
+      break;
+    }
+  }
+
+  if (has_gap) {
+    wl_resource_post_error(
+      resource,
+      ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INCOMPLETE,
+      "gap in dmabuf planes");
+    _linux_dmabuf_close_params(params);
+  }
+
+  if (!zwp_linux_buffer_params_v1_flags_is_valid(flags,  wl_resource_get_version(resource))) {
+    wl_resource_post_error(resource,
+                           ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INVALID_FORMAT,
+                           "Unknown dmabuf flags %"PRIu32, flags);
+    _linux_dmabuf_close_params(params);
+  }
+
+
+  if (flags != 0) {
+    if (buf_id == 0) {
+      VT_ERROR(_proto->comp->log, " VT_PROTO_LINUX_DMABUF_V1: DMABUF flags aren't supported.");
+      zwp_linux_buffer_params_v1_send_failed(resource);
+    } else {
+      wl_resource_post_error(
+        resource,
+        ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INVALID_WL_BUFFER,
+        "importing the supplied dmabufs failed");
+    }
+    _linux_dmabuf_close_params(params);
+  }
+
+
+  params->attr.width = width;
+  params->attr.height = height;
+  params->attr.format = format;
+
+  if (width <= 0 || height <= 0) {
+    wl_resource_post_error(
+      resource,
+      ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INVALID_DIMENSIONS,
+      "invalid width %i or height %i", width, height);
+    _linux_dmabuf_close_params(params);
+  }
+
+  for (int i = 0; i < params->attr.num_planes; i++) {
+    if ((uint64_t)params->attr.offsets[i]
+      + params->attr.strides[i] > UINT32_MAX) {
+      wl_resource_post_error(
+        resource,
+        ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_OUT_OF_BOUNDS,
+        "size overflow for plane %d", i);
+      _linux_dmabuf_close_params(params);
+    }
+
+    if ((uint64_t)params->attr.offsets[i]
+      + (uint64_t)params->attr.strides[i] * height > UINT32_MAX) {
+      wl_resource_post_error(
+        resource,
+        ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_OUT_OF_BOUNDS,
+        "size overflow for plane %d", i);
+      _linux_dmabuf_close_params(params);
+    }
+    off_t size = lseek(params->attr.fds[i], 0, SEEK_END);
+    if (size == -1) continue;
+
+    if (params->attr.offsets[i] > size) {
+      wl_resource_post_error(
+        resource,
+        ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_OUT_OF_BOUNDS,
+        "invalid offset %" PRIu32 " for plane %d",
+        params->attr.offsets[i], i);
+      _linux_dmabuf_close_params(params);
+    }
+
+    if (params->attr.offsets[i] + params->attr.strides[i] > size ||
+				params->attr.strides[i] == 0) {
+			wl_resource_post_error(resource,
+				ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_OUT_OF_BOUNDS,
+				"invalid stride %" PRIu32 " for plane %d",
+				params->attr.strides[i], i);
+      _linux_dmabuf_close_params(params);
+		}
+
+		// planes > 0 might be subsampled according to fourcc format
+		if (i == 0 && params->attr.offsets[i] +
+				params->attr.strides[i] * height > size) {
+			wl_resource_post_error(resource,
+				ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_OUT_OF_BOUNDS,
+				"invalid buffer stride or height for plane %d", i);
+      _linux_dmabuf_close_params(params);
+		}
+  }
+
+  if(!_linux_dmabuf_is_importable(&params->attr)) {
+    if (buf_id == 0) {
+      VT_ERROR(_proto->comp->log, " VT_PROTO_LINUX_DMABUF_V1: DMABUF flags aren't supported.");
+      zwp_linux_buffer_params_v1_send_failed(resource);
+    } else {
+      wl_resource_post_error(
+        resource,
+        ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INVALID_WL_BUFFER,
+        "importing the supplied dmabufs failed");
+    }
+    _linux_dmabuf_close_params(params);
+  }
+
+  struct vt_linux_dmabuf_v1_buffer_t* buf = calloc(1, sizeof(*buf));
+  if(!buf) {
+    wl_resource_post_no_memory(resource);
+    _linux_dmabuf_close_params(params);
+  }
+  buf->w = width;
+  buf->h = height;
+
+	struct wl_client* client = wl_resource_get_client(resource);
+	buf->res = wl_resource_create(client, &wl_buffer_interface,1, buf_id);
+  if(!buf->res) {
+    free(buf);
+    wl_resource_post_no_memory(resource);
+    _linux_dmabuf_close_params(params);
+  }
+
+  buf->attr = params->attr;
+
+	wl_resource_set_implementation(buf->res,
+		&wl_buffer_impl, buf, _linux_dmabuf_v1_buffer_handle_res_destroy);
+
+  if (!buf_id) {
+    zwp_linux_buffer_params_v1_send_created(
+      resource,
+      buf->res);
+  }
 
 }
 
@@ -276,7 +534,7 @@ _linux_dmabuf_v1_params_create(
   int32_t height,
   uint32_t format,
   uint32_t flags) {
-
+  _linux_dmabuf_params_create(resource, 0, width, height, format, flags);
 }
 	
 void 
@@ -288,7 +546,7 @@ _linux_dmabuf_v1_params_create_immed(
   int32_t height,
   uint32_t format,
   uint32_t flags) {
-
+  _linux_dmabuf_params_create(resource, buffer_id, width, height, format, flags);
 }
 
 void 
@@ -300,13 +558,18 @@ _linux_dmabuf_v1_params_handle_res_destroy(
   if(!(params = wl_resource_get_user_data(resource))) {
     return;
   }
-  for(uint32_t i = 0; i < params->attr.num_planes; i++) {
-    if(params->attr.fds[i] < 0) continue;
-    close(params->attr.fds[i]);
-    params->attr.fds[i] = -1;
-  }
-  params->attr.num_planes = 0;
+  _linux_dmabuf_close_params(params);
   free(params);
+}
+
+void 
+_linux_dmabuf_v1_buffer_handle_res_destroy(
+  struct wl_resource *resource
+) {
+  if(!resource) return;
+  struct vt_linux_dmabuf_v1_buffer_t* buf = wl_resource_get_user_data(resource);
+  if(!buf) return;
+  buf->res = NULL;
 }
 
 void 
@@ -317,6 +580,14 @@ _linux_dmabuf_v1_feedback_destroy(
   (void)client;
   wl_resource_destroy(resource);
 }
+
+
+void 
+_linux_dmabuf_v1_buffer_destroy(struct wl_client *client,
+		struct wl_resource *resource) {
+	wl_resource_destroy(resource);
+}
+
 
 static bool
 _format_exists(struct wl_array* fmts, struct vt_dmabuf_drm_format_t* find)  {
@@ -419,7 +690,7 @@ _linux_dmabuf_set_default_feedback(
     }
     s->impl.finish_native_handle(s, native_main_dev);
   } else {
-    VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: No render node attached to main device, cannot use DMABUFs.");
+    VT_TRACE(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Device '%s' is not a render node, skipping default feedback.");
     s->impl.finish_native_handle(s, native_main_dev);
     free(packed);
     return false;
@@ -620,6 +891,39 @@ _linux_dmabuf_pack_feedback(
   return true;
 }
 
+// https://gitlab.freedesktop.org/wlroots/wlroots/-/blob/master/types/wlr_linux_dmabuf_v1.c?ref_type=heads#L208
+bool 
+_linux_dmabuf_is_importable(
+  struct vt_dmabuf_attr_t* attr
+) {
+  // skip check for non DRM setups
+  if (_proto->fd_main_dev < 0) return true;
+
+  for (uint32_t i = 0; i < attr->num_planes; i++) {
+    uint32_t handle = 0;
+    if (drmPrimeFDToHandle(_proto->fd_main_dev, attr->fds[i], &handle) != 0) {
+      VT_ERROR(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Failed to import DMA-BUF FD for plane %i", i);
+      return false;
+    }
+    if (drmCloseBufferHandle(_proto->fd_main_dev, handle) != 0) {
+      VT_ERROR(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Failed to closse buffer handle for plane %i", i);
+      return false;
+    }
+  }
+  return true;
+}
+
+bool 
+_linux_dmabuf_close_params(
+  struct vt_linux_dmabuf_v1_params_t* params
+) {
+  for(uint32_t i = 0; i < params->attr.num_planes; i++) {
+    if(params->attr.fds[i] < 0) continue;
+    close(params->attr.fds[i]);
+    params->attr.fds[i] = -1;
+  }
+  params->attr.num_planes = 0;
+}
 
 // ===================================================
 // =================== PUBLIC API ====================
@@ -633,15 +937,15 @@ vt_proto_linux_dmabuf_v1_init(struct vt_compositor_t* comp, struct vt_dmabuf_fee
      4, _proto, _proto_linux_dmabuf_v1_bind))) return false;
   _proto->fd_main_dev = -1;
 
-  _proto->dsp_destroy.notify = _proto_linux_dmabuf_v1_handle_dsp_destroy;
-  wl_display_add_destroy_listener(comp->wl.dsp, &_proto->dsp_destroy);
-
-
   if(!_linux_dmabuf_set_default_feedback(_proto, default_feedback)) {
   VT_TRACE(comp->log, "VT_PROTO_LINUX_DMABUF_V1: Failed to set default feedback.");
     wl_global_destroy(_proto->global);
     return false;
   }
+
+
+  _proto->dsp_destroy.notify = _proto_linux_dmabuf_v1_handle_dsp_destroy;
+  wl_display_add_destroy_listener(comp->wl.dsp, &_proto->dsp_destroy);
 
   VT_TRACE(comp->log, "VT_PROTO_LINUX_DMABUF_V1: Initialized DMABUF protocol.");
 

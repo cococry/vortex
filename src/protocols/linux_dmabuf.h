@@ -4,7 +4,9 @@
 #include "../render/dmabuf.h"
 
 struct vt_linux_dmabuf_v1_buffer_t {
-
+  uint32_t w, h;
+  struct vt_dmabuf_attr_t attr;
+  struct wl_resource* res;
 };
 
 bool vt_proto_linux_dmabuf_v1_init(
