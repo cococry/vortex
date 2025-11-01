@@ -389,6 +389,8 @@ vt_session_open_device_drm(struct vt_session_t* session, struct vt_device_t* dev
   dev->fd = device_fd;
   dev->device_id = device_id;
   dev->dev = st.st_rdev;
+  
+  VT_ERROR(session->comp->log, "SESSION: Opening device %s, device ID: %i", path, dev->dev);
 
   return true;
 }

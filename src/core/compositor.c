@@ -604,9 +604,11 @@ _vt_comp_wl_surface_commit(
   if(r && r->impl.import_buffer) {
     r->impl.import_buffer(r, surf, surf->buf_res);
     // Tell the client we're finsied uploading its buffer
+    VT_TRACE(surf->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Sending release."); 
     wl_buffer_send_release(surf->buf_res);
   }
 
+    VT_TRACE(surf->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Sending release."); 
   wl_list_for_each(output, &surf->comp->outputs, link_global) {
     if(!(surf->_mask_outputs_visible_on & (1u << output->id))) {
       VT_WARN(surf->comp->log, "Not rerendering for surface %p because not on output %p.\n", surf, output);
@@ -620,6 +622,8 @@ _vt_comp_wl_surface_commit(
   }
 
   pixman_region32_clear(&surf->current_damage);
+  
+  VT_TRACE(surf->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Finsihed commit."); 
 }
 
 

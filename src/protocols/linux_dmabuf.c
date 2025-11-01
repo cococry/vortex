@@ -3,6 +3,7 @@
 #include "../render/dmabuf.h"
 
 #include <errno.h>
+#include <sys/stat.h>
 #include <fcntl.h>
 #include <linux-dmabuf-v1-server-protocol.h>
 #include <stdbool.h>
@@ -279,6 +280,7 @@ _linux_dmabuf_v1_create_params(struct wl_client* client,
 			      struct wl_resource* resource,
 			      uint32_t params_id) {
   struct vt_linux_dmabuf_v1_params_t* params;
+  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_v1_create_params"); 
   if(!(params = calloc(1, sizeof(*params)))) {
     wl_resource_post_no_memory(resource);
     return;
@@ -301,6 +303,7 @@ _linux_dmabuf_v1_get_default_feedback(struct wl_client *client,
 				     struct wl_resource *resource,
 				     uint32_t id) {
 	struct wl_resource* res;
+  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_v1_get_default_feedback"); 
   if(!(res = wl_resource_create(client,
 		&zwp_linux_dmabuf_feedback_v1_interface, wl_resource_get_version(resource), id))) {
     wl_client_post_no_memory(client);
@@ -324,6 +327,7 @@ _linux_dmabuf_v1_get_surface_feedback(
   struct vt_surface_t* surf;
   surf = wl_resource_get_user_data(surface);
   if(!surf) return;
+  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_v1_get_surface_feedback"); 
 
 	struct vt_linux_dmabuf_v1_surface_t* dmabuf_surf = _linux_dmabuf_surface_from_surf(surf);
   if(!dmabuf_surf) {
@@ -347,6 +351,8 @@ _linux_dmabuf_v1_get_surface_feedback(
   _linux_dmabuf_send_feedback(
     res_feedback, dmabuf_surf->feedback ? dmabuf_surf->feedback : _proto->default_feedback);
 
+  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Got surface feedback from  surface with version: %i", wl_resource_get_version(surface));
+  
 }
 
 void
@@ -367,6 +373,7 @@ _linux_dmabuf_v1_params_add(
   uint32_t modifier_hi,
   uint32_t modifier_lo) {
   struct vt_linux_dmabuf_v1_params_t* params = wl_resource_get_user_data(resource);
+  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_v1_params_add"); 
   if (!params) {
     wl_resource_post_error(
       resource,
@@ -433,6 +440,7 @@ _linux_dmabuf_params_create(
       "params was already used to create a wl_buffer");
     return;
   }
+  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_params_create"); 
   
   // we used up those params to create a buffer
   wl_resource_set_user_data(resource, NULL);
@@ -621,6 +629,7 @@ _linux_dmabuf_v1_params_create(
   int32_t height,
   uint32_t format,
   uint32_t flags) {
+  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_v1_params_create"); 
   _linux_dmabuf_params_create(resource, 0, width, height, format, flags);
 }
 	
@@ -633,6 +642,7 @@ _linux_dmabuf_v1_params_create_immed(
   int32_t height,
   uint32_t format,
   uint32_t flags) {
+  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_v1_params_create_immed"); 
   _linux_dmabuf_params_create(resource, buffer_id, width, height, format, flags);
 }
 
@@ -641,6 +651,7 @@ _linux_dmabuf_v1_params_handle_res_destroy(
   struct wl_resource* resource
 ) {
   if(!resource) return;
+  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_v1_params_handle_res_destroy"); 
   struct vt_linux_dmabuf_v1_params_t* params;
   if(!(params = wl_resource_get_user_data(resource))) {
     return;
@@ -657,6 +668,7 @@ _linux_dmabuf_v1_buffer_handle_res_destroy(
   struct vt_linux_dmabuf_v1_buffer_t* buf = wl_resource_get_user_data(resource);
   if(!buf) return;
   buf->res = NULL;
+  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_v1_buffer_handle_res_destroy()"); 
   free(buf);
 }
 
@@ -664,6 +676,7 @@ void
 _linux_dmabuf_v1_surf_feedback_handle_res_destroy(
   struct wl_resource *resource
 ) {
+  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_v1_surf_feedback_handle_res_destroy()"); 
   wl_list_remove(wl_resource_get_link(resource));
 }
 
@@ -673,6 +686,7 @@ _linux_dmabuf_v1_feedback_destroy(
   struct wl_resource* resource
 ) {
   (void)client;
+  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_v1_feedback_destroy()"); 
   wl_resource_destroy(resource);
 }
 
@@ -680,6 +694,7 @@ _linux_dmabuf_v1_feedback_destroy(
 void 
 _linux_dmabuf_v1_buffer_destroy(struct wl_client *client,
 		struct wl_resource *resource) {
+  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_v1_buffer_destroy()"); 
 	wl_resource_destroy(resource);
 }
 
@@ -757,6 +772,7 @@ _linux_dmabuf_set_default_feedback(
   struct vt_dmabuf_feedback_t* feedback
 ) {
   if(!feedback || !feedback->comp || !feedback->comp->session) return false;
+  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_set_default_feedback"); 
 
   struct vt_linux_dmabuf_v1_packed_feedback_t* packed = NULL;
   if(!_linux_dmabuf_pack_feedback(feedback, &packed)) {
@@ -784,6 +800,7 @@ _linux_dmabuf_set_default_feedback(
         s->impl.finish_native_handle(s, native_main_dev);
         return false;
       }
+      VT_TRACE(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Opened device '%s' for DMABUF imports.", native_render_node);
       s->impl.finish_native_handle(s, native_main_dev);
     } else {
       VT_TRACE(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Device '%s' is not a render node, skipping default feedback.");
@@ -833,6 +850,8 @@ _linux_dmabuf_pack_feedback(
 ) {
   if(!feedback) return false;
   if(!feedback->tranches.size) return false;
+  
+  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_pack_feedback"); 
  
 
   VT_TRACE(feedback->comp->log,
@@ -873,7 +892,6 @@ _linux_dmabuf_pack_feedback(
     VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Failed to mmap SHM for packed DMABUF feedback format entries: %s.", strerror(errno));
     close(ro_fd);
     close(rw_fd);
-    munmap(entries, entries_size);
     wl_array_release(&all_formats);
     return false;
   }	
@@ -1009,6 +1027,7 @@ void
 _linux_dmabuf_close_params(
   struct vt_linux_dmabuf_v1_params_t* params
 ) {
+  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_close_params"); 
   for(uint32_t i = 0; i < params->attr.num_planes; i++) {
     if(params->attr.fds[i] < 0) continue;
     close(params->attr.fds[i]) ;
@@ -1034,25 +1053,9 @@ _linux_dmabuf_surface_from_surf(
   dmabuf_surf->surf = surf;
   wl_list_init(&dmabuf_surf->res_feedback);
   wl_list_insert(&_proto->dmabuf_surfaces, &dmabuf_surf->link);
+  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_surface_from_surf"); 
 
   return dmabuf_surf;
-}
-
-static void 
-_send_feedback_tranche(
-  struct wl_resource* res,
-  struct vt_linux_dmabuf_v1_packed_feedback_tranche_t* tranche
-  ) {
-	struct wl_array dev_array = {
-		.size = sizeof(tranche->dev_target),
-		.data = (void *)&tranche->dev_target,
-	};
-	zwp_linux_dmabuf_feedback_v1_send_tranche_target_device(res, &dev_array);
-  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Sending tranche target device: %i", tranche->dev_target);
-	zwp_linux_dmabuf_feedback_v1_send_tranche_flags(res, tranche->flags);
-	zwp_linux_dmabuf_feedback_v1_send_tranche_formats(res,
-		(struct wl_array *)&tranche->indices);
-	zwp_linux_dmabuf_feedback_v1_send_tranche_done(res);
 }
 
 void
@@ -1062,21 +1065,49 @@ _linux_dmabuf_send_feedback(
 ) {
   if(!res || !feedback) return;
   VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Sending feedback with %i tranches...", feedback->n_tranches);
-  struct wl_array dev = {
-    .size = sizeof(feedback->dev_main),
-    .data = (void*)&feedback->dev_main,
-  };
-  zwp_linux_dmabuf_feedback_v1_send_main_device(res, &dev);
-  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Send main device %i.",feedback->dev_main);
+
+  struct stat s;
+  stat("/dev/dri/card128", &s);
+  struct wl_array device;
+  dev_t *dev;
+
+  wl_array_init(&device);
+  dev = wl_array_add(&device, sizeof(*dev));
+  if (!dev) {
+    wl_resource_post_no_memory(res);
+    return;
+  }
+
   zwp_linux_dmabuf_feedback_v1_send_format_table(
     res, feedback->entries_fd, feedback->entries_size);
+	
+  *dev = s.st_rdev;
+
+  zwp_linux_dmabuf_feedback_v1_send_main_device(res, &device);
+
+  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Send main device %i.",feedback->dev_main);
   
 	for (size_t i = 0; i < feedback->n_tranches; i++) {
     VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Sending tranche %i.",feedback->dev_main);
-		_send_feedback_tranche(res, &feedback->tranches[i]);
-	}
+  struct vt_linux_dmabuf_v1_packed_feedback_tranche_t* tranche = &feedback->tranches[i];
+    /* tranche_target_device event */
+    *dev = tranche->dev_target;
+    zwp_linux_dmabuf_feedback_v1_send_tranche_target_device(res, &device);
+
+    /* tranche_flags event */
+    zwp_linux_dmabuf_feedback_v1_send_tranche_flags(res, tranche->flags);
+
+    /* tranche_formats event */
+    zwp_linux_dmabuf_feedback_v1_send_tranche_formats(res, &tranche->indices);
+
+    /* tranche_done_event */
+    zwp_linux_dmabuf_feedback_v1_send_tranche_done(res);
+  }
 
 	zwp_linux_dmabuf_feedback_v1_send_done(res);
+
+
+	wl_array_release(&device);
 }
 
 static bool _format_has_mod(struct vt_dmabuf_drm_format_t* fmt, uint64_t mod) {

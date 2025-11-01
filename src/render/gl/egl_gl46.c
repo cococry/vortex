@@ -880,6 +880,8 @@ bool renderer_import_buffer_egl(
 
   VT_TRACE(r->comp->log, "Importing buffer for surface %p", surf);
   if(shmbuf) {
+  VT_TRACE(r->comp->log,
+           "Importing buffer as SHM.");
     return _egl_gl_import_buffer_shm(r, surf, shmbuf); 
   }
 
@@ -887,6 +889,8 @@ bool renderer_import_buffer_egl(
 
   if(dmabuf && egl->has_dmabuf_support) {
     // import dmabuf
+  VT_TRACE(r->comp->log,
+           "Importing buffer as DMABUF.");
     return _egl_gl_import_buffer_dmabuf(r, dmabuf, surf);
   }
 

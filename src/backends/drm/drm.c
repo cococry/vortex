@@ -408,10 +408,14 @@ _drm_build_dmabuf_feedback(
   wl_array_init(&fallback->formats);
 
   struct vt_dmabuf_drm_format_t* fmt = wl_array_add(&fallback->formats, sizeof(*fmt));
-  fmt->format = DRM_FORMAT_ARGB8888;
-  fmt->len = 1;
-  fmt->mods = calloc(1, sizeof(struct vt_dmabuf_format_modifier_t));
+  fmt->format = DRM_FORMAT_XRGB8888;
+  fmt->len = 2;
+  fmt->mods = calloc(fmt->len, sizeof(*fmt->mods));
   fmt->mods[0].mod = DRM_FORMAT_MOD_LINEAR;
+  fmt->mods[0]._egl_ext_only = false;
+  fmt->mods[1].mod = DRM_FORMAT_MOD_INVALID;
+  fmt->mods[1]._egl_ext_only = false;
+
 
   drmFreeDevice(&dev_main_drm);
   for (int i = 0; i < n_devs; i++) {
