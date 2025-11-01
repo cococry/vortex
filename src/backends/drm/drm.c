@@ -417,7 +417,7 @@ _drm_build_dmabuf_feedback(
   for (int i = 0; i < n_devs; i++) {
     drmFreeDevice(&devs[i]);
   }
-  VT_TRACE(master->comp->log, "DRM: Added default fallback tranhe (LINEAR DRM_FORMAT_ARGB8888).\n");
+  VT_TRACE(master->comp->log, "DRM: Added default fallback tranche (LINEAR DRM_FORMAT_ARGB8888).\n");
 
   return true;
 }
@@ -1085,9 +1085,14 @@ backend_init_drm(struct vt_backend_t* backend) {
   // cleanup the feedback
   struct vt_dmabuf_tranche_t* tranche;
   wl_array_for_each(tranche, &default_feedback->tranches) {
+  struct vt_dmabuf_drm_format_t* fmt;
+    wl_array_for_each(fmt, &tranche->formats) {
+      free(fmt->mods);
+    }
     wl_array_release(&tranche->formats);
   }
   wl_array_release(&default_feedback->tranches);
+
   free(default_feedback);
   
   VT_TRACE(backend->comp->log, "DRM: Successfully initialized DRM backend.");
@@ -1139,6 +1144,24 @@ backend_terminate_drm(struct vt_backend_t* backend) {
   }
 }
 
+bool 
+backend_is_dmabuf_importable_drm(struct vt_backend_t* backend, struct vt_dmabuf_attr_t* attr, int32_t device_fd) {
+  if (device_fd < 0) return true;
+
+  for (uint32_t i = 0; i < attr->num_planes; i++) {
+    uint32_t handle = 0;
+    if (drmPrimeFDToHandle(device_fd, attr->fds[i], &handle) != 0) {
+      VT_ERROR(backend->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Failed to import DMA-BUF FD for plane %i", i);
+      return false;
+    }
+    if (drmCloseBufferHandle(device_fd, handle) != 0) {
+      VT_ERROR(backend->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Failed to closse buffer handle for plane %i", i);
+      return false;
+    }
+  }
+  return true;
+}
+
 
 bool 
 backend_prepare_output_frame_drm(struct vt_backend_t* backend, struct vt_output_t* output) {
@@ -1160,6 +1183,7 @@ backend_implement_drm(struct vt_compositor_t* comp) {
 
   comp->backend->impl = (struct vt_backend_interface_t){
     .init = backend_init_drm,
+    .is_dmabuf_importable = backend_is_dmabuf_importable_drm,
     .handle_frame = backend_handle_frame_drm,
     .terminate = backend_terminate_drm,
     .prepare_output_frame = backend_prepare_output_frame_drm,

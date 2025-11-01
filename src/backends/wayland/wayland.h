@@ -4,6 +4,8 @@
 
 bool backend_init_wl(struct vt_backend_t* backend);
 
+bool backend_is_dmabuf_importable_wl(struct vt_backend_t* backend, struct vt_dmabuf_attr_t* attr, int32_t device_fd);
+
 bool backend_implement_wl(struct vt_compositor_t* comp);
   
 bool backend_handle_frame_wl(struct vt_backend_t* backend, struct vt_output_t* output);

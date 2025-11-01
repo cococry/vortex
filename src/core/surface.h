@@ -18,6 +18,7 @@ struct vt_surface_t {
   struct vt_xdg_surface_t* xdg_surf;
 
   RnTexture tex; 
+  void* render_tex_handle;
 
   struct wl_list link;
   

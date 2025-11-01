@@ -3,6 +3,8 @@
 #include <sys/types.h>
 #include "core_types.h"
 
+#include <wayland-server-core.h>
+
 struct vt_session_t;
 
 struct vt_device_t {

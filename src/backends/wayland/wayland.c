@@ -1,4 +1,3 @@
-#include <wayland-server-protocol.h>
 #define _GNU_SOURCE
 #include "wayland.h"
 
@@ -15,6 +14,7 @@
 #include "xdg-shell-client-protocol.h"
 #include "../../render/renderer.h"
 #include "../../core/compositor.h"
+#include "../../protocols/linux_dmabuf.h"
 
 #define _WL_DEFAULT_OUTPUT_WIDTH 1280
 #define _WL_DEFAULT_OUTPUT_HEIGHT 720
@@ -231,6 +231,55 @@ _wl_backend_destroy_output(struct vt_backend_t* backend, struct vt_output_t* out
   return true;
 }
 
+#define _vt_fourcc_code(a, b, c, d) ((__u32)(a) | ((__u32)(b) << 8) | \
+  ((__u32)(c) << 16) | ((__u32)(d) << 24))
+
+#define _VT_DRM_FORMAT_ARGB8888	_vt_fourcc_code('A', 'R', '2', '4') /* [31:0] A:R:G:B 8:8:8:8 little endian */
+#define _VT_DRM_FORMAT_XRGB8888	_vt_fourcc_code('X', 'R', '2', '4') /* [31:0] A:R:G:B 8:8:8:8 little endian */
+#define _VT_DRM_FORMAT_MOD_LINEAR 0x0000000000000000
+#define _VT_DRM_FORMAT_MOD_INVALID 0x00FFFFFFFFFFFFFF
+
+static bool init_fake_dmabuf_feedback(struct vt_compositor_t* comp,
+                                      struct vt_dmabuf_feedback_t* fb) {
+  wl_array_init(&fb->tranches);
+
+  fb->comp = comp;
+  fb->dev_main = calloc(1, sizeof(*fb->dev_main)); // no DRM device
+  fb->dev_main->dev = 0;
+  fb->dev_main->fd = -1;
+
+  // Create a single empty tranche (no formats)
+  struct vt_dmabuf_tranche_t* tranche = wl_array_add(&fb->tranches, sizeof(*tranche));
+  if (!tranche)
+    return false;
+
+  wl_array_init(&tranche->formats);
+
+  tranche->flags = 0; // no scanout
+  tranche->target_device = fb->dev_main;
+
+  // add DRM_FORMAT_XRGB8888 + modifiers
+  struct vt_dmabuf_drm_format_t* fmt = wl_array_add(&tranche->formats, sizeof(*fmt));
+  fmt->format = _VT_DRM_FORMAT_XRGB8888;
+  fmt->len = 2;
+  fmt->mods = calloc(fmt->len, sizeof(*fmt->mods));
+  fmt->mods[0].mod = _VT_DRM_FORMAT_MOD_LINEAR;
+  fmt->mods[0]._egl_ext_only = false;
+  fmt->mods[1].mod = _VT_DRM_FORMAT_MOD_INVALID;
+  fmt->mods[1]._egl_ext_only = false;
+
+  // also ARGB8888 (clients sometimes expect it)
+  struct vt_dmabuf_drm_format_t* fmt2 = wl_array_add(&tranche->formats, sizeof(*fmt2));
+  fmt2->format = _VT_DRM_FORMAT_ARGB8888;
+  fmt2->len = 2;
+  fmt2->mods = calloc(fmt2->len, sizeof(*fmt2->mods));
+  fmt2->mods[0].mod = _VT_DRM_FORMAT_MOD_LINEAR;
+  fmt2->mods[0]._egl_ext_only = false;
+  fmt2->mods[1].mod = _VT_DRM_FORMAT_MOD_INVALID;
+  fmt2->mods[1]._egl_ext_only = false;
+
+}
+
 // ===================================================
 // =================== PUBLIC API ====================
 // ===================================================
@@ -270,12 +319,24 @@ backend_init_wl(struct vt_backend_t* backend) {
 
   backend->comp->renderer->impl.init(c->backend, backend->comp->renderer, wl->parent_display);
 
+struct vt_dmabuf_feedback_t *feedback = calloc(1, sizeof(*feedback));
+init_fake_dmabuf_feedback(backend->comp, feedback);
+vt_proto_linux_dmabuf_v1_init(backend->comp, feedback, 4);
+
   _wl_backend_init_active_outputs(backend);
   
   VT_TRACE(c->log, "WL: Successfully initialized Wayland backend.");
 
   return true;
 
+}
+
+bool 
+backend_is_dmabuf_importable_wl(struct vt_backend_t* backend, struct vt_dmabuf_attr_t* attr, int32_t device_fd) {
+  (void)backend;
+  (void)attr;
+  (void)device_fd;
+  return true;
 }
 
 bool 
@@ -287,6 +348,7 @@ backend_implement_wl(struct vt_compositor_t* comp) {
   comp->backend->platform = VT_BACKEND_WAYLAND; 
   comp->backend->impl = (struct vt_backend_interface_t){
     .init = backend_init_wl,
+    .is_dmabuf_importable = backend_is_dmabuf_importable_wl,
     .handle_frame = backend_handle_frame_wl,
     .terminate = backend_terminate_wl,
     .prepare_output_frame = backend_prepare_output_frame_wl,
@@ -418,7 +480,6 @@ _wl_backend_create_output(struct vt_backend_t* backend, struct vt_output_t* outp
   output->y = 0;
   output->width = _WL_DEFAULT_OUTPUT_WIDTH;  
   output->height = _WL_DEFAULT_OUTPUT_HEIGHT; 
-
 
 
   wl_list_insert(&backend->comp->outputs, &output->link_global);

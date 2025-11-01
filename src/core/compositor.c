@@ -771,6 +771,9 @@ _vt_comp_wl_surface_handle_resource_destroy(struct wl_resource* resource) {
     r->impl.destroy_surface_texture(r, surf);
   }
 
+  // destroy dmabuf resources of the surface
+  vt_proto_linux_dmabuf_v1_surface_destroy(surf);
+
   wl_list_for_each(output, &surf->comp->outputs, link_global) {
     if(!(surf->_mask_outputs_visible_on & (1u << output->id))) continue;
     // Destory surface texture with the renderer associated with the first output 

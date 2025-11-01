@@ -6,6 +6,7 @@
 #include <pixman.h>
 
 #include "../input/input.h"
+#include "../render/dmabuf.h"
 #include "util.h"
 #include "session.h"
 #include "../input/wl_seat.h"
@@ -36,12 +37,13 @@ enum vt_backend_platform_t {
   VT_BACKEND_DRM_GBM = 0,
   VT_BACKEND_WAYLAND,
   VT_BACKEND_SURFACELESS,
-} ;
+};
 
 
 
 struct vt_backend_interface_t {
   bool (*init)(struct vt_backend_t* backend);
+  bool (*is_dmabuf_importable)(struct vt_backend_t* backend, struct vt_dmabuf_attr_t* attr, int32_t device_fd);
   bool (*handle_frame)(struct vt_backend_t* backend, struct vt_output_t* output);
   bool (*prepare_output_frame)(struct vt_backend_t* backend, struct vt_output_t* output);
   bool (*terminate)(struct vt_backend_t* backend);

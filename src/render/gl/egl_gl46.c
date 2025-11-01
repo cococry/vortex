@@ -1,17 +1,19 @@
-#include "src/core/core_types.h"
-#include "src/core/util.h"
-#include "src/render/dmabuf.h"
-#include "src/render/renderer.h"
-#include <EGL/eglplatform.h>
-#include <wayland-util.h>
 #define EGL_NO_X11
 #define MESA_EGL_NO_X11_HEADERS
 #define EGL_PLATFORM_GBM_KHR 1
 #define EGL_EGLEXT_PROTOTYPES
-#include "egl_gl46.h"
+#include <EGL/eglplatform.h>
+#include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
+#include <wayland-util.h>
 
 #include "src/core/compositor.h"
 #include "src/core/surface.h"
+#include "src/core/core_types.h"
+#include "src/core/util.h"
+#include "src/protocols/linux_dmabuf.h"
+#include "src/render/dmabuf.h"
+#include "src/render/renderer.h"
 
 
 #include <EGL/egl.h>
@@ -22,6 +24,11 @@
 
 #include <runara/runara.h>
 
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+
+#include "egl_gl46.h"
+
 
 // Minimal GBM interop
 #define __vt_gbm_fourcc_code(a,b,c,d) ((uint32_t)(a) | ((uint32_t)(b) << 8) | \
@@ -30,16 +37,23 @@
 
 #define _VT_GBM_FORMAT_XRGB8888	__vt_gbm_fourcc_code('X', 'R', '2', '4') /* [31:0] x:R:G:B 8:8:8:8 little endian */
 
+
 static PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC eglSwapBuffersWithDamageEXT_ptr = NULL;
 static PFNEGLSWAPBUFFERSWITHDAMAGEKHRPROC eglSwapBuffersWithDamageKHR_ptr = NULL;
+static PFNGLEGLIMAGETARGETTEXTURE2DOESPROC glEGLImageTargetTexture2DOES_ptr = NULL;
+static PFNEGLCREATEIMAGEKHRPROC eglCreateImageKHR_ptr = NULL;
+static PFNEGLDESTROYIMAGEKHRPROC eglDestroyImageKHR_ptr = NULL;
 
 struct egl_backend_state_t {
   EGLDisplay egl_dsp;
   EGLContext egl_ctx;
   EGLConfig egl_conf;
   EGLint egl_native_vis;
+  bool has_dmabuf_modifiers, has_dmabuf_support;
 
   RnState* render;
+
+  struct wl_array formats;
 }; 
 
 struct egl_output_state_t {
@@ -137,6 +151,154 @@ _egl_gl_import_buffer_shm(struct vt_renderer_t* r, struct vt_surface_t *surf,
 
   glBindTexture(GL_TEXTURE_2D, 0);
 
+  return true;
+}
+
+
+#define _VT_DRM_FORMAT_MOD_INVALID 0x00FFFFFFFFFFFFFF
+#define _VT_DRM_FORMAT_MOD_LINEAR 0x0000000000000000
+
+bool
+_egl_gl_import_buffer_dmabuf(struct vt_renderer_t* r,
+                             struct vt_linux_dmabuf_v1_buffer_t* dmabuf,
+                             struct vt_surface_t* surf)
+{
+  struct vt_dmabuf_attr_t* a = &dmabuf->attr;
+  
+  struct egl_backend_state_t* egl = BACKEND_DATA(r, struct egl_backend_state_t);
+
+  if (!a->num_planes || a->width <= 0 || a->height <= 0) {
+    VT_ERROR(r->comp->log, "Invalid dmabuf attributes for import.");
+    return false;
+  }
+
+	if (a->mod != _VT_DRM_FORMAT_MOD_INVALID &&
+			a->mod != _VT_DRM_FORMAT_MOD_LINEAR &&
+			!egl->has_dmabuf_modifiers) {
+    VT_ERROR(r->comp->log, "EGL: No support for DMABUF modifiers, skipping importing.");
+    return false;
+	}
+
+  // https://gitlab.freedesktop.org/wlroots/wlroots/-/blob/master/render/egl.c#L750
+	unsigned int atti = 0;
+	EGLint attribs[50];
+	attribs[atti++] = EGL_WIDTH;
+	attribs[atti++] = a->width;
+	attribs[atti++] = EGL_HEIGHT;
+	attribs[atti++] = a->height;
+	attribs[atti++] = EGL_LINUX_DRM_FOURCC_EXT;
+	attribs[atti++] = a->format;
+
+	struct {
+		EGLint fd;
+		EGLint offset;
+		EGLint pitch;
+		EGLint mod_lo;
+		EGLint mod_hi;
+	} attr_names[VT_DMABUF_PLANES_CAP] = {
+		{
+			EGL_DMA_BUF_PLANE0_FD_EXT,
+			EGL_DMA_BUF_PLANE0_OFFSET_EXT,
+			EGL_DMA_BUF_PLANE0_PITCH_EXT,
+			EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT,
+			EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT
+		}, {
+			EGL_DMA_BUF_PLANE1_FD_EXT,
+			EGL_DMA_BUF_PLANE1_OFFSET_EXT,
+			EGL_DMA_BUF_PLANE1_PITCH_EXT,
+			EGL_DMA_BUF_PLANE1_MODIFIER_LO_EXT,
+			EGL_DMA_BUF_PLANE1_MODIFIER_HI_EXT
+		}, {
+			EGL_DMA_BUF_PLANE2_FD_EXT,
+			EGL_DMA_BUF_PLANE2_OFFSET_EXT,
+			EGL_DMA_BUF_PLANE2_PITCH_EXT,
+			EGL_DMA_BUF_PLANE2_MODIFIER_LO_EXT,
+			EGL_DMA_BUF_PLANE2_MODIFIER_HI_EXT
+		}, {
+			EGL_DMA_BUF_PLANE3_FD_EXT,
+			EGL_DMA_BUF_PLANE3_OFFSET_EXT,
+			EGL_DMA_BUF_PLANE3_PITCH_EXT,
+			EGL_DMA_BUF_PLANE3_MODIFIER_LO_EXT,
+			EGL_DMA_BUF_PLANE3_MODIFIER_HI_EXT
+		}
+	};
+
+	for (int i = 0; i < a->num_planes; i++) {
+		attribs[atti++] = attr_names[i].fd;
+		attribs[atti++] = a->fds[i];
+		attribs[atti++] = attr_names[i].offset;
+		attribs[atti++] = a->offsets[i];
+		attribs[atti++] = attr_names[i].pitch;
+		attribs[atti++] = a->strides[i];
+		if (egl->has_dmabuf_modifiers &&
+				a->mod != _VT_DRM_FORMAT_MOD_INVALID) {
+			attribs[atti++] = attr_names[i].mod_lo;
+			attribs[atti++] = a->mod & 0xFFFFFFFF;
+			attribs[atti++] = attr_names[i].mod_hi;
+			attribs[atti++] = a->mod >> 32;
+		}
+	}
+	attribs[atti++] = EGL_IMAGE_PRESERVED_KHR;
+	attribs[atti++] = EGL_TRUE;
+
+	attribs[atti++] = EGL_NONE;
+	assert(atti <= sizeof(attribs)/sizeof(attribs[0]));
+
+  EGLImageKHR image = eglCreateImageKHR_ptr(
+      egl->egl_dsp,
+      EGL_NO_CONTEXT,
+      EGL_LINUX_DMA_BUF_EXT,
+      NULL,
+      attribs);
+
+  if (image == EGL_NO_IMAGE_KHR) {
+    EGLint err = eglGetError();
+    VT_ERROR(r->comp->log,
+             "Failed to import dmabuf into EGLImage: error=0x%x "
+             "(format=0x%x, mod=0x%016" PRIx64 ")",
+             err, a->format, a->mod);
+    return false;
+  }
+
+  bool is_external_only = false;
+  struct vt_dmabuf_drm_format_t* fmt = NULL;
+  struct vt_dmabuf_drm_format_t* f;
+  wl_array_for_each(f, &egl->formats) {
+    if (f->format != a->format) continue;
+    for (size_t i = 0; i < f->len; i++) {
+      if (f->mods[i].mod == a->mod) {
+        is_external_only = f->mods[i]._egl_ext_only;
+        fmt = f;
+        break;
+      }
+    }
+    if (fmt) break;
+  }
+
+  GLenum target = is_external_only ? GL_TEXTURE_EXTERNAL_OES : GL_TEXTURE_2D;
+
+  if (!surf->tex.id)
+    glGenTextures(1, &surf->tex.id);
+
+  glBindTexture(target, surf->tex.id);
+  glEGLImageTargetTexture2DOES_ptr(target, image);
+
+  glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+  glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+  glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+  surf->tex.width = a->width;
+  surf->tex.height = a->height;
+  surf->render_tex_handle = image; 
+
+
+  VT_TRACE(r->comp->log,
+           "Imported dmabuf %ux%u fmt=0x%x mod=0x%016" PRIx64 " (%s)",
+           a->width, a->height, a->format, a->mod,
+           is_external_only ? "external" : "2D");
+
+  glBindTexture(target, 0);
   return true;
 }
 
@@ -381,6 +543,29 @@ renderer_init_egl(struct vt_backend_t* backend, struct vt_renderer_t *r, void* n
       eglGetProcAddress("eglSwapBuffersWithDamageKHR");
   }
 
+  egl->has_dmabuf_support = true;
+  egl->has_dmabuf_modifiers = true;
+
+  glEGLImageTargetTexture2DOES_ptr =
+    (PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)
+    eglGetProcAddress("glEGLImageTargetTexture2DOES");
+
+  if (!glEGLImageTargetTexture2DOES_ptr) {
+    VT_ERROR(backend->comp->log,
+             "EGL: Failed to load glEGLImageTargetTexture2DOES (GL_OES_EGL_image), DMABUF imports will not be supported.");
+    egl->has_dmabuf_support = false;
+  }
+
+  if (strstr(exts, "EGL_KHR_image_base")) {
+    eglCreateImageKHR_ptr =
+      (PFNEGLCREATEIMAGEKHRPROC) eglGetProcAddress("eglCreateImageKHR");
+    eglDestroyImageKHR_ptr =
+      (PFNEGLDESTROYIMAGEKHRPROC) eglGetProcAddress("eglDestroyImageKHR");
+  } else {
+    VT_ERROR(backend->comp->log, "EGL: EGL_KHR_image_base extension not supported, DMABUF imports will not be supported.");
+    egl->has_dmabuf_support = false;
+  }
+  VT_TRACE(r->comp->log, "EGL extensions: %s", exts);
   VT_TRACE(r->comp->log, "EGL: initialized (vendor=%s, version=%s)", vendor, version);
 
   return true;
@@ -474,6 +659,9 @@ renderer_query_dmabuf_formats_egl(struct vt_compositor_t* comp, void* native_han
 bool 
 renderer_query_dmabuf_formats_with_renderer_egl(struct vt_renderer_t* renderer, struct wl_array* formats) {
   if(!renderer || !renderer->user_data || !formats) return false; 
+  
+  struct egl_backend_state_t* egl = BACKEND_DATA(renderer, struct egl_backend_state_t);
+  wl_array_init(&egl->formats);
 
     PFNEGLQUERYDMABUFFORMATSEXTPROC eglQueryDmaBufFormatsEXT =
         (void*) eglGetProcAddress("eglQueryDmaBufFormatsEXT");
@@ -482,10 +670,10 @@ renderer_query_dmabuf_formats_with_renderer_egl(struct vt_renderer_t* renderer, 
 
   if (!eglQueryDmaBufFormatsEXT || !eglQueryDmaBufModifiersEXT) {
     VT_ERROR(renderer->comp->log, "EGL: DMABUF extensions not supported, falling back to SHM.\n");
+    egl->has_dmabuf_modifiers = true;
     return false;
   }
   
-  struct egl_backend_state_t* egl = BACKEND_DATA(renderer, struct egl_backend_state_t);
 
   wl_array_init(formats);
 
@@ -538,6 +726,34 @@ renderer_query_dmabuf_formats_with_renderer_egl(struct vt_renderer_t* renderer, 
 
     free(format_mods);
     free(ext_only);
+  }
+
+
+  struct vt_dmabuf_drm_format_t* fmt;
+  wl_array_for_each(fmt, formats) {
+    if(!fmt) continue;
+    struct vt_dmabuf_drm_format_t* fmt_add = wl_array_add(&egl->formats, sizeof(*fmt_add));
+    if(!fmt_add) {
+      return false;
+    }
+    // deep copy
+    fmt_add->format = fmt->format;
+    fmt_add->len = fmt->len;
+
+    if (fmt->len > 0 && fmt->mods) {
+      fmt_add->mods = calloc(fmt->len,
+                             sizeof(*fmt_add->mods));
+      if (!fmt_add->mods) {
+        // Rollback allocation
+        wl_array_release(&egl->formats);
+        if (n_formats)
+          return false;
+      }
+      memcpy(fmt_add->mods, fmt->mods,
+             fmt->len * sizeof(*fmt->mods));
+    } else {
+      fmt_add->mods = NULL;
+    }
   }
 
   free(dmabuf_formats);
@@ -660,18 +876,35 @@ bool renderer_import_buffer_egl(
   struct vt_renderer_t *r, struct vt_surface_t *surf,
   struct wl_resource *buffer_resource) {
   struct wl_shm_buffer* shmbuf = wl_shm_buffer_get(buffer_resource);
+  struct egl_backend_state_t* egl = BACKEND_DATA(r, struct egl_backend_state_t);
+
   VT_TRACE(r->comp->log, "Importing buffer for surface %p", surf);
   if(shmbuf) {
     return _egl_gl_import_buffer_shm(r, surf, shmbuf); 
   }
+
+  struct vt_linux_dmabuf_v1_buffer_t* dmabuf = vt_proto_linux_dmabuf_v1_from_buffer_res(buffer_resource);
+
+  if(dmabuf && egl->has_dmabuf_support) {
+    // import dmabuf
+    return _egl_gl_import_buffer_dmabuf(r, dmabuf, surf);
+  }
+
   VT_WARN(r->comp->log, "Unknown buffer type for surface %p", surf);
   return false;
 }
   
 bool renderer_destroy_surface_texture_egl(struct vt_renderer_t* r, struct vt_surface_t* surf) {
   if(!surf || !r) return false;
+  struct egl_backend_state_t* egl = BACKEND_DATA(r, struct egl_backend_state_t);
+  glBindTexture(GL_TEXTURE_2D, 0);
   if(surf->tex.id)
     glDeleteTextures(1, &surf->tex.id);
+
+  if (surf->render_tex_handle && surf->render_tex_handle != EGL_NO_IMAGE_KHR) {
+    eglDestroyImageKHR_ptr(egl->egl_dsp, (EGLImageKHR)surf->render_tex_handle);
+    surf->render_tex_handle = EGL_NO_IMAGE_KHR;
+  }
   surf->tex.id = 0;
   surf->tex.width = 0;
   surf->tex.height = 0;
