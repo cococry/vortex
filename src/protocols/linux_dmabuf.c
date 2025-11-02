@@ -1066,8 +1066,6 @@ _linux_dmabuf_send_feedback(
   if(!res || !feedback) return;
   VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Sending feedback with %i tranches...", feedback->n_tranches);
 
-  struct stat s;
-  stat("/dev/dri/card128", &s);
   struct wl_array device;
   dev_t *dev;
 
@@ -1081,7 +1079,7 @@ _linux_dmabuf_send_feedback(
   zwp_linux_dmabuf_feedback_v1_send_format_table(
     res, feedback->entries_fd, feedback->entries_size);
 	
-  *dev = s.st_rdev;
+  *dev =  feedback->dev_main;
 
   zwp_linux_dmabuf_feedback_v1_send_main_device(res, &device);
 
@@ -1090,22 +1088,17 @@ _linux_dmabuf_send_feedback(
 	for (size_t i = 0; i < feedback->n_tranches; i++) {
     VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Sending tranche %i.",feedback->dev_main);
   struct vt_linux_dmabuf_v1_packed_feedback_tranche_t* tranche = &feedback->tranches[i];
-    /* tranche_target_device event */
-    *dev = tranche->dev_target;
+    *dev = tranche->dev_target; 
     zwp_linux_dmabuf_feedback_v1_send_tranche_target_device(res, &device);
 
-    /* tranche_flags event */
     zwp_linux_dmabuf_feedback_v1_send_tranche_flags(res, tranche->flags);
 
-    /* tranche_formats event */
     zwp_linux_dmabuf_feedback_v1_send_tranche_formats(res, &tranche->indices);
 
-    /* tranche_done_event */
     zwp_linux_dmabuf_feedback_v1_send_tranche_done(res);
   }
 
 	zwp_linux_dmabuf_feedback_v1_send_done(res);
-
 
 	wl_array_release(&device);
 }
@@ -1189,7 +1182,6 @@ vt_proto_linux_dmabuf_v1_init(struct vt_compositor_t* comp, struct vt_dmabuf_fee
   }
 
   wl_list_init(&_proto->dmabuf_surfaces);
-
 
   _proto->dsp_destroy.notify = _proto_linux_dmabuf_v1_handle_dsp_destroy;
   wl_display_add_destroy_listener(comp->wl.dsp, &_proto->dsp_destroy);

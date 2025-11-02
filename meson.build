@@ -32,10 +32,11 @@ dep_seat            = dependency('libseat',           required: false)
 dep_udev            = dependency('libudev',           required: false)
 dep_libinput        = dependency('libinput',          required: false)
 
-wayland_scanner = find_program('wayland-scanner', required: true)
-protocols_dir = dep_wayland_protos.get_variable(pkgconfig: 'pkgdatadir')
-xdg_shell_xml = join_paths(protocols_dir, 'stable', 'xdg-shell', 'xdg-shell.xml')
-dma_buf_xml    = join_paths(protocols_dir, 'stable', 'linux-dmabuf', 'linux-dmabuf-v1.xml')
+wayland_scanner   = find_program('wayland-scanner', required: true)
+protocols_dir     = dep_wayland_protos.get_variable(pkgconfig: 'pkgdatadir')
+xdg_shell_xml     = join_paths(protocols_dir, 'stable', 'xdg-shell', 'xdg-shell.xml')
+dma_buf_xml       = join_paths(protocols_dir, 'stable', 'linux-dmabuf', 'linux-dmabuf-v1.xml')
+explitic_sync_xml = join_paths(protocols_dir, 'unstable', 'linux-explicit-synchronization', 'linux-explicit-synchronization-unstable-v1.xml')
 
 xdg_server_header = custom_target(
   'xdg-shell-server-header',
@@ -59,10 +60,27 @@ dma_buf_header = custom_target(
   command: [wayland_scanner, 'server-header', '@INPUT@', '@OUTPUT@'],
   install: false
 )
+
 dma_buf_code = custom_target(
   'linux-dmabuf-code',
   input: dma_buf_xml,
   output: 'linux-dmabuf-v1-protocol.c',
+  command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'],
+  install: false
+)
+
+explitic_sync_header = custom_target(
+  'linux-explicit-synchronization-header',
+  input: explitic_sync_xml,
+  output: 'linux-explicit-synchronization-v1-server-protocol.h',
+  command: [wayland_scanner, 'server-header', '@INPUT@', '@OUTPUT@'],
+  install: false
+)
+
+explitic_sync_code = custom_target(
+  'linux-explicit-synchronization-code',
+  input: explitic_sync_xml,
+  output: 'linux-explicit-synchronization-v1-protocol.c',
   command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'],
   install: false
 )
@@ -81,6 +99,8 @@ vortex_src = files('src/vortex.c',
 'src/protocols/xdg_shell.h', 
 'src/protocols/linux_dmabuf.c', 
 'src/protocols/linux_dmabuf.h', 
+'src/protocols/linux_explicit_sync.c', 
+'src/protocols/linux_explicit_sync.h', 
 'src/input/input.c', 
 'src/input/input.h', 
 'src/input/wl_seat.c', 
@@ -130,6 +150,8 @@ vortex_exe = executable(
     xdg_server_code,
     dma_buf_header,
     dma_buf_code,
+    explitic_sync_header,
+    explitic_sync_code
   ],
   include_directories: vortex_inc,
   link_args: ['-Wl,-E'], 
