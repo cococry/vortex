@@ -203,8 +203,6 @@ vt_comp_frame_done(struct vt_compositor_t *c, struct vt_output_t* output, uint32
   wl_list_for_each(surf, &c->surfaces, link) {
     if(!surf->needs_frame_done) continue; 
 
-    surf->_mask_outputs_presented_on |= (1u << output->id);
-
     if(!(surf->_mask_outputs_visible_on & (1u << output->id))) continue;
 
     if((surf->_mask_outputs_presented_on & surf->_mask_outputs_visible_on) == surf->_mask_outputs_visible_on) {
@@ -457,8 +455,14 @@ void _vt_comp_associate_surface_with_output(struct vt_compositor_t* c, struct vt
     surf->x >= output->x + output->width ||
     surf->y + surf->height <= output->y ||
     surf->y >= output->y + output->height) return;
+
+  bool visibility_updated = !(surf->_mask_outputs_visible_on & (1u << output->id));
+
   surf->_mask_outputs_visible_on |= (1u << output->id);
 
+  if(visibility_updated) {
+    output->needs_damage_rebuild = true;
+  }
 }
 
 void 
@@ -550,23 +554,16 @@ _vt_comp_wl_surface_commit(
   if (!surf->has_buffer) {
     return;
   }
+  if(pixman_region32_empty(&surf->pending_damage)) return;
+
 
   if (!surf->current_damage.data) {
     pixman_region32_init(&surf->current_damage);
   }
-
-  if(pixman_region32_empty(&surf->pending_damage)) return;
-
-  pixman_box32_t extents = *pixman_region32_extents(&surf->pending_damage);
-
-  if (surf->current_damage.data && surf->current_damage.data->numRects == 0)
-    pixman_region32_copy(&surf->current_damage, &surf->pending_damage);
-  else
-    pixman_region32_union_rect(&surf->current_damage, &surf->current_damage,
-                               extents.x1, extents.y1,
-                               extents.x2 - extents.x1,
-                               extents.y2 - extents.y1);
-
+  pixman_box32_t ext =* pixman_region32_extents(&surf->pending_damage);
+  pixman_region32_clear(&surf->current_damage);
+  pixman_region32_union_rect(&surf->current_damage, &surf->current_damage,
+                             ext.x1, ext.y1, ext.x2 - ext.x1, ext.y2 - ext.y1);
   pixman_region32_clear(&surf->pending_damage);
 
 
@@ -671,16 +668,25 @@ _vt_comp_wl_surface_damage(
     return;
   }
 
-  pixman_region32_union_rect(
-    &surf->pending_damage, &surf->pending_damage,
-    x, y, width, height);
+  pixman_region32_union_rect(&surf->pending_damage, &surf->pending_damage,
+                             x, y, width, height);
 
+  pixman_box32_t extents = *pixman_region32_extents(&surf->pending_damage);
+
+
+  struct vt_output_t* output;
+  wl_list_for_each(output, &surf->comp->outputs, link_global) {
+    if (!(surf->_mask_outputs_visible_on & (1u << output->id)))
+      continue;
+
+    output->needs_damage_rebuild = true;
+  }
   surf->damaged = true;
 
 }
 void 
 _vt_comp_wl_surface_damage_buffer(struct wl_client *client,
-                               struct wl_resource *resource,
+                                  struct wl_resource *resource,
                                int32_t x,
                                int32_t y,
                                int32_t width,
@@ -691,10 +697,19 @@ _vt_comp_wl_surface_damage_buffer(struct wl_client *client,
     return;
   }
 
-  pixman_region32_union_rect(
-    &surf->pending_damage, &surf->pending_damage,
-    x, y, width, height);
+  pixman_region32_union_rect(&surf->pending_damage, &surf->pending_damage,
+                             x, y, width, height);
 
+  pixman_box32_t extents = *pixman_region32_extents(&surf->pending_damage);
+
+
+  struct vt_output_t* output;
+  wl_list_for_each(output, &surf->comp->outputs, link_global) {
+    if (!(surf->_mask_outputs_visible_on & (1u << output->id)))
+      continue;
+
+    output->needs_damage_rebuild = true;
+  }
   surf->damaged = true;
 }
 
@@ -903,6 +918,7 @@ static void vt_sig_handler(int sig) {
 bool
 vt_comp_init(struct vt_compositor_t* c, int argc, char** argv) {
   vt_util_arena_init(&c->arena, 1024 * 1024 * 2);
+  vt_util_arena_init(&c->frame_arena, 1024 * 1024 * 2);
 
   vt_global_compositor = c;
   signal(SIGSEGV, vt_sig_handler);
@@ -1009,6 +1025,8 @@ vt_comp_run(struct vt_compositor_t *c) {
   c->running = true;
   VT_TRACE(c->log, "Entering main event loop...");
   while (c->running) {
+    vt_util_arena_reset(&c->frame_arena);
+
     wl_event_loop_dispatch(c->wl.evloop, -1);
     wl_display_flush_clients(c->wl.dsp);
   }
@@ -1078,17 +1096,18 @@ void vt_comp_repaint_scene(struct vt_compositor_t *c, struct vt_output_t *output
   struct vt_renderer_t* r = c->renderer;
   r->impl.begin_frame(r, output);
 
-  pixman_box32_t damage_boxes[VT_MAX_DAMAGE_RECTS];
-  int32_t n_damage = vt_comp_merge_damaged_regions(damage_boxes, &output->damage);
-
+  if(output->needs_damage_rebuild) {
+    output->n_damage_boxes = vt_comp_merge_damaged_regions(output->cached_damage, &output->damage);
+    output->needs_damage_rebuild = false;
+  }
   // Damage Pass
   r->impl.stencil_damage_pass(r, output);
   r->impl.begin_scene(r, output);
-  for(uint32_t i = 0; i < n_damage; i++) {
-    const pixman_box32_t b = damage_boxes[i];
+  for(uint32_t i = 0; i < output->n_damage_boxes; i++) {
+    const pixman_box32_t b = output->cached_damage[i];
     r->impl.draw_rect(r, b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1, 0xFFFFFF);
   }
-  r->impl.end_scene(r, output);
+    r->impl.end_scene(r, output);
 
 
   //Composite pass
@@ -1099,19 +1118,16 @@ void vt_comp_repaint_scene(struct vt_compositor_t *c, struct vt_output_t *output
   struct vt_surface_t* surf;
   wl_list_for_each_reverse(surf, &c->surfaces, link) {
     if(!surf->damaged) continue;
-    if (surf->x + surf->width  <= output->x ||
-      surf->x >= output->x + output->width ||
-      surf->y + surf->height <= output->y ||
-      surf->y >= output->y + output->height) continue;
+    if(!(surf->_mask_outputs_visible_on & (1u << output->id))) continue;
 
     if(!pixman_region32_intersect_rect(&output->damage, &output->damage, surf->x, surf->y, surf->width, surf->height)) continue;
 
-    r->impl.draw_surface(r, surf, surf->x - output->x, surf->y - output->y);
+    r->impl.draw_surface(r, output, surf, surf->x - output->x, surf->y - output->y);
   }
 
   r->impl.end_scene(r, output);
 
-  r->impl.end_frame(r, output, damage_boxes, n_damage);
+  r->impl.end_frame(r, output, output->cached_damage, output->n_damage_boxes);
 
   pixman_region32_clear(&output->damage);
   output->needs_repaint = false;
@@ -1121,6 +1137,10 @@ void vt_comp_invalidate_all_surfaces(struct vt_compositor_t *comp) {
   if (!comp) return;
 
   VT_TRACE(comp->log, "Invalidating all surface GPU imports...");
+  struct vt_output_t* output;
+  wl_list_for_each(output, &comp->outputs, link_global) {
+    output->needs_damage_rebuild = true;
+  } 
 
   struct vt_surface_t *surf, *tmp;
   wl_list_for_each_safe(surf, tmp, &comp->surfaces, link) {

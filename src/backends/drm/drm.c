@@ -15,6 +15,8 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <drm/drm_fourcc.h>
+#include <libinput.h>
+#include <xkbcommon/xkbcommon-keysyms.h>
 #include <stdarg.h>
 #include <string.h>
 
@@ -33,9 +35,9 @@
 #include "core/session.h"
 #include "input/wl_seat.h"
 #include "protocols/linux_dmabuf.h"
+#include "protocols/linux_explicit_sync.h"
 #include "render/dmabuf.h"
-#include <libinput.h>
-#include <xkbcommon/xkbcommon-keysyms.h>
+
 
 #include <linux/input-event-codes.h>
 
@@ -619,6 +621,7 @@ _drm_init_active_outputs_for_device(struct drm_backend_state_t* drm) {
     if (!conn) continue;
     if (conn->connection == DRM_MODE_CONNECTED && conn->count_modes > 0) {
       struct vt_output_t* output = VT_ALLOC(comp, sizeof(struct vt_output_t));
+      output->needs_damage_rebuild = true;
       wl_list_init(&output->link_local);
       wl_list_init(&output->link_global);
       if (!output) {
@@ -1081,8 +1084,9 @@ backend_init_drm(struct vt_backend_t* backend) {
     VT_ERROR(backend->comp->log, "DRM: Failed to build default DMABUF feedback.");
     free(default_feedback);
   } else {
-    if(!vt_proto_linux_dmabuf_v1_init(drm_master->comp, default_feedback, 4)) {
-      VT_ERROR(backend->comp->log, "DRM: Failed to initialize DMABUF protocol.");
+    const uint32_t dmabuf_ver = 4;
+    if(!vt_proto_linux_dmabuf_v1_init(backend->comp, default_feedback, dmabuf_ver)) {
+      VT_ERROR(backend->comp->log, "DRM: Failed to initialize DMABUF protocol version %i.", dmabuf_ver);
     }
   }
 
@@ -1098,6 +1102,15 @@ backend_init_drm(struct vt_backend_t* backend) {
   wl_array_release(&default_feedback->tranches);
 
   free(default_feedback);
+
+  // init explicit sync
+  {
+    const uint32_t dmabuf_explicit_sync_ver = 2;
+    if(!vt_proto_linux_explicit_sync_v1_init(backend->comp, dmabuf_explicit_sync_ver)) {
+      VT_ERROR(backend->comp->log, "DRM: Failed to initialize DMABUF explicit sync protocol.");
+
+    }
+  }
   
   VT_TRACE(backend->comp->log, "DRM: Successfully initialized DRM backend.");
 

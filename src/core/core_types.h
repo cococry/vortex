@@ -16,6 +16,7 @@
 #define VT_MAX_DAMAGE_RECTS 4
 
 #define VT_ALLOC(c, size) vt_util_alloc(&(c)->arena, (size))
+#define VT_ALLOC_FRAME(c, size) vt_util_alloc(&(c)->frame_arena, (size))
 
 struct vt_renderer_t;   
 struct vt_surface_t;
@@ -76,10 +77,14 @@ struct vt_output_t {
   struct wl_event_source* repaint_source;
 
   pixman_region32_t damage; 
+
+  pixman_box32_t cached_damage[VT_MAX_DAMAGE_RECTS];
+  int32_t n_damage_boxes;
+  bool needs_damage_rebuild;
 }; 
 
 struct vt_compositor_t {
-  struct vt_arena_t arena;
+  struct vt_arena_t arena, frame_arena;
 
   struct wl_state_t  wl;
   struct vt_backend_t* backend;

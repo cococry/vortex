@@ -10,6 +10,16 @@ struct vt_linux_dmabuf_v1_buffer_t {
   struct wl_resource* res;
 };
 
+struct vt_linux_dmabuf_v1_surface_t {
+  struct vt_surface_t* surf;
+  struct wl_list link;
+
+  struct vt_linux_dmabuf_v1_packed_feedback_t* feedback;
+
+  struct wl_list res_feedback;
+
+};
+
 bool vt_proto_linux_dmabuf_v1_init(
     struct vt_compositor_t* comp, 
     struct vt_dmabuf_feedback_t* default_feedback, 

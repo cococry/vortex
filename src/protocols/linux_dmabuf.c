@@ -37,15 +37,6 @@ struct vt_linux_dmabuf_v1_packed_feedback_entry_t {
 	uint32_t pad; // unused
 };
 
-struct vt_linux_dmabuf_v1_surface_t {
-  struct vt_surface_t* surf;
-  struct wl_list link;
-
-  struct vt_linux_dmabuf_v1_packed_feedback_t* feedback;
-
-  struct wl_list res_feedback;
-
-};
 
 struct vt_proto_linux_dmabuf_v1_t {
   struct wl_global* global;
@@ -939,7 +930,6 @@ _linux_dmabuf_pack_feedback(
 
   // after sealing, close the read-write FD
   close(rw_fd);
-
   
   VT_TRACE(feedback->comp->log,
            "VT_PROTO_LINUX_DMABUF_V1: Building packed feedback for %i tranche(s)...", feedback->tranches.size / sizeof(struct vt_dmabuf_tranche_t));
@@ -972,6 +962,7 @@ _linux_dmabuf_pack_feedback(
     VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Corrupted all_formats array: misaligned size %i", all_formats.size);
     wl_array_release(&all_formats);
     close(ro_fd);
+    free(packed);
     return false;
   }
 
@@ -1040,17 +1031,14 @@ struct vt_linux_dmabuf_v1_surface_t*
 _linux_dmabuf_surface_from_surf(
   struct vt_surface_t* surf 
 ) {
-  {
-    struct vt_linux_dmabuf_v1_surface_t* dmabuf_surf;
-    wl_list_for_each(dmabuf_surf, &_proto->dmabuf_surfaces, link) {
-      if(dmabuf_surf->surf == surf) return dmabuf_surf;
-    }
-  }
+  if(surf->dmabuf_surf) return surf->dmabuf_surf;
 
   struct vt_linux_dmabuf_v1_surface_t* dmabuf_surf = calloc(1, sizeof(*dmabuf_surf));
   if(!dmabuf_surf) return NULL;
 
   dmabuf_surf->surf = surf;
+  surf->dmabuf_surf = dmabuf_surf;
+
   wl_list_init(&dmabuf_surf->res_feedback);
   wl_list_insert(&_proto->dmabuf_surfaces, &dmabuf_surf->link);
   VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_surface_from_surf"); 

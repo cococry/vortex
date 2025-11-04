@@ -1,12 +1,9 @@
-#define EGL_NO_X11
-#define MESA_EGL_NO_X11_HEADERS
-#define EGL_PLATFORM_GBM_KHR 1
-#define EGL_EGLEXT_PROTOTYPES
 #include <EGL/eglplatform.h>
-#include <GLES2/gl2.h>
-#include <GLES2/gl2ext.h>
+#include <stdbool.h>
+#include <unistd.h>
 #include <wayland-util.h>
 
+#include "linux-explicit-synchronization-v1-server-protocol.h"
 #include "src/core/compositor.h"
 #include "src/core/surface.h"
 #include "src/core/core_types.h"
@@ -16,16 +13,18 @@
 #include "src/render/renderer.h"
 
 
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
-#include <glad.h>
 #include <wayland-server.h>
 #include <wayland-egl.h>
 
 #include <runara/runara.h>
 
+
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
+
+#include <glad.h>
 
 #include "egl_gl46.h"
 
@@ -38,32 +37,48 @@
 #define _VT_GBM_FORMAT_XRGB8888	__vt_gbm_fourcc_code('X', 'R', '2', '4') /* [31:0] x:R:G:B 8:8:8:8 little endian */
 
 
-static PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC eglSwapBuffersWithDamageEXT_ptr = NULL;
-static PFNEGLSWAPBUFFERSWITHDAMAGEKHRPROC eglSwapBuffersWithDamageKHR_ptr = NULL;
+// Damage swapping
+static PFNEGLSWAPBUFFERSWITHDAMAGEEXTPROC eglSwapBuffersWithDamageEXT_ptr   = NULL;
+static PFNEGLSWAPBUFFERSWITHDAMAGEKHRPROC eglSwapBuffersWithDamageKHR_ptr   = NULL;
+
+// DMABUFs
 static PFNGLEGLIMAGETARGETTEXTURE2DOESPROC glEGLImageTargetTexture2DOES_ptr = NULL;
-static PFNEGLCREATEIMAGEKHRPROC eglCreateImageKHR_ptr = NULL;
-static PFNEGLDESTROYIMAGEKHRPROC eglDestroyImageKHR_ptr = NULL;
+static PFNEGLCREATEIMAGEKHRPROC eglCreateImageKHR_ptr                       = NULL;
+static PFNEGLDESTROYIMAGEKHRPROC eglDestroyImageKHR_ptr                     = NULL;
+static PFNEGLQUERYDMABUFFORMATSEXTPROC eglQueryDmaBufFormatsEXT_ptr         = NULL;
+static PFNEGLQUERYDMABUFMODIFIERSEXTPROC eglQueryDmaBufModifiersEXT_ptr     = NULL;
+
+// Explicit sync
+static PFNEGLCREATESYNCKHRPROC eglCreateSyncKHR_ptr                         = NULL;
+static PFNEGLDESTROYSYNCKHRPROC eglDestroySyncKHR_ptr                       = NULL;
+static PFNEGLWAITSYNCKHRPROC eglWaitSyncKHR_ptr                             = NULL;
+static PFNEGLDUPNATIVEFENCEFDANDROIDPROC eglDupNativeFenceFDANDROID_ptr       = NULL;
 
 struct egl_backend_state_t {
   EGLDisplay egl_dsp;
   EGLContext egl_ctx;
   EGLConfig egl_conf;
   EGLint egl_native_vis;
-  bool has_dmabuf_modifiers, has_dmabuf_support;
+
+  bool has_dmabuf_modifiers_support, has_dmabuf_support, has_explicit_sync_support;
 
   RnState* render;
 
   struct wl_array formats;
+  bool need_fence;
 }; 
 
 struct egl_output_state_t {
   GLint fbo_id, fbo_tex_id; 
+  EGLSyncKHR end_sync;
 };
 
 static const char*  _egl_err_str(EGLint error);
 static bool         _egl_gl_import_buffer_shm(struct vt_renderer_t* r, struct vt_surface_t *surf, struct wl_shm_buffer *shm_buf);
 static bool         _egl_pick_config_from_format(struct vt_compositor_t* c, struct egl_backend_state_t* egl, uint32_t format);
 static bool         _egl_pick_config(struct vt_compositor_t *comp, struct egl_backend_state_t *egl, struct vt_backend_t *backend);
+static bool         _egl_surface_is_ready(struct vt_renderer_t* renderer, struct vt_surface_t* surf); 
+static bool         _egl_send_surface_release_fences(struct vt_renderer_t* renderer, struct vt_output_t* output); 
 static bool         _egl_gl_create_output_fbo(struct vt_output_t *output); 
 static bool         _egl_create_renderer(
   struct vt_renderer_t* renderer, enum vt_backend_platform_t platform, void* native_handle, 
@@ -148,7 +163,6 @@ _egl_gl_import_buffer_shm(struct vt_renderer_t* r, struct vt_surface_t *surf,
 
   wl_shm_buffer_end_access(shm_buf);
 
-
   glBindTexture(GL_TEXTURE_2D, 0);
 
   return true;
@@ -164,141 +178,143 @@ _egl_gl_import_buffer_dmabuf(struct vt_renderer_t* r,
                              struct vt_surface_t* surf)
 {
   struct vt_dmabuf_attr_t* a = &dmabuf->attr;
-  
+
   struct egl_backend_state_t* egl = BACKEND_DATA(r, struct egl_backend_state_t);
 
   if (!a->num_planes || a->width <= 0 || a->height <= 0) {
     VT_ERROR(r->comp->log, "Invalid dmabuf attributes for import.");
     return false;
   }
+  if(!surf->render_tex_handle || a->width != surf->width || a->height != surf->height) {
+    if (a->mod != _VT_DRM_FORMAT_MOD_INVALID &&
+      a->mod != _VT_DRM_FORMAT_MOD_LINEAR &&
+      !egl->has_dmabuf_modifiers_support) {
+      VT_ERROR(r->comp->log, "EGL: No support for DMABUF modifiers, skipping importing.");
+      return false;
+    }
 
-	if (a->mod != _VT_DRM_FORMAT_MOD_INVALID &&
-			a->mod != _VT_DRM_FORMAT_MOD_LINEAR &&
-			!egl->has_dmabuf_modifiers) {
-    VT_ERROR(r->comp->log, "EGL: No support for DMABUF modifiers, skipping importing.");
-    return false;
-	}
+    // https://gitlab.freedesktop.org/wlroots/wlroots/-/blob/master/render/egl.c#L750
+    unsigned int atti = 0;
+    EGLint attribs[50];
+    attribs[atti++] = EGL_WIDTH;
+    attribs[atti++] = a->width;
+    attribs[atti++] = EGL_HEIGHT;
+    attribs[atti++] = a->height;
+    attribs[atti++] = EGL_LINUX_DRM_FOURCC_EXT;
+    attribs[atti++] = a->format;
 
-  // https://gitlab.freedesktop.org/wlroots/wlroots/-/blob/master/render/egl.c#L750
-	unsigned int atti = 0;
-	EGLint attribs[50];
-	attribs[atti++] = EGL_WIDTH;
-	attribs[atti++] = a->width;
-	attribs[atti++] = EGL_HEIGHT;
-	attribs[atti++] = a->height;
-	attribs[atti++] = EGL_LINUX_DRM_FOURCC_EXT;
-	attribs[atti++] = a->format;
+    struct {
+      EGLint fd;
+      EGLint offset;
+      EGLint pitch;
+      EGLint mod_lo;
+      EGLint mod_hi;
+    } attr_names[VT_DMABUF_PLANES_CAP] = {
+      {
+        EGL_DMA_BUF_PLANE0_FD_EXT,
+        EGL_DMA_BUF_PLANE0_OFFSET_EXT,
+        EGL_DMA_BUF_PLANE0_PITCH_EXT,
+        EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT,
+        EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT
+      }, {
+        EGL_DMA_BUF_PLANE1_FD_EXT,
+        EGL_DMA_BUF_PLANE1_OFFSET_EXT,
+        EGL_DMA_BUF_PLANE1_PITCH_EXT,
+        EGL_DMA_BUF_PLANE1_MODIFIER_LO_EXT,
+        EGL_DMA_BUF_PLANE1_MODIFIER_HI_EXT
+      }, {
+        EGL_DMA_BUF_PLANE2_FD_EXT,
+        EGL_DMA_BUF_PLANE2_OFFSET_EXT,
+        EGL_DMA_BUF_PLANE2_PITCH_EXT,
+        EGL_DMA_BUF_PLANE2_MODIFIER_LO_EXT,
+        EGL_DMA_BUF_PLANE2_MODIFIER_HI_EXT
+      }, {
+        EGL_DMA_BUF_PLANE3_FD_EXT,
+        EGL_DMA_BUF_PLANE3_OFFSET_EXT,
+        EGL_DMA_BUF_PLANE3_PITCH_EXT,
+        EGL_DMA_BUF_PLANE3_MODIFIER_LO_EXT,
+        EGL_DMA_BUF_PLANE3_MODIFIER_HI_EXT
+      }
+    };
 
-	struct {
-		EGLint fd;
-		EGLint offset;
-		EGLint pitch;
-		EGLint mod_lo;
-		EGLint mod_hi;
-	} attr_names[VT_DMABUF_PLANES_CAP] = {
-		{
-			EGL_DMA_BUF_PLANE0_FD_EXT,
-			EGL_DMA_BUF_PLANE0_OFFSET_EXT,
-			EGL_DMA_BUF_PLANE0_PITCH_EXT,
-			EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT,
-			EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT
-		}, {
-			EGL_DMA_BUF_PLANE1_FD_EXT,
-			EGL_DMA_BUF_PLANE1_OFFSET_EXT,
-			EGL_DMA_BUF_PLANE1_PITCH_EXT,
-			EGL_DMA_BUF_PLANE1_MODIFIER_LO_EXT,
-			EGL_DMA_BUF_PLANE1_MODIFIER_HI_EXT
-		}, {
-			EGL_DMA_BUF_PLANE2_FD_EXT,
-			EGL_DMA_BUF_PLANE2_OFFSET_EXT,
-			EGL_DMA_BUF_PLANE2_PITCH_EXT,
-			EGL_DMA_BUF_PLANE2_MODIFIER_LO_EXT,
-			EGL_DMA_BUF_PLANE2_MODIFIER_HI_EXT
-		}, {
-			EGL_DMA_BUF_PLANE3_FD_EXT,
-			EGL_DMA_BUF_PLANE3_OFFSET_EXT,
-			EGL_DMA_BUF_PLANE3_PITCH_EXT,
-			EGL_DMA_BUF_PLANE3_MODIFIER_LO_EXT,
-			EGL_DMA_BUF_PLANE3_MODIFIER_HI_EXT
-		}
-	};
+    for (int i = 0; i < a->num_planes; i++) {
+      attribs[atti++] = attr_names[i].fd;
+      attribs[atti++] = a->fds[i];
+      attribs[atti++] = attr_names[i].offset;
+      attribs[atti++] = a->offsets[i];
+      attribs[atti++] = attr_names[i].pitch;
+      attribs[atti++] = a->strides[i];
+      if (egl->has_dmabuf_modifiers_support &&
+        a->mod != _VT_DRM_FORMAT_MOD_INVALID) {
+        attribs[atti++] = attr_names[i].mod_lo;
+        attribs[atti++] = a->mod & 0xFFFFFFFF;
+        attribs[atti++] = attr_names[i].mod_hi;
+        attribs[atti++] = a->mod >> 32;
+      }
+    }
+    attribs[atti++] = EGL_IMAGE_PRESERVED_KHR;
+    attribs[atti++] = EGL_TRUE;
 
-	for (int i = 0; i < a->num_planes; i++) {
-		attribs[atti++] = attr_names[i].fd;
-		attribs[atti++] = a->fds[i];
-		attribs[atti++] = attr_names[i].offset;
-		attribs[atti++] = a->offsets[i];
-		attribs[atti++] = attr_names[i].pitch;
-		attribs[atti++] = a->strides[i];
-		if (egl->has_dmabuf_modifiers &&
-				a->mod != _VT_DRM_FORMAT_MOD_INVALID) {
-			attribs[atti++] = attr_names[i].mod_lo;
-			attribs[atti++] = a->mod & 0xFFFFFFFF;
-			attribs[atti++] = attr_names[i].mod_hi;
-			attribs[atti++] = a->mod >> 32;
-		}
-	}
-	attribs[atti++] = EGL_IMAGE_PRESERVED_KHR;
-	attribs[atti++] = EGL_TRUE;
+    attribs[atti++] = EGL_NONE;
+    assert(atti <= sizeof(attribs)/sizeof(attribs[0]));
 
-	attribs[atti++] = EGL_NONE;
-	assert(atti <= sizeof(attribs)/sizeof(attribs[0]));
-
-  EGLImageKHR image = eglCreateImageKHR_ptr(
+    surf->render_tex_handle = eglCreateImageKHR_ptr(
       egl->egl_dsp,
       EGL_NO_CONTEXT,
       EGL_LINUX_DMA_BUF_EXT,
       NULL,
       attribs);
-
-  if (image == EGL_NO_IMAGE_KHR) {
-    EGLint err = eglGetError();
-    VT_ERROR(r->comp->log,
-             "Failed to import dmabuf into EGLImage: error=0x%x "
-             "(format=0x%x, mod=0x%016" PRIx64 ")",
-             err, a->format, a->mod);
-    return false;
-  }
-
-  bool is_external_only = false;
-  struct vt_dmabuf_drm_format_t* fmt = NULL;
-  struct vt_dmabuf_drm_format_t* f;
-  wl_array_for_each(f, &egl->formats) {
-    if (f->format != a->format) continue;
-    for (size_t i = 0; i < f->len; i++) {
-      if (f->mods[i].mod == a->mod) {
-        is_external_only = f->mods[i]._egl_ext_only;
-        fmt = f;
-        break;
-      }
+    if (surf->render_tex_handle == EGL_NO_IMAGE_KHR) {
+      EGLint err = eglGetError();
+      VT_ERROR(r->comp->log,
+               "Failed to import dmabuf into EGLImage: error=0x%x "
+               "(format=0x%x, mod=0x%016" PRIx64 ")",
+               err, a->format, a->mod);
+      return false;
     }
-    if (fmt) break;
+
+
+    bool is_external_only = false;
+    struct vt_dmabuf_drm_format_t* fmt = NULL;
+    struct vt_dmabuf_drm_format_t* f;
+    wl_array_for_each(f, &egl->formats) {
+      if (f->format != a->format) continue;
+      for (size_t i = 0; i < f->len; i++) {
+        if (f->mods[i].mod == a->mod) {
+          is_external_only = f->mods[i]._egl_ext_only;
+          fmt = f;
+          break;
+        }
+      }
+      if (fmt) break;
+    }
+
+    GLenum target = is_external_only ? GL_TEXTURE_EXTERNAL_OES : GL_TEXTURE_2D;
+
+    if (!surf->tex.id)
+      glGenTextures(1, &surf->tex.id);
+
+    glBindTexture(target, surf->tex.id);
+    glEGLImageTargetTexture2DOES_ptr(target, surf->render_tex_handle);
+
+    glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    surf->tex.width = a->width;
+    surf->tex.height = a->height;
+    surf->render_tex_handle = surf->render_tex_handle; 
+
+
+    VT_TRACE(r->comp->log,
+             "Imported dmabuf %ux%u fmt=0x%x mod=0x%016" PRIx64 " (%s)",
+             a->width, a->height, a->format, a->mod,
+             is_external_only ? "external" : "2D");
+
+    glBindTexture(target, 0);
   }
 
-  GLenum target = is_external_only ? GL_TEXTURE_EXTERNAL_OES : GL_TEXTURE_2D;
-
-  if (!surf->tex.id)
-    glGenTextures(1, &surf->tex.id);
-
-  glBindTexture(target, surf->tex.id);
-  glEGLImageTargetTexture2DOES_ptr(target, image);
-
-  glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-  surf->tex.width = a->width;
-  surf->tex.height = a->height;
-  surf->render_tex_handle = image; 
-
-
-  VT_TRACE(r->comp->log,
-           "Imported dmabuf %ux%u fmt=0x%x mod=0x%016" PRIx64 " (%s)",
-           a->width, a->height, a->format, a->mod,
-           is_external_only ? "external" : "2D");
-
-  glBindTexture(target, 0);
   return true;
 }
 
@@ -396,6 +412,86 @@ _egl_pick_config(struct vt_compositor_t *comp, struct egl_backend_state_t *egl, 
   }
 }
 
+bool _egl_surface_is_ready(struct vt_renderer_t* renderer, struct vt_surface_t* surf) {
+  if (!surf || !surf->sync.res) return true;
+  struct egl_backend_state_t* egl = BACKEND_DATA(renderer, struct egl_backend_state_t);
+
+  if (surf->sync.acquire_fence_fd >= 0) {
+    EGLint attribs[] = {
+      EGL_SYNC_NATIVE_FENCE_FD_ANDROID,
+      surf->sync.acquire_fence_fd,
+      EGL_NONE
+    };
+
+    egl->need_fence = true;
+
+    EGLSyncKHR sync = eglCreateSyncKHR_ptr(
+      egl->egl_dsp, EGL_SYNC_NATIVE_FENCE_ANDROID, attribs);
+
+    surf->sync.acquire_fence_fd = -1;
+
+    if (sync == EGL_NO_SYNC_KHR)
+      return false;
+
+    eglWaitSyncKHR_ptr(egl->egl_dsp, sync, EGL_SYNC_FLUSH_COMMANDS_BIT_KHR);
+
+    eglDestroySyncKHR_ptr(egl->egl_dsp, sync);
+  }
+
+  return true;
+}
+
+
+bool _egl_send_surface_release_fences(struct vt_renderer_t* renderer, struct vt_output_t* output) {
+  if (!renderer || !output) return false;
+
+  struct egl_backend_state_t* egl = BACKEND_DATA(output->backend->comp->renderer, struct egl_backend_state_t); 
+  struct egl_output_state_t* egl_output = (struct egl_output_state_t*)output->user_data_render;
+
+  // Get a single end-of-frame fence FD for this output repaint
+  int fence_fd = -1;
+  if(egl->need_fence) {
+    fence_fd = eglDupNativeFenceFDANDROID_ptr(egl->egl_dsp, egl_output->end_sync);
+
+    if (fence_fd == -1) {
+      log_fatal(
+        renderer->comp->log, 
+        "EGL: A catastrophic scenario happend:"
+        "We were able to create an EGL Sync and now need a fence but"
+        "for some reason eglDupNativeFenceFDANDROID()" 
+        "failed. you're cooked.");
+      return false;
+    }
+  } 
+
+  eglDestroySyncKHR_ptr(egl->egl_dsp, egl_output->end_sync);
+  egl_output->end_sync = EGL_NO_SYNC_KHR;
+
+  if(fence_fd != -1) {
+    struct vt_compositor_t* comp = renderer->comp;
+    struct vt_surface_t* surf;
+
+    wl_list_for_each_reverse(surf, &comp->surfaces, link) {
+      if (!surf->damaged) continue;
+      if (!(surf->_mask_outputs_presented_on & (1u << output->id))) continue;
+      if (!surf->buf_res) continue;
+      if (!surf->sync.res_release) continue;
+
+      zwp_linux_buffer_release_v1_send_fenced_release(surf->sync.res_release, fence_fd);
+
+      // we're finished with this fence
+      wl_resource_destroy(surf->sync.res_release);
+      surf->sync.res_release = NULL;
+      surf->sync.release_fence_fd = -1;
+    }
+  }
+
+  // clean up the dup'ed native fence
+  close(fence_fd);
+
+  return true;
+}
+
 bool
 _egl_gl_create_output_fbo(struct vt_output_t *output) {
   if(!output || !output->user_data_render) return false;
@@ -420,6 +516,7 @@ _egl_gl_create_output_fbo(struct vt_output_t *output) {
 
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, egl_output->fbo_tex_id, 0);
 
+
   if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
     VT_ERROR(output->backend->comp->log, "EGL: FBO creation for output %p (%u%u) failed.\n", output, output->width, output->height);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
@@ -431,7 +528,6 @@ _egl_gl_create_output_fbo(struct vt_output_t *output) {
 
   return true;
 }
-
 EGLDisplay _egl_create_display(
   struct vt_compositor_t* comp,
   enum vt_backend_platform_t platform,
@@ -544,7 +640,8 @@ renderer_init_egl(struct vt_backend_t* backend, struct vt_renderer_t *r, void* n
   }
 
   egl->has_dmabuf_support = true;
-  egl->has_dmabuf_modifiers = true;
+  egl->has_dmabuf_modifiers_support = true;
+  egl->has_explicit_sync_support = true;
 
   glEGLImageTargetTexture2DOES_ptr =
     (PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)
@@ -561,12 +658,32 @@ renderer_init_egl(struct vt_backend_t* backend, struct vt_renderer_t *r, void* n
       (PFNEGLCREATEIMAGEKHRPROC) eglGetProcAddress("eglCreateImageKHR");
     eglDestroyImageKHR_ptr =
       (PFNEGLDESTROYIMAGEKHRPROC) eglGetProcAddress("eglDestroyImageKHR");
+    if(!eglCreateImageKHR_ptr || !eglDestroyImageKHR_ptr) {
+      VT_ERROR(backend->comp->log, "EGL: Failed to load DMABUF procs, DMABUF imports will not be supported.");
+      egl->has_dmabuf_support = false;
+    }
   } else {
     VT_ERROR(backend->comp->log, "EGL: EGL_KHR_image_base extension not supported, DMABUF imports will not be supported.");
     egl->has_dmabuf_support = false;
   }
+
+  if(strstr(exts, "EGL_KHR_fence_sync") && 
+    strstr(exts, "EGL_ANDROID_native_fence_sync")) {
+    eglCreateSyncKHR_ptr = (PFNEGLCREATESYNCKHRPROC)eglGetProcAddress("eglCreateSyncKHR");
+    eglDestroySyncKHR_ptr = (PFNEGLDESTROYSYNCKHRPROC)eglGetProcAddress("eglDestroySyncKHR");
+    eglWaitSyncKHR_ptr = (PFNEGLWAITSYNCKHRPROC)eglGetProcAddress("eglWaitSyncKHR");
+    eglDupNativeFenceFDANDROID_ptr = (PFNEGLDUPNATIVEFENCEFDANDROIDPROC)eglGetProcAddress("eglDupNativeFenceFDANDROID");
+
+    if(!eglCreateSyncKHR_ptr || !eglDestroySyncKHR_ptr || !eglDupNativeFenceFDANDROID_ptr) {
+      VT_ERROR(backend->comp->log, "EGL: Failed to load explicit sync procs, explicit sync will not be used.");
+      egl->has_explicit_sync_support = false;
+    }
+  } else {
+    VT_WARN(backend->comp->log, "EGL: Explicit sync extensions (EGL_KHR_fence_sync, EGL_ANDROID_native_fence_sync) not supported, explicit sync will not be used.");
+    egl->has_explicit_sync_support = false;
+  }
   VT_TRACE(r->comp->log, "EGL extensions: %s", exts);
-  VT_TRACE(r->comp->log, "EGL: initialized (vendor=%s, version=%s)", vendor, version);
+  VT_TRACE(r->comp->log, "EGL: initialized (vendor=%s, version=%s) with EGL display %p", vendor, version, egl->egl_dsp);
 
   return true;
 }
@@ -580,12 +697,12 @@ renderer_is_handle_renderable_egl(struct vt_renderer_t* renderer, void* native_h
 bool 
 renderer_query_dmabuf_formats_egl(struct vt_compositor_t* comp, void* native_handle, struct wl_array* formats) {
   if(!comp || !native_handle || !formats) return false; 
-    PFNEGLQUERYDMABUFFORMATSEXTPROC eglQueryDmaBufFormatsEXT =
-        (void*) eglGetProcAddress("eglQueryDmaBufFormatsEXT");
-    PFNEGLQUERYDMABUFMODIFIERSEXTPROC eglQueryDmaBufModifiersEXT =
-        (void*) eglGetProcAddress("eglQueryDmaBufModifiersEXT");
+  if(!eglQueryDmaBufFormatsEXT_ptr)
+    eglQueryDmaBufFormatsEXT_ptr = (void*) eglGetProcAddress("eglQueryDmaBufFormatsEXT");
+  if(!eglQueryDmaBufModifiersEXT_ptr)
+    eglQueryDmaBufModifiersEXT_ptr = (void*) eglGetProcAddress("eglQueryDmaBufModifiersEXT");
 
-  if (!eglQueryDmaBufFormatsEXT || !eglQueryDmaBufModifiersEXT) {
+  if (!eglQueryDmaBufFormatsEXT_ptr || !eglQueryDmaBufModifiersEXT_ptr) {
     return false;
   }
 
@@ -604,7 +721,7 @@ renderer_query_dmabuf_formats_egl(struct vt_compositor_t* comp, void* native_han
    *      If <max_formats> is 0, no formats are returned, but the total number
           of formats is returned in <num_formats>, and no error is generated.
     */
-  eglQueryDmaBufFormatsEXT(egl_dsp, 0 /*max_formats*/, NULL, &n_formats);
+  eglQueryDmaBufFormatsEXT_ptr(egl_dsp, 0 /*max_formats*/, NULL, &n_formats);
   if (n_formats <= 0) {
     VT_ERROR(comp->log, "EGL: No DMABUF formats available, falling back to SHM.\n");
     eglTerminate(egl_dsp);
@@ -612,7 +729,7 @@ renderer_query_dmabuf_formats_egl(struct vt_compositor_t* comp, void* native_han
   }
 
   EGLint* dmabuf_formats = calloc(n_formats, sizeof(EGLint));
-  eglQueryDmaBufFormatsEXT(egl_dsp, n_formats, dmabuf_formats, &n_formats);
+  eglQueryDmaBufFormatsEXT_ptr(egl_dsp, n_formats, dmabuf_formats, &n_formats);
 
   // query the available modifiers of each format
   for (uint32_t i = 0; i < n_formats; i++) {
@@ -621,7 +738,7 @@ renderer_query_dmabuf_formats_egl(struct vt_compositor_t* comp, void* native_han
      *    If <max_modifiers> is 0, no modifiers are returned, but the total
           number of modifiers is returned in <num_modifiers>, and no error is
           generated. */
-    eglQueryDmaBufModifiersEXT(egl_dsp, dmabuf_formats[i], 0 /*max_modifiers*/, NULL, NULL, &n_mods);
+    eglQueryDmaBufModifiersEXT_ptr(egl_dsp, dmabuf_formats[i], 0 /*max_modifiers*/, NULL, NULL, &n_mods);
     if (n_mods <= 0) continue;
 
     EGLuint64KHR* format_mods = calloc(n_mods, sizeof(EGLuint64KHR));
@@ -630,7 +747,7 @@ renderer_query_dmabuf_formats_egl(struct vt_compositor_t* comp, void* native_han
     // supported for use with the GL_TEXTURE_EXTERNAL_OES flag when importing 
     // the DMABUF into a GL texture later.
     EGLBoolean* ext_only = calloc(n_mods, sizeof(EGLBoolean));
-    eglQueryDmaBufModifiersEXT(egl_dsp, dmabuf_formats[i],
+    eglQueryDmaBufModifiersEXT_ptr(egl_dsp, dmabuf_formats[i],
                                n_mods, format_mods, ext_only, &n_mods);
 
     // add the format to the array of available formats
@@ -662,15 +779,16 @@ renderer_query_dmabuf_formats_with_renderer_egl(struct vt_renderer_t* renderer, 
   
   struct egl_backend_state_t* egl = BACKEND_DATA(renderer, struct egl_backend_state_t);
   wl_array_init(&egl->formats);
+  
+  if(!eglQueryDmaBufFormatsEXT_ptr)
+    eglQueryDmaBufFormatsEXT_ptr = (void*) eglGetProcAddress("eglQueryDmaBufFormatsEXT");
+  if(!eglQueryDmaBufModifiersEXT_ptr)
+    eglQueryDmaBufModifiersEXT_ptr = (void*) eglGetProcAddress("eglQueryDmaBufModifiersEXT");
 
-    PFNEGLQUERYDMABUFFORMATSEXTPROC eglQueryDmaBufFormatsEXT =
-        (void*) eglGetProcAddress("eglQueryDmaBufFormatsEXT");
-    PFNEGLQUERYDMABUFMODIFIERSEXTPROC eglQueryDmaBufModifiersEXT =
-        (void*) eglGetProcAddress("eglQueryDmaBufModifiersEXT");
-
-  if (!eglQueryDmaBufFormatsEXT || !eglQueryDmaBufModifiersEXT) {
+  if (!eglQueryDmaBufFormatsEXT_ptr || !eglQueryDmaBufModifiersEXT_ptr) {
     VT_ERROR(renderer->comp->log, "EGL: DMABUF extensions not supported, falling back to SHM.\n");
-    egl->has_dmabuf_modifiers = true;
+    egl->has_dmabuf_modifiers_support = false;
+    egl->has_dmabuf_support = false;
     return false;
   }
   
@@ -684,14 +802,14 @@ renderer_query_dmabuf_formats_with_renderer_egl(struct vt_renderer_t* renderer, 
    *      If <max_formats> is 0, no formats are returned, but the total number
           of formats is returned in <num_formats>, and no error is generated.
     */
-  eglQueryDmaBufFormatsEXT(egl->egl_dsp, 0 /*max_formats*/, NULL, &n_formats);
+  eglQueryDmaBufFormatsEXT_ptr(egl->egl_dsp, 0 /*max_formats*/, NULL, &n_formats);
   if (n_formats <= 0) {
     VT_ERROR(renderer->comp->log, "EGL: No DMABUF formats available, falling back to SHM.\n");
     return false;
   }
 
   EGLint* dmabuf_formats = calloc(n_formats, sizeof(EGLint));
-  eglQueryDmaBufFormatsEXT(egl->egl_dsp, n_formats, dmabuf_formats, &n_formats);
+  eglQueryDmaBufFormatsEXT_ptr(egl->egl_dsp, n_formats, dmabuf_formats, &n_formats);
 
   // query the available modifiers of each format
   for (uint32_t i = 0; i < n_formats; i++) {
@@ -700,7 +818,7 @@ renderer_query_dmabuf_formats_with_renderer_egl(struct vt_renderer_t* renderer, 
      *    If <max_modifiers> is 0, no modifiers are returned, but the total
           number of modifiers is returned in <num_modifiers>, and no error is
           generated. */
-    eglQueryDmaBufModifiersEXT(egl->egl_dsp, dmabuf_formats[i], 0 /*max_modifiers*/, NULL, NULL, &n_mods);
+    eglQueryDmaBufModifiersEXT_ptr(egl->egl_dsp, dmabuf_formats[i], 0 /*max_modifiers*/, NULL, NULL, &n_mods);
     if (n_mods <= 0) continue;
 
     EGLuint64KHR* format_mods = calloc(n_mods, sizeof(EGLuint64KHR));
@@ -709,7 +827,7 @@ renderer_query_dmabuf_formats_with_renderer_egl(struct vt_renderer_t* renderer, 
     // supported for use with the GL_TEXTURE_EXTERNAL_OES flag when importing 
     // the DMABUF into a GL texture later.
     EGLBoolean* ext_only = calloc(n_mods, sizeof(EGLBoolean));
-    eglQueryDmaBufModifiersEXT(egl->egl_dsp, dmabuf_formats[i],
+    eglQueryDmaBufModifiersEXT_ptr(egl->egl_dsp, dmabuf_formats[i],
                                n_mods, format_mods, ext_only, &n_mods);
 
     // add the format to the array of available formats
@@ -767,9 +885,7 @@ renderer_setup_renderable_output_egl(struct vt_renderer_t *r, struct vt_output_t
   struct egl_backend_state_t* egl = BACKEND_DATA(r, struct egl_backend_state_t);
 
   output->user_data_render = VT_ALLOC(r->comp, sizeof(*output->user_data_render));
-
-  EGLint fbo_id, fbo_tex_id; 
-
+  struct egl_output_state_t* egl_output = (struct egl_output_state_t*)output->user_data_render; 
  
   // If we're running the wayland sink backend, we create the egl_window 
   // handle and use it as the native window handle to create the EGL 
@@ -817,8 +933,8 @@ renderer_setup_renderable_output_egl(struct vt_renderer_t *r, struct vt_output_t
     &output->damage, &output->damage,
     0, 0, output->width, output->height);
   
-  // Create EGL FBO for output
-  _egl_gl_create_output_fbo(output);
+  // Create EGL FBOs for output
+  if(!_egl_gl_create_output_fbo(output)) return false;
   glEnable(GL_STENCIL_TEST);
 
   vt_comp_schedule_repaint(r->comp, output);
@@ -835,8 +951,10 @@ renderer_resize_renderable_output_egl(struct vt_renderer_t* r, struct vt_output_
   struct wl_egl_window* egl_win = (struct wl_egl_window*)output->native_window; 
   if(!egl_win) return false;
 
+  if(!_egl_gl_create_output_fbo(output)) return false;
+  
   wl_egl_window_resize(egl_win, w, h, 0, 0);
-  _egl_gl_create_output_fbo(output);
+
 
   pixman_region32_union_rect(
     &output->damage, &output->damage,
@@ -947,20 +1065,27 @@ renderer_set_clear_color_egl(struct vt_renderer_t* r, struct vt_output_t* output
 
 void 
 renderer_stencil_damage_pass_egl(struct vt_renderer_t* r, struct vt_output_t* output) {
-  glClear(GL_STENCIL_BUFFER_BIT);
+  if(!r || !output || !output->user_data_render) return;
+
+  struct egl_output_state_t* egl_output = (struct egl_output_state_t*)output->user_data_render; 
+
+
   glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
   glDepthMask(GL_FALSE);
+  glClear(GL_STENCIL_BUFFER_BIT);
+
   glStencilOp(GL_REPLACE, GL_REPLACE, GL_REPLACE);
   glStencilFunc(GL_ALWAYS, 1, 0xFF);
-
 }
 
 void 
 renderer_composite_pass_egl(struct vt_renderer_t* r, struct vt_output_t* output) {
+  if(!r || !output || !output->user_data_render) return;
+
+  struct egl_output_state_t* egl_output = (struct egl_output_state_t*)output->user_data_render; 
   glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
   glStencilFunc(GL_EQUAL, 1, 0xFF);
   glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
-
 }
 
 void 
@@ -990,27 +1115,33 @@ renderer_begin_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output) {
   }
 
   struct egl_backend_state_t* egl = BACKEND_DATA(r, struct egl_backend_state_t);
+  struct egl_output_state_t* egl_output = (struct egl_output_state_t*)output->user_data_render; 
 
   EGLSurface surface = (EGLSurface)output->render_surface;
+  static EGLSurface last_surface = EGL_NO_SURFACE;
+  if(surface != last_surface) {
   if (!eglMakeCurrent(egl->egl_dsp, surface, surface, egl->egl_ctx)) {
     EGLint err = eglGetError();
     VT_ERROR(r->comp->log, "eglMakeCurrent() failed (renderer_begin_frame_egl): 0x%04x (%s)",
              err, _egl_err_str(err));
     return;
   }
+    surface = last_surface;
+  }
 
   // Resize the render display if the output size changed
   if(egl->render->render.render_w != output->width || egl->render->render.render_h != output->height) {
     rn_resize_display(egl->render, output->width, output->height);
   }
-  
-  struct egl_output_state_t* egl_output = (struct egl_output_state_t*)output->user_data_render; 
+ 
+  egl->need_fence = false;
+
   glBindFramebuffer(GL_FRAMEBUFFER, egl_output->fbo_id);
 }
 
 
 void 
-renderer_draw_surface_egl(struct vt_renderer_t* r, struct vt_surface_t* surface, float x, float y) {
+renderer_draw_surface_egl(struct vt_renderer_t* r, struct vt_output_t* output, struct vt_surface_t* surface, float x, float y) {
   if(!surface) return;
   if(!surface->tex.id) return;
   if (!r || !r->impl.draw_surface || !r->user_data) {
@@ -1019,7 +1150,15 @@ renderer_draw_surface_egl(struct vt_renderer_t* r, struct vt_surface_t* surface,
   }
   struct egl_backend_state_t* egl = BACKEND_DATA(r, struct egl_backend_state_t);
 
+  if(!_egl_surface_is_ready(r, surface)) return;
+
   rn_image_render(egl->render, (vec2s){x,y}, RN_WHITE, surface->tex);
+  
+  surface->_mask_outputs_presented_on |= (1u << output->id);
+
+  VT_TRACE(r->comp->log, "EGL: Presented surface %p (%.2f,%.2f).", surface, x, y);
+
+    
 }
 
 void 
@@ -1070,6 +1209,12 @@ renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,  con
                     GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
 
+  egl_output->end_sync = eglCreateSyncKHR_ptr(
+    egl->egl_dsp, 
+    EGL_SYNC_NATIVE_FENCE_ANDROID,
+    &(EGLint){EGL_NONE});
+
+
   if (n_damaged > 0 && eglSwapBuffersWithDamageEXT_ptr) {
     EGLint egl_rects[n_damaged * 4];
     for (int i = 0; i < n_damaged; i++) {
@@ -1095,6 +1240,9 @@ renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,  con
     eglSwapBuffers(egl->egl_dsp, output->render_surface);
   }
 
+  if(!_egl_send_surface_release_fences(r, output)) {
+    VT_ERROR(r->comp->log, "EGL: Cannot release surface fences after render for output %p.", output);
+  }
 }
 
 bool
@@ -1104,8 +1252,7 @@ renderer_destroy_egl(struct vt_renderer_t* r) {
     return false;
   }
   struct egl_backend_state_t* egl = BACKEND_DATA(r, struct egl_backend_state_t);
-  eglMakeCurrent(egl->egl_dsp, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
-
+  eglMakeCurrent(egl->egl_dsp, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT); 
   if (egl->egl_ctx != EGL_NO_CONTEXT) {
     if(!eglDestroyContext(egl->egl_dsp, egl->egl_ctx)) {
       VT_ERROR(r->comp->log, "eglDestroyContext() failed: %s", _egl_err_str(eglGetError()));

@@ -1,5 +1,6 @@
 #pragma once 
 
+#include "../protocols/linux_dmabuf.h"
 #define VT_MAX_FRAME_CBS 8 
 
 #include <stdint.h>
@@ -10,6 +11,14 @@ struct vt_frame_cb_pool {
   struct wl_resource* cbs[VT_MAX_FRAME_CBS];
   uint32_t n_cbs;
 };
+
+struct vt_surface_sync_state_t {
+  int32_t acquire_fence_fd, release_fence_fd;
+  struct wl_resource* res_release;
+  struct wl_resource* res;
+};
+
+struct vt_linux_dmabuf_v1_surface_t;
 
 struct vt_surface_t {
   struct wl_resource* surf_res;
@@ -40,6 +49,11 @@ struct vt_surface_t {
   bool damaged;
 
   struct vt_frame_cb_pool cb_pool;
+
+  struct vt_surface_sync_state_t sync;
+
+  struct vt_linux_dmabuf_v1_surface_t* dmabuf_surf;
+
 };
 
 void vt_surface_mapped(struct vt_surface_t* surf);

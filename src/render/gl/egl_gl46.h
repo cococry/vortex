@@ -3,6 +3,7 @@
 
 #include "../renderer.h"
 #include "../../core/core_types.h"
+#include "src/core/surface.h"
 
 bool renderer_init_egl(struct vt_backend_t* backend, struct vt_renderer_t* r, void* native_handle);
 
@@ -39,7 +40,7 @@ void renderer_begin_scene_egl(struct vt_renderer_t* r, struct vt_output_t* outpu
   
 void renderer_init_surface_egl(struct vt_renderer_t* r, struct vt_surface_t* surf);
 
-void renderer_draw_surface_egl(struct vt_renderer_t* r, struct vt_surface_t* surface, float x, float y);
+void renderer_draw_surface_egl(struct vt_renderer_t* r, struct vt_output_t* output, struct vt_surface_t* surface, float x, float y);
   
 void renderer_draw_rect_egl(struct vt_renderer_t* r, float x, float y, float w, float h, uint32_t col);
 

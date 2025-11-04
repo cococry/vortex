@@ -15,6 +15,7 @@
 #include "../../render/renderer.h"
 #include "../../core/compositor.h"
 #include "../../protocols/linux_dmabuf.h"
+#include "../../protocols/linux_explicit_sync.h"
 
 #define _WL_DEFAULT_OUTPUT_WIDTH 1280
 #define _WL_DEFAULT_OUTPUT_HEIGHT 720
@@ -319,10 +320,20 @@ backend_init_wl(struct vt_backend_t* backend) {
 
   backend->comp->renderer->impl.init(c->backend, backend->comp->renderer, wl->parent_display);
 
-struct vt_dmabuf_feedback_t *feedback = calloc(1, sizeof(*feedback));
-init_fake_dmabuf_feedback(backend->comp, feedback);
-vt_proto_linux_dmabuf_v1_init(backend->comp, feedback, 4);
+  struct vt_dmabuf_feedback_t *feedback = calloc(1, sizeof(*feedback));
 
+  const uint8_t dmabuf_ver = 4, dmabuf_explicit_sync_ver = 2;
+  init_fake_dmabuf_feedback(backend->comp, feedback);
+  if(!vt_proto_linux_dmabuf_v1_init(backend->comp, feedback, dmabuf_ver)) {
+    VT_ERROR(backend->comp->log, "WL: Failed to initialize DMABUF protocol, will fallback to SHM imports.");
+  } else {
+    if(!vt_proto_linux_explicit_sync_v1_init(backend->comp, dmabuf_explicit_sync_ver)) {
+      VT_ERROR(backend->comp->log, "WL: Failed to initialize DMABUF explicit sync protocol, will not use explicit sync.");
+    } else {
+      VT_TRACE(c->log, "WL: Successfully initialized DMABUF protocol version %i and DMABUF explicit sync protocol version %i.",
+               dmabuf_ver, dmabuf_explicit_sync_ver);
+    }
+  }
   _wl_backend_init_active_outputs(backend);
   
   VT_TRACE(c->log, "WL: Successfully initialized Wayland backend.");
@@ -386,6 +397,7 @@ _wl_backend_init_active_outputs(struct vt_backend_t* backend){
 
   for (uint32_t i = 0; i < backend->comp->n_virtual_outputs; i++) {
     struct vt_output_t* output = VT_ALLOC(backend->comp, sizeof(struct vt_output_t));
+    output->needs_damage_rebuild = true;
     pixman_region32_init(&output->damage);
     output->backend = backend;
     if (!_wl_backend_create_output(backend, output, NULL)) {

@@ -1,4 +1,3 @@
-
 project(
   'vortex',
   'c',
@@ -9,7 +8,7 @@ project(
     'optimization=3',
     'default_library=static',
     'werror=false',
-    'c_args=-w'
+    'c_args=-w -Ofast -ffast-math -funroll-loops -march=native'
   ]
 )
 
