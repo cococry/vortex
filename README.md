@@ -4,6 +4,21 @@
 
 ---
 
+## Overview
+
+Vortex is currently under active development as a high-performance, modern Wayland compositor
+focused on creating a visually appealing Wayland desktop experience. 
+The project's goal is to create a self-contained, independent platform dedicated entirely to desktop compositing. 
+In other words, the compositor is responsible only for compositing and its related aspects (such as window animations and IPC), 
+while components like the desktop shell are intentionally abstracted away from it.
+
+## Beta?
+
+Given that Vortex is only about a month old, it’s still far too 
+early to consider it a Beta release. The project yet remains in its pre-alpha stage of development.
+
+**The first beta release is planned for around January 2026.**
+
 ## Build & Run
 
 Make sure you have the required dependencies installed (debian packages shown):
