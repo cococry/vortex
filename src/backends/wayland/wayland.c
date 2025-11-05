@@ -8,8 +8,11 @@
 #include <wayland-server-core.h>
 #include <wayland-util.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <pthread.h>
 #include <string.h>
+#include <fcntl.h>
+#include <sys/sysmacros.h>
 
 #include "xdg-shell-client-protocol.h"
 #include "../../render/renderer.h"
@@ -64,6 +67,8 @@ static void _wl_parent_frame_done(void *data,
 		     uint32_t time);
 
 static bool _wl_backend_destroy_output(struct vt_backend_t* backend, struct vt_output_t* output);
+
+static bool  _wl_init_fake_dmabuf_feedback(struct vt_compositor_t* comp, struct vt_dmabuf_feedback_t* fb);
 
 static bool _wl_backend_create_output(struct vt_backend_t* backend, struct vt_output_t* output, void* data);
 
@@ -240,13 +245,28 @@ _wl_backend_destroy_output(struct vt_backend_t* backend, struct vt_output_t* out
 #define _VT_DRM_FORMAT_MOD_LINEAR 0x0000000000000000
 #define _VT_DRM_FORMAT_MOD_INVALID 0x00FFFFFFFFFFFFFF
 
-static bool init_fake_dmabuf_feedback(struct vt_compositor_t* comp,
-                                      struct vt_dmabuf_feedback_t* fb) {
+bool 
+_wl_init_fake_dmabuf_feedback(
+  struct vt_compositor_t* comp,
+  struct vt_dmabuf_feedback_t* fb) {
   wl_array_init(&fb->tranches);
 
   fb->comp = comp;
-  fb->dev_main = calloc(1, sizeof(*fb->dev_main)); // no DRM device
-  fb->dev_main->dev = 0;
+  fb->dev_main = calloc(1, sizeof(*fb->dev_main)); 
+
+  dev_t main_dev;
+  struct stat st;
+  if (stat("/dev/dri/renderD128", &st) == 0)
+    main_dev = st.st_rdev;
+  else if (stat("/dev/dri/card0", &st) == 0)
+    main_dev = st.st_rdev;
+  else {
+    main_dev = makedev(0, 0);
+    VT_WARN(comp->log, "WL: Cannot stat() /dev/dri/card0 and /dev/dri/renderD128, falling back to not providing a main device for DMABUF feedback.");
+  }
+
+  fb->dev_main->dev = main_dev;
+
   fb->dev_main->fd = -1;
 
   // Create a single empty tranche (no formats)
@@ -256,7 +276,7 @@ static bool init_fake_dmabuf_feedback(struct vt_compositor_t* comp,
 
   wl_array_init(&tranche->formats);
 
-  tranche->flags = 0; // no scanout
+  tranche->flags = 0;
   tranche->target_device = fb->dev_main;
 
   // add DRM_FORMAT_XRGB8888 + modifiers
@@ -278,6 +298,8 @@ static bool init_fake_dmabuf_feedback(struct vt_compositor_t* comp,
   fmt2->mods[0]._egl_ext_only = false;
   fmt2->mods[1].mod = _VT_DRM_FORMAT_MOD_INVALID;
   fmt2->mods[1]._egl_ext_only = false;
+
+  return true;
 
 }
 
@@ -320,20 +342,53 @@ backend_init_wl(struct vt_backend_t* backend) {
 
   backend->comp->renderer->impl.init(c->backend, backend->comp->renderer, wl->parent_display);
 
-  struct vt_dmabuf_feedback_t *feedback = calloc(1, sizeof(*feedback));
-
   const uint8_t dmabuf_ver = 4, dmabuf_explicit_sync_ver = 2;
-  init_fake_dmabuf_feedback(backend->comp, feedback);
-  if(!vt_proto_linux_dmabuf_v1_init(backend->comp, feedback, dmabuf_ver)) {
-    VT_ERROR(backend->comp->log, "WL: Failed to initialize DMABUF protocol, will fallback to SHM imports.");
-  } else {
-    if(!vt_proto_linux_explicit_sync_v1_init(backend->comp, dmabuf_explicit_sync_ver)) {
-      VT_ERROR(backend->comp->log, "WL: Failed to initialize DMABUF explicit sync protocol, will not use explicit sync.");
+
+  if(backend->comp->have_proto_dmabuf) {
+    // initialize the dmabuf protocol with default feedback
+    struct vt_dmabuf_feedback_t* default_feedback = calloc(1, sizeof(*default_feedback));
+    default_feedback->comp = backend->comp;
+
+    if(!(_wl_init_fake_dmabuf_feedback(backend->comp, default_feedback))) {
+      VT_ERROR(backend->comp->log, "WL: Failed to build default DMABUF feedback.");
     } else {
-      VT_TRACE(c->log, "WL: Successfully initialized DMABUF protocol version %i and DMABUF explicit sync protocol version %i.",
-               dmabuf_ver, dmabuf_explicit_sync_ver);
+      const uint32_t dmabuf_ver = 4;
+      if(!vt_proto_linux_dmabuf_v1_init(backend->comp, default_feedback, dmabuf_ver)) {
+        VT_ERROR(backend->comp->log, "WL: Failed to initialize DMABUF protocol version %i.", dmabuf_ver);
+      } else {
+        VT_TRACE(backend->comp->log, "WL: Successfully initialized DMABUF protocol version %i.", dmabuf_ver);
+      }
+    }
+
+    // cleanup the feedback
+    struct vt_dmabuf_tranche_t* tranche;
+    wl_array_for_each(tranche, &default_feedback->tranches) {
+      struct vt_dmabuf_drm_format_t* fmt;
+      wl_array_for_each(fmt, &tranche->formats) {
+        free(fmt->mods);
+      }
+      wl_array_release(&tranche->formats);
+    }
+    wl_array_release(&default_feedback->tranches);
+
+    free(default_feedback);
+  }
+
+  // init explicit sync
+  if(backend->comp->have_proto_dmabuf_explicit_sync)  {
+    VT_WARN(backend->comp->log,
+            "WL: Running nested backend with linux-dmabuf-explicit-sync.\n"
+            "This protocol provides no benefit without DRM fence support.\n"
+            "Use --exclude-protocol=linux-dmabuf-explicit-sync for best performance.\n");
+
+    const uint32_t dmabuf_explicit_sync_ver = 2;
+    if(!vt_proto_linux_explicit_sync_v1_init(backend->comp, dmabuf_explicit_sync_ver)) {
+      VT_ERROR(backend->comp->log, "WL: Failed to initialize DMABUF explicit sync protocol version %i.", dmabuf_explicit_sync_ver);
+    } else {
+      VT_TRACE(backend->comp->log, "WL: Successfully initialized DMABUF explicit sync protocol version %i.", dmabuf_explicit_sync_ver);
     }
   }
+
   _wl_backend_init_active_outputs(backend);
   
   VT_TRACE(c->log, "WL: Successfully initialized Wayland backend.");

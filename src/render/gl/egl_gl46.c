@@ -414,6 +414,8 @@ _egl_pick_config(struct vt_compositor_t *comp, struct egl_backend_state_t *egl, 
 
 bool _egl_surface_is_ready(struct vt_renderer_t* renderer, struct vt_surface_t* surf) {
   if (!surf || !surf->sync.res) return true;
+  if(!renderer->comp->have_proto_dmabuf_explicit_sync) return true;
+
   struct egl_backend_state_t* egl = BACKEND_DATA(renderer, struct egl_backend_state_t);
   if(!egl->has_explicit_sync_support) return true;
 
@@ -447,7 +449,7 @@ bool _egl_send_surface_release_fences(struct vt_renderer_t* renderer, struct vt_
   if (!renderer || !output) return false;
 
   struct egl_backend_state_t* egl = BACKEND_DATA(output->backend->comp->renderer, struct egl_backend_state_t); 
-  if(!egl->has_explicit_sync_support) return true;
+  if(!renderer->comp->have_proto_dmabuf_explicit_sync || !egl->has_explicit_sync_support) return true;
 
   struct egl_output_state_t* egl_output = (struct egl_output_state_t*)output->user_data_render;
 
@@ -1212,7 +1214,7 @@ renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,  con
                     GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
 
-  if(egl->has_explicit_sync_support) {
+  if(r->backend->comp->have_proto_dmabuf_explicit_sync && egl->has_explicit_sync_support) {
     egl_output->end_sync = eglCreateSyncKHR_ptr(
       egl->egl_dsp, 
       EGL_SYNC_NATIVE_FENCE_ANDROID,
@@ -1257,6 +1259,9 @@ renderer_destroy_egl(struct vt_renderer_t* r) {
     return false;
   }
   struct egl_backend_state_t* egl = BACKEND_DATA(r, struct egl_backend_state_t);
+
+  rn_terminate(egl->render);
+
   eglMakeCurrent(egl->egl_dsp, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT); 
   if (egl->egl_ctx != EGL_NO_CONTEXT) {
     if(!eglDestroyContext(egl->egl_dsp, egl->egl_ctx)) {

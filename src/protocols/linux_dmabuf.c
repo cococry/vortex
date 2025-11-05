@@ -775,11 +775,9 @@ _linux_dmabuf_set_default_feedback(
 
   int32_t fd_main_dev = -1;
   void* native_main_dev;
-  if(feedback->dev_main->dev != 0) {
-    if(!s->impl.get_native_handle || !s->impl.finish_native_handle || !s->impl.get_native_handle_render_node) {
-      VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Session backend does not implement required functionality for DMABUF.");
-      return false;
-    }
+  if(feedback->dev_main->dev != 0 && 
+    (s->impl.get_native_handle && s->impl.finish_native_handle && s->impl.get_native_handle_render_node)) {
+
     native_main_dev = s->impl.get_native_handle(s, feedback->dev_main);
 
     const char* native_render_node = s->impl.get_native_handle_render_node(s, native_main_dev);

@@ -387,8 +387,8 @@ _vt_comp_handle_cmd_flags(struct vt_compositor_t* c, int argc, char** argv) {
           } else if(strcmp(argv[i], "linux-dmabuf-explicit-sync") == 0) {
             c->have_proto_dmabuf_explicit_sync = false;
             disabled = true;
+            VT_WARN(c->log, "Disabled protocol '%s'", argv[i]);
           } else {
-
             VT_ERROR(
               c->log, 
               "Protocol %s is not valid, valid protocols are: "
@@ -396,7 +396,6 @@ _vt_comp_handle_cmd_flags(struct vt_compositor_t* c, int argc, char** argv) {
             exit(1);
           }
         }
-
       }
       else {
         VT_ERROR(c->log, "invalid option -- '%s'", flag);
@@ -979,6 +978,9 @@ vt_comp_init(struct vt_compositor_t* c, int argc, char** argv) {
   c->seat = VT_ALLOC(c, sizeof(*c->seat));
   c->seat->comp = c;
 
+  c->have_proto_dmabuf = true;
+  c->have_proto_dmabuf_explicit_sync = true;
+
   const char* backend_str = _vt_comp_handle_cmd_flags(c, argc, argv);
   if(!backend_str) {
     if(getenv("WAYLAND_DISPLAY"))
@@ -1037,15 +1039,6 @@ vt_comp_init(struct vt_compositor_t* c, int argc, char** argv) {
   struct vt_scene_node_t* root = vt_scene_node_create(c, 0, 0, output->width, output->height);
  
   vt_scene_node_add_child(c, root, vt_scene_node_create(c, 20, 20, 20, 20));
-
-  for(uint32_t i = 0; i < root->child_count; i++) {
-    printf("Root children: %f, %f, %f, %f\n",
-           root->childs[i]->x, 
-           root->childs[i]->y, 
-           root->childs[i]->w, 
-           root->childs[i]->h
-           );
-  }
 
   return true;
 }

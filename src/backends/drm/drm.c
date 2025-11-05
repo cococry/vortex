@@ -1076,42 +1076,47 @@ backend_init_drm(struct vt_backend_t* backend) {
     log_fatal(drm_master->comp->log, "DRM: Failed to find renderable DRM device.");
   }
 
-  // initialize the dmabuf protocol with default feedback
-  struct vt_dmabuf_feedback_t* default_feedback = calloc(1, sizeof(*default_feedback));
-  default_feedback->comp = drm_master->comp;
+  if(backend->comp->have_proto_dmabuf) {
+    // initialize the dmabuf protocol with default feedback
+    struct vt_dmabuf_feedback_t* default_feedback = calloc(1, sizeof(*default_feedback));
+    default_feedback->comp = drm_master->comp;
 
-  if(!(_drm_build_dmabuf_feedback(drm_master, default_feedback))) {
-    VT_ERROR(backend->comp->log, "DRM: Failed to build default DMABUF feedback.");
+    if(!(_drm_build_dmabuf_feedback(drm_master, default_feedback))) {
+      VT_ERROR(backend->comp->log, "DRM: Failed to build default DMABUF feedback.");
+      free(default_feedback);
+    } else {
+      const uint32_t dmabuf_ver = 4;
+      if(!vt_proto_linux_dmabuf_v1_init(backend->comp, default_feedback, dmabuf_ver)) {
+        VT_ERROR(backend->comp->log, "DRM: Failed to initialize DMABUF protocol version %i.", dmabuf_ver);
+      } else {
+        VT_TRACE(backend->comp->log, "WL: Successfully initialized DMABUF protocol version %i.", dmabuf_ver);
+      }
+    }
+
+    // cleanup the feedback
+    struct vt_dmabuf_tranche_t* tranche;
+    wl_array_for_each(tranche, &default_feedback->tranches) {
+      struct vt_dmabuf_drm_format_t* fmt;
+      wl_array_for_each(fmt, &tranche->formats) {
+        free(fmt->mods);
+      }
+      wl_array_release(&tranche->formats);
+    }
+    wl_array_release(&default_feedback->tranches);
+
     free(default_feedback);
-  } else {
-    const uint32_t dmabuf_ver = 4;
-    if(!vt_proto_linux_dmabuf_v1_init(backend->comp, default_feedback, dmabuf_ver)) {
-      VT_ERROR(backend->comp->log, "DRM: Failed to initialize DMABUF protocol version %i.", dmabuf_ver);
-    }
   }
-
-  // cleanup the feedback
-  struct vt_dmabuf_tranche_t* tranche;
-  wl_array_for_each(tranche, &default_feedback->tranches) {
-  struct vt_dmabuf_drm_format_t* fmt;
-    wl_array_for_each(fmt, &tranche->formats) {
-      free(fmt->mods);
-    }
-    wl_array_release(&tranche->formats);
-  }
-  wl_array_release(&default_feedback->tranches);
-
-  free(default_feedback);
 
   // init explicit sync
-  {
+  if(backend->comp->have_proto_dmabuf_explicit_sync)  {
     const uint32_t dmabuf_explicit_sync_ver = 2;
     if(!vt_proto_linux_explicit_sync_v1_init(backend->comp, dmabuf_explicit_sync_ver)) {
-      VT_ERROR(backend->comp->log, "DRM: Failed to initialize DMABUF explicit sync protocol.");
-
+      VT_ERROR(backend->comp->log, "DRM: Failed to initialize DMABUF explicit sync protocol version %i.", dmabuf_explicit_sync_ver);
+    } else {
+      VT_TRACE(backend->comp->log, "DRM: Successfully initialized DMABUF explicit sync protocol version %i.", dmabuf_explicit_sync_ver);
     }
   }
-  
+
   VT_TRACE(backend->comp->log, "DRM: Successfully initialized DRM backend.");
 
   return true;
