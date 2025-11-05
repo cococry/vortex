@@ -307,6 +307,10 @@ static char** _scan_valid_backends(size_t *count_out) {
   return list;
 }
 
+bool _disable_protocols(struct vt_compositor_t* c, int argc, char** argv) {
+
+}
+
 const char*
 _vt_comp_handle_cmd_flags(struct vt_compositor_t* c, int argc, char** argv) {
   if(argc > 1) {
@@ -367,6 +371,32 @@ _vt_comp_handle_cmd_flags(struct vt_compositor_t* c, int argc, char** argv) {
         if (c->n_virtual_outputs <= 0)
           c->n_virtual_outputs = 1;
         VT_TRACE(c->log, "Virtual outputs set to %d", c->n_virtual_outputs);
+      }
+      else if(_flag_cmp(flag, "-expt", "--exclude-protocol")) {
+        if (i + 1 >= argc) {
+          VT_ERROR(c->log, "Missing value for %s", flag);
+          exit(1);
+        }
+        bool disabled = false;
+        i++;
+        for(uint32_t j = i; j < argc; j++) {
+          if(strcmp(argv[i], "linux-dmabuf") == 0) {
+            c->have_proto_dmabuf = false;
+            disabled = true;
+            VT_WARN(c->log, "Disabled protcol '%s'", argv[i]);
+          } else if(strcmp(argv[i], "linux-dmabuf-explicit-sync") == 0) {
+            c->have_proto_dmabuf_explicit_sync = false;
+            disabled = true;
+          } else {
+
+            VT_ERROR(
+              c->log, 
+              "Protocol %s is not valid, valid protocols are: "
+              "[ 'linux-dmabuf', 'linux-dmabuf-explicit-sync' ] ", argv[i]);
+            exit(1);
+          }
+        }
+
       }
       else {
         VT_ERROR(c->log, "invalid option -- '%s'", flag);

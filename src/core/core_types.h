@@ -104,6 +104,9 @@ struct vt_compositor_t {
   struct vt_session_t* session;
   struct vt_seat_t* seat;
   struct vt_input_backend_t* input_backend;
+
+  bool have_proto_dmabuf,
+       have_proto_dmabuf_explicit_sync;
 };
 
 typedef bool (*backend_implement_func_t)(struct vt_compositor_t* comp);

@@ -415,6 +415,7 @@ _egl_pick_config(struct vt_compositor_t *comp, struct egl_backend_state_t *egl, 
 bool _egl_surface_is_ready(struct vt_renderer_t* renderer, struct vt_surface_t* surf) {
   if (!surf || !surf->sync.res) return true;
   struct egl_backend_state_t* egl = BACKEND_DATA(renderer, struct egl_backend_state_t);
+  if(!egl->has_explicit_sync_support) return true;
 
   if (surf->sync.acquire_fence_fd >= 0) {
     EGLint attribs[] = {
@@ -446,6 +447,8 @@ bool _egl_send_surface_release_fences(struct vt_renderer_t* renderer, struct vt_
   if (!renderer || !output) return false;
 
   struct egl_backend_state_t* egl = BACKEND_DATA(output->backend->comp->renderer, struct egl_backend_state_t); 
+  if(!egl->has_explicit_sync_support) return true;
+
   struct egl_output_state_t* egl_output = (struct egl_output_state_t*)output->user_data_render;
 
   // Get a single end-of-frame fence FD for this output repaint
@@ -667,7 +670,7 @@ renderer_init_egl(struct vt_backend_t* backend, struct vt_renderer_t *r, void* n
     egl->has_dmabuf_support = false;
   }
 
-  if(strstr(exts, "EGL_KHR_fence_sync") && 
+  if(egl->has_explicit_sync_support && strstr(exts, "EGL_KHR_fence_sync") && 
     strstr(exts, "EGL_ANDROID_native_fence_sync")) {
     eglCreateSyncKHR_ptr = (PFNEGLCREATESYNCKHRPROC)eglGetProcAddress("eglCreateSyncKHR");
     eglDestroySyncKHR_ptr = (PFNEGLDESTROYSYNCKHRPROC)eglGetProcAddress("eglDestroySyncKHR");
@@ -1209,10 +1212,12 @@ renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,  con
                     GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
 
-  egl_output->end_sync = eglCreateSyncKHR_ptr(
-    egl->egl_dsp, 
-    EGL_SYNC_NATIVE_FENCE_ANDROID,
-    &(EGLint){EGL_NONE});
+  if(egl->has_explicit_sync_support) {
+    egl_output->end_sync = eglCreateSyncKHR_ptr(
+      egl->egl_dsp, 
+      EGL_SYNC_NATIVE_FENCE_ANDROID,
+      &(EGLint){EGL_NONE});
+  }
 
 
   if (n_damaged > 0 && eglSwapBuffersWithDamageEXT_ptr) {
