@@ -156,6 +156,7 @@ vt_comp_frame_done_all(struct vt_compositor_t *c, uint32_t t) {
     if(!surf->needs_frame_done) continue; 
 
     for (uint32_t i = 0; i < surf->cb_pool.n_cbs; i++) {
+      //if(!surf->cb_pool.cbs[i]) continue;
       wl_callback_send_done(surf->cb_pool.cbs[i], t);
       wl_resource_destroy(surf->cb_pool.cbs[i]);
       if(!c->sent_frame_cbs) c->sent_frame_cbs = true;
@@ -327,14 +328,15 @@ _vt_comp_handle_cmd_flags(struct vt_compositor_t* c, int argc, char** argv) {
 void _vt_comp_log_help() {
   printf("Usage: vortex [option:s] (value:s)\n");
   printf("Options: \n");
-  printf("%-30s %s\n", "-h, --help", "Show this help message and exit");
-  printf("%-30s %s\n", "-v, --version", "Show version information");
-  printf("%-30s %s\n", "-vb, --verbose", "Log verbose (trace) output");
-  printf("%-30s %s\n", "-lf, --logfile", 
+  printf("%-35s %s\n", "-h, --help", "Show this help message and exit");
+  printf("%-35s %s\n", "-v, --version", "Show version information");
+  printf("%-35s %s\n", "-vb, --verbose", "Log verbose (trace) output");
+  printf("%-35s %s\n", "-lf, --logfile", 
          "Write logs to a logfile (~/.local/state/vortex/logs/ or if available $XDG_STATE_HOME/vortex/logs)");
-  printf("%-30s %s\n", "-q, --quiet", "Run in quiet mode");
-  printf("%-30s %s\n", "-vo, --virtual-outputs [val]", "Specify the number of virtual outputs (windows) in nested mode");
-  printf("%-30s %s", "-b, --backend [val]", "Specifies the sink backend of the compositor.");
+  printf("%-35s %s\n", "-q, --quiet", "Run in quiet mode (no logging)");
+  printf("%-35s %s\n", "-vo, --virtual-outputs [val]", "Specify the number of virtual outputs (windows) in nested mode");
+  printf("%-35s %s\n", "-expt, --exclude-protocol [val]", "Specifies optional protocols to exlcude. Valid options are: 'linux-dmabuf', 'linux-dmabuf-explicit-sync");
+  printf("%-35s %s", "-b, --backend [val]", "Specifies the sink backend of the compositor.");
   printf(" Valid options for backends are: [ "); 
   size_t n;
   char** valid_backends = _scan_valid_backends(&n);
@@ -342,7 +344,7 @@ void _vt_comp_log_help() {
     printf("'%s'%s ", valid_backends[i], i != n - 1 ? "," : "");
   printf("]\n"); 
   free(valid_backends);
-  printf("%-30s %s\n", "-bp, --backend-path [val]", "Specifies the path of the .so file to load as the compositor's sink backend");
+  printf("%-35s %s\n", "-bp, --backend-path [val]", "Specifies the path of the .so file to load as the compositor's sink backend");
   exit(0);
 }
 
@@ -520,11 +522,6 @@ _vt_comp_wl_init(struct vt_compositor_t* c) {
     VT_ERROR(c->log, "Cannot get wayland event loop.");
     return false;
   }
-
-  wl_display_init_shm(c->wl.dsp);
-
-  wl_display_add_shm_format(c->wl.dsp, WL_SHM_FORMAT_ARGB8888);
-  wl_display_add_shm_format(c->wl.dsp, WL_SHM_FORMAT_XRGB8888);
 
   wl_global_create(c->wl.dsp, &wl_compositor_interface, 4, c, _vt_comp_wl_bind); 
 

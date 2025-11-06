@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <wayland-server-core.h>
+#include <wayland-server-protocol.h>
 
 #define _BRAND_NAME "vortex"  
 #define _VERSION "alpha 0.1"
@@ -97,3 +98,7 @@ int vt_util_allocate_shm_file(struct vt_compositor_t* comp, size_t size);
 
 struct vt_compositor_t;
 bool vt_util_allocate_shm_rwro_pair(struct vt_compositor_t* comp, size_t size, int* rw_fd, int* ro_fd);
+
+uint32_t vt_util_convert_wl_shm_format_to_drm(enum wl_shm_format fmt);
+
+enum wl_shm_format vt_util_convert_drm_format_to_wl_shm(uint32_t fmt);

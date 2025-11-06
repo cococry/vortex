@@ -117,7 +117,6 @@ _wl_surface_commit(
     
   if (!surf) { VT_ERROR(surf->comp->log, "surface_commit: NULL user_data"); return; }
 
-
   surf->has_buffer = (surf->buf_res != NULL);
   if (!surf->mapped && surf->has_buffer && surf->xdg_surf && surf->xdg_surf->toplevel.xdg_toplevel_res) {
     // surface is becoming visible
@@ -197,7 +196,6 @@ _wl_surface_commit(
     vt_comp_schedule_repaint(surf->comp, output);
   }
 
-  pixman_region32_clear(&surf->current_damage);
   
   VT_TRACE(surf->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Finsihed commit."); 
 }

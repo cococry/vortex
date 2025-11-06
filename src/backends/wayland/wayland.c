@@ -18,6 +18,7 @@
 #include "../../render/renderer.h"
 #include "../../core/compositor.h"
 #include "../../protocols/linux_dmabuf.h"
+#include "../../protocols/wl_shm.h"
 #include "../../protocols/linux_explicit_sync.h"
 
 #define _WL_DEFAULT_OUTPUT_WIDTH 1280
@@ -204,6 +205,100 @@ _wl_parent_frame_done(void *data,
 }
 
 bool 
+_wl_backend_init_active_outputs(struct vt_backend_t* backend){
+  if(!backend) return false;
+
+  VT_TRACE(backend->comp->log, "WL: Initializing active outputs.");
+  
+  wayland_backend_state_t* wl_backend = BACKEND_DATA(backend, wayland_backend_state_t);
+
+  if (!backend->comp->renderer || !backend->comp->renderer->impl.setup_renderable_output) {
+    VT_ERROR(backend->comp->log, "WL: Renderer backend not initialized before output setup.");
+    return false;
+  }
+
+  for (uint32_t i = 0; i < backend->comp->n_virtual_outputs; i++) {
+    struct vt_output_t* output = VT_ALLOC(backend->comp, sizeof(struct vt_output_t));
+    output->needs_damage_rebuild = true;
+    pixman_region32_init(&output->damage);
+    output->backend = backend;
+    if (!_wl_backend_create_output(backend, output, NULL)) {
+      VT_ERROR(backend->comp->log, "WL: Failed to setup internal WL output.");
+      continue;
+    } 
+    if(!backend->comp->renderer->impl.setup_renderable_output(backend->comp->renderer, output)) {
+      VT_ERROR(backend->comp->log, "WL: Failed to setup renderable output for WL output (%ix%i@%.2f)",
+                output->width, output->height, output->refresh_rate);
+      _wl_backend_destroy_output(backend, output);
+      continue;
+    }
+    vt_comp_schedule_repaint(backend->comp, output);
+  }
+  
+  if (wl_list_empty(&backend->comp->outputs)) {
+    VT_ERROR(backend->comp->log, "WL: No outputs have been initialized.");
+    return false;
+  }
+
+  // Nested backend must not wait for the vblank of the compositor for 
+  // frame pacing, as the parent compositor already waits.
+  backend->comp->renderer->impl.set_vsync(backend->comp->renderer, false);
+
+  return true;
+}
+
+bool 
+_wl_backend_create_output(struct vt_backend_t* backend, struct vt_output_t* output, void* data){
+  if(!backend || !output) return false;
+
+  VT_TRACE(backend->comp->log, "WL: Creating WL internal output.");
+  if(!(output->user_data = VT_ALLOC(backend->comp, sizeof(wayland_output_state_t)))) {
+    return false;
+  }
+
+  wayland_backend_state_t* wl = BACKEND_DATA(backend, wayland_backend_state_t);
+  wayland_output_state_t* wl_output = BACKEND_DATA(output, wayland_output_state_t);
+  wl_output->parent_surface = wl_compositor_create_surface(wl->parent_compositor);
+  wl_output->parent_xdg_surface =
+    xdg_wm_base_get_xdg_surface(wl->parent_xdg_wm_base, wl_output->parent_surface);
+  xdg_surface_add_listener(wl_output->parent_xdg_surface, &parent_xdg_surface_listener, output);
+
+  wl_output->parent_xdg_toplevel = xdg_surface_get_toplevel(wl_output->parent_xdg_surface);
+  xdg_toplevel_add_listener(wl_output->parent_xdg_toplevel, &parent_toplevel_listener, output);
+  char name[64];
+  sprintf(name, "Vortex Nested (%i)", wl_list_length(&backend->comp->outputs));
+  xdg_toplevel_set_title(wl_output->parent_xdg_toplevel, name);
+  
+  VT_TRACE(backend->comp->log, "WL: Created virtual nested output %s.", name);
+
+  wl_output->parent_frame_cb = wl_surface_frame(wl_output->parent_surface);
+  wl_callback_add_listener(wl_output->parent_frame_cb, &parent_surface_frame_listener, output);
+ 
+  vt_comp_schedule_repaint(backend->comp, output);
+
+  // Trigger initial configure
+  wl_surface_commit(wl_output->parent_surface);
+  // Get the initial configure immidiately
+  wl_display_roundtrip(wl->parent_display);
+
+  output->native_window = wl_output->parent_surface;  
+
+  output->id = wl_list_length(&backend->comp->outputs);
+  output->refresh_rate = 60;
+  output->x = 0;
+  output->y = 0;
+  output->width = _WL_DEFAULT_OUTPUT_WIDTH;  
+  output->height = _WL_DEFAULT_OUTPUT_HEIGHT; 
+
+
+  wl_list_insert(&backend->comp->outputs, &output->link_global);
+ 
+  return true;
+}
+
+
+
+bool 
 _wl_backend_destroy_output(struct vt_backend_t* backend, struct vt_output_t* output) {
   if(!output || !output->user_data) return false;
 
@@ -269,7 +364,7 @@ _wl_init_fake_dmabuf_feedback(
 
   fb->dev_main->fd = -1;
 
-  // Create a single empty tranche (no formats)
+  // single empty tranche (no formats)
   struct vt_dmabuf_tranche_t* tranche = wl_array_add(&fb->tranches, sizeof(*tranche));
   if (!tranche)
     return false;
@@ -298,6 +393,17 @@ _wl_init_fake_dmabuf_feedback(
   fmt2->mods[0]._egl_ext_only = false;
   fmt2->mods[1].mod = _VT_DRM_FORMAT_MOD_INVALID;
   fmt2->mods[1]._egl_ext_only = false;
+
+  uint32_t* shm_formats = calloc(2, sizeof(uint32_t));
+  shm_formats[0] = _VT_DRM_FORMAT_XRGB8888; 
+  shm_formats[1] = _VT_DRM_FORMAT_ARGB8888; 
+
+  if(!vt_proto_wl_shm_init(comp, shm_formats, 2)) {
+    VT_ERROR(comp->log, "WL: Failed to initialize WL SHM protcol.\n");
+    return false;
+  }
+
+  free(shm_formats);
 
   return true;
 
@@ -438,49 +544,6 @@ backend_handle_frame_wl(struct vt_backend_t* backend, struct vt_output_t* output
 } 
 
 bool 
-_wl_backend_init_active_outputs(struct vt_backend_t* backend){
-  if(!backend) return false;
-
-  VT_TRACE(backend->comp->log, "WL: Initializing active outputs.");
-  
-  wayland_backend_state_t* wl_backend = BACKEND_DATA(backend, wayland_backend_state_t);
-
-  if (!backend->comp->renderer || !backend->comp->renderer->impl.setup_renderable_output) {
-    VT_ERROR(backend->comp->log, "WL: Renderer backend not initialized before output setup.");
-    return false;
-  }
-
-  for (uint32_t i = 0; i < backend->comp->n_virtual_outputs; i++) {
-    struct vt_output_t* output = VT_ALLOC(backend->comp, sizeof(struct vt_output_t));
-    output->needs_damage_rebuild = true;
-    pixman_region32_init(&output->damage);
-    output->backend = backend;
-    if (!_wl_backend_create_output(backend, output, NULL)) {
-      VT_ERROR(backend->comp->log, "WL: Failed to setup internal WL output.");
-      continue;
-    } 
-    if(!backend->comp->renderer->impl.setup_renderable_output(backend->comp->renderer, output)) {
-      VT_ERROR(backend->comp->log, "WL: Failed to setup renderable output for WL output (%ix%i@%.2f)",
-                output->width, output->height, output->refresh_rate);
-      _wl_backend_destroy_output(backend, output);
-      continue;
-    }
-    vt_comp_schedule_repaint(backend->comp, output);
-  }
-  
-  if (wl_list_empty(&backend->comp->outputs)) {
-    VT_ERROR(backend->comp->log, "WL: No outputs have been initialized.");
-    return false;
-  }
-
-  // Nested backend must not wait for the vblank of the compositor for 
-  // frame pacing, as the parent compositor already waits.
-  backend->comp->renderer->impl.set_vsync(backend->comp->renderer, false);
-
-  return true;
-}
-
-bool 
 backend_terminate_wl(struct vt_backend_t* backend){
   if(!backend || !backend->user_data) return false;
   
@@ -503,57 +566,6 @@ backend_terminate_wl(struct vt_backend_t* backend){
 
   return true;
 }
-
-
-bool 
-_wl_backend_create_output(struct vt_backend_t* backend, struct vt_output_t* output, void* data){
-  if(!backend || !output) return false;
-
-  VT_TRACE(backend->comp->log, "WL: Creating WL internal output.");
-  if(!(output->user_data = VT_ALLOC(backend->comp, sizeof(wayland_output_state_t)))) {
-    return false;
-  }
-
-  wayland_backend_state_t* wl = BACKEND_DATA(backend, wayland_backend_state_t);
-  wayland_output_state_t* wl_output = BACKEND_DATA(output, wayland_output_state_t);
-  wl_output->parent_surface = wl_compositor_create_surface(wl->parent_compositor);
-  wl_output->parent_xdg_surface =
-    xdg_wm_base_get_xdg_surface(wl->parent_xdg_wm_base, wl_output->parent_surface);
-  xdg_surface_add_listener(wl_output->parent_xdg_surface, &parent_xdg_surface_listener, output);
-
-  wl_output->parent_xdg_toplevel = xdg_surface_get_toplevel(wl_output->parent_xdg_surface);
-  xdg_toplevel_add_listener(wl_output->parent_xdg_toplevel, &parent_toplevel_listener, output);
-  char name[64];
-  sprintf(name, "Vortex Nested (%i)", wl_list_length(&backend->comp->outputs));
-  xdg_toplevel_set_title(wl_output->parent_xdg_toplevel, name);
-  
-  VT_TRACE(backend->comp->log, "WL: Created virtual nested output %s.", name);
-
-  wl_output->parent_frame_cb = wl_surface_frame(wl_output->parent_surface);
-  wl_callback_add_listener(wl_output->parent_frame_cb, &parent_surface_frame_listener, output);
- 
-  vt_comp_schedule_repaint(backend->comp, output);
-
-  // Trigger initial configure
-  wl_surface_commit(wl_output->parent_surface);
-  // Get the initial configure immidiately
-  wl_display_roundtrip(wl->parent_display);
-
-  output->native_window = wl_output->parent_surface;  
-
-  output->id = wl_list_length(&backend->comp->outputs);
-  output->refresh_rate = 60;
-  output->x = 0;
-  output->y = 0;
-  output->width = _WL_DEFAULT_OUTPUT_WIDTH;  
-  output->height = _WL_DEFAULT_OUTPUT_HEIGHT; 
-
-
-  wl_list_insert(&backend->comp->outputs, &output->link_global);
- 
-  return true;
-}
-
 bool 
 backend_prepare_output_frame_wl(struct vt_backend_t* backend, struct vt_output_t* output){
   (void)backend;

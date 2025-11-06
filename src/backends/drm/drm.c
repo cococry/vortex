@@ -36,6 +36,7 @@
 #include "input/wl_seat.h"
 #include "protocols/linux_dmabuf.h"
 #include "protocols/linux_explicit_sync.h"
+#include "protocols/wl_shm.h"
 #include "render/dmabuf.h"
 
 
@@ -341,6 +342,9 @@ _drm_build_dmabuf_feedback(
 
   VT_TRACE(master->comp->log, "DRM: Building default DMABUF feedback...");
 
+  uint32_t max_shm_formats = 256, n_shm_formats = 0;
+  uint32_t shm_formats[max_shm_formats];
+
   uint32_t n_devs = 0;
   drmDevicePtr devs[master->n_drm];
   // add the tranches
@@ -400,7 +404,16 @@ _drm_build_dmabuf_feedback(
         }
       }
     }
+    struct vt_dmabuf_drm_format_t* formats = tranche->formats.data;
+    for(uint32_t i = 0; i < tranche->formats.size; i++) {
+      if(!(n_shm_formats < max_shm_formats - 1)) {
+        VT_WARN(master->comp->log, "DRM: Maximum number of SHM formats reached, not adding format %i.", formats[i].format);
+        break; 
+      }
+      shm_formats[n_shm_formats++] = formats[i].format; 
+    }
     _log_dmabuf_tranche(master->comp, tranche, dev->path);
+
   }
   // Adding a generic fallback tranche (LINEAR DRM_FORMAT_ARGB8888) 
   struct vt_dmabuf_tranche_t* fallback = wl_array_add(&feedback->tranches, sizeof(*fallback));
@@ -418,11 +431,18 @@ _drm_build_dmabuf_feedback(
   fmt->mods[1].mod = DRM_FORMAT_MOD_INVALID;
   fmt->mods[1]._egl_ext_only = false;
 
-
   drmFreeDevice(&dev_main_drm);
   for (int i = 0; i < n_devs; i++) {
     drmFreeDevice(&devs[i]);
   }
+
+  shm_formats[n_shm_formats++] = fmt->format;
+
+  if(!vt_proto_wl_shm_init(master->comp, shm_formats, n_shm_formats)) {
+    VT_ERROR(master->comp->log, "DRM: Failed to initialize WL SHM protcol.\n");
+    return false;
+  }
+
   VT_TRACE(master->comp->log, "DRM: Added default fallback tranche (LINEAR DRM_FORMAT_ARGB8888).\n");
 
   return true;

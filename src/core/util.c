@@ -202,3 +202,33 @@ vt_util_allocate_shm_rwro_pair(struct vt_compositor_t* comp, size_t size, int* r
 
   return true;
 }
+
+#define fourcc_code(a, b, c, d) ((__u32)(a) | ((__u32)(b) << 8) | \
+  ((__u32)(c) << 16) | ((__u32)(d) << 24))
+
+#define DRM_FORMAT_XRGB8888	fourcc_code('X', 'R', '2', '4') /* [31:0] x:R:G:B 8:8:8:8 little endian */
+#define DRM_FORMAT_ARGB8888	fourcc_code('A', 'R', '2', '4') /* [31:0] A:R:G:B 8:8:8:8 little endian */
+
+uint32_t 
+vt_util_convert_wl_shm_format_to_drm(enum wl_shm_format fmt) {
+  switch (fmt) {
+    case WL_SHM_FORMAT_XRGB8888:
+      return DRM_FORMAT_XRGB8888;
+    case WL_SHM_FORMAT_ARGB8888:
+      return DRM_FORMAT_ARGB8888;
+    default:
+      return (uint32_t)fmt;
+  }
+}
+
+enum wl_shm_format 
+vt_util_convert_drm_format_to_wl_shm(uint32_t fmt) {
+  switch (fmt) {
+    case DRM_FORMAT_XRGB8888:
+      return WL_SHM_FORMAT_XRGB8888;
+    case DRM_FORMAT_ARGB8888:
+      return WL_SHM_FORMAT_ARGB8888;
+    default:
+      return (enum wl_shm_format)fmt;
+  }
+}
