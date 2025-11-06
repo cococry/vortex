@@ -1069,8 +1069,9 @@ vt_comp_terminate(struct vt_compositor_t *c) {
   
   c->input_backend->impl.terminate(c->input_backend);
 
-  if(c->session->impl.terminate)
+  if(c->session->impl.terminate) {
     c->session->impl.terminate(c->session);
+  }
 
   // Shut down wayland 
   if (c->wl.dsp) {
@@ -1088,6 +1089,7 @@ vt_comp_terminate(struct vt_compositor_t *c) {
   }
   
   vt_util_arena_destroy(&c->arena); 
+  vt_util_arena_destroy(&c->frame_arena); 
 
   dlclose(_vt_comp_dl_handle);
 

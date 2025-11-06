@@ -244,8 +244,6 @@ _proto_linux_dmabuf_v1_destroy(struct vt_proto_linux_dmabuf_v1_t* dmabuf) {
     close(dmabuf->fd_main_dev);
   }
   wl_list_remove(&dmabuf->dsp_destroy.link);
-
-  free(dmabuf);
 }
 
 void 

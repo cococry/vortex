@@ -233,7 +233,7 @@ vt_seat_handle_key(struct vt_seat_t* seat, uint32_t keycode, uint32_t state, uin
                        state == VT_KEY_STATE_PRESSED ? XKB_KEY_DOWN : XKB_KEY_UP);
   struct vt_kb_modifier_states_t mod_states = _wl_kb_get_mod_states(backend->kb_state);
 
-  printf(
+  VT_TRACE(seat->comp->log,
            "INPUT: Got key event: keycode: %i, state: %i, mods: %08x\n",
            keycode, state, mod_states.depressed);
 
@@ -276,7 +276,6 @@ vt_seat_add_global_keybind(
   if(!seat || !seat->comp) return NULL;
   struct vt_keybind_t* keybind = VT_ALLOC(seat->comp, sizeof(*keybind));
   keybind->mods = mods;
-  printf("Mods: %i\n", mods);
   keybind->sym = sym;
   keybind->callback = callback;
   keybind->user_data = user_data;
