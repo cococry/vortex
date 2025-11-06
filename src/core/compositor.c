@@ -832,6 +832,8 @@ _vt_comp_wl_surface_handle_resource_destroy(struct wl_resource* resource) {
       &output->damage, &output->damage,
       x, y, w, h); 
     vt_comp_schedule_repaint(surf->comp, output);
+
+    output->needs_damage_rebuild = true;
   }
 }
 
