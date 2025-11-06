@@ -5,6 +5,7 @@
 #include "src/input/wl_seat.h"
 #include "src/protocols/xdg_shell.h"
 #include "src/protocols/linux_dmabuf.h"
+#include "src/protocols/wl_surface.h"
 #include "src/render/renderer.h"
 
 #include <linux/vt.h>
@@ -38,8 +39,6 @@ static void  _vt_comp_wl_bind(struct wl_client *client, void *data,
                            uint32_t version, uint32_t id);
 
 
-static void _vt_comp_associate_surface_with_output(struct vt_compositor_t* c, struct vt_surface_t* surf, struct vt_output_t* output);
-
 void _vt_comp_wl_surface_create(
   struct wl_client *client,
   struct wl_resource *resource,
@@ -49,68 +48,6 @@ void _vt_comp_wl_surface_create_region(
   struct wl_client *client,
   struct wl_resource *resource,
   uint32_t id);
-
-static void _vt_comp_wl_surface_attach(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  struct wl_resource *buffer,
-  int32_t x,
-  int32_t y);
-
-static void _vt_comp_wl_surface_commit(
-  struct wl_client *client,
-  struct wl_resource *resource);
-
-static void _vt_comp_wl_surface_frame(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  uint32_t callback);
-
-static void _vt_comp_wl_surface_damage(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  int32_t x,
-  int32_t y,
-  int32_t width,
-  int32_t height);  
-
-static void _vt_comp_wl_surface_set_opaque_region(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  struct wl_resource *region);
-
-static void _vt_comp_wl_surface_set_input_region(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  struct wl_resource *region);
-
-static void _vt_comp_wl_surface_set_buffer_transform(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  int32_t transform);
-
-static void _vt_comp_wl_surface_set_buffer_scale(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  int32_t scale);
-
-static void _vt_comp_wl_surface_damage_buffer(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  int32_t x,
-  int32_t y,
-  int32_t width,
-  int32_t height);
-
-static void _vt_comp_wl_surface_offset(struct wl_client *client,
-                                    struct wl_resource *resource,
-                                    int32_t x,
-                                    int32_t y);
-
-static void _vt_comp_wl_surface_destroy(struct wl_client *client,
-                                     struct wl_resource *resource);
-
-static void _vt_comp_wl_surface_handle_resource_destroy(struct wl_resource* resource);
 
 static void _vt_comp_wl_region_destroy(
   struct wl_client *client,
@@ -136,20 +73,6 @@ static void _vt_comp_wl_region_subtract(
 static const struct wl_compositor_interface compositor_impl = {
   .create_surface = _vt_comp_wl_surface_create,
   .create_region = _vt_comp_wl_surface_create_region 
-};
-
-static const struct wl_surface_interface surface_impl = {
-  .attach = _vt_comp_wl_surface_attach,
-  .commit = _vt_comp_wl_surface_commit,
-  .damage = _vt_comp_wl_surface_damage, 
-  .frame = _vt_comp_wl_surface_frame,
-  .set_opaque_region = _vt_comp_wl_surface_set_opaque_region,
-  .set_input_region = _vt_comp_wl_surface_set_input_region,
-  .set_buffer_scale = _vt_comp_wl_surface_set_buffer_scale,
-  .set_buffer_transform = _vt_comp_wl_surface_set_buffer_transform,
-  .offset = _vt_comp_wl_surface_offset, 
-  .destroy = _vt_comp_wl_surface_destroy,
-  .damage_buffer = _vt_comp_wl_surface_damage_buffer,
 };
 
 static const struct wl_region_interface region_impl = {
@@ -233,7 +156,6 @@ vt_comp_frame_done_all(struct vt_compositor_t *c, uint32_t t) {
     if(!surf->needs_frame_done) continue; 
 
     for (uint32_t i = 0; i < surf->cb_pool.n_cbs; i++) {
-      //if(!surf->cb_pool.cbs[i]) continue;
       wl_callback_send_done(surf->cb_pool.cbs[i], t);
       wl_resource_destroy(surf->cb_pool.cbs[i]);
       if(!c->sent_frame_cbs) c->sent_frame_cbs = true;
@@ -305,10 +227,6 @@ static char** _scan_valid_backends(size_t *count_out) {
   closedir(dir);
   if (count_out) *count_out = count;
   return list;
-}
-
-bool _disable_protocols(struct vt_compositor_t* c, int argc, char** argv) {
-
 }
 
 const char*
@@ -500,6 +418,11 @@ _vt_comp_wl_surface_create(
   struct wl_resource *resource,
   uint32_t id) {
   struct vt_compositor_t* c = wl_resource_get_user_data(resource);
+  if(!c) {
+    log_fatal(c->log, "compositor.surface_create: User data is NULL.");
+    return;
+  }
+
   VT_TRACE(c->log, "Got compositor.surface_create: Started managing surface.")
   // Allocate the struct to store protocol information about the surface
   struct vt_surface_t* surf = VT_ALLOC(c, sizeof(*surf));
@@ -515,12 +438,13 @@ _vt_comp_wl_surface_create(
   wl_list_insert(&c->surfaces, &surf->link);
   VT_TRACE(c->log, "compositor.surface_create: Inserted surface into list.")
 
-  // Get the surface's wayland resource
-  struct wl_resource* res = wl_resource_create(client, &wl_surface_interface, 4, id);
-  wl_resource_set_implementation(res, &surface_impl, surf, _vt_comp_wl_surface_handle_resource_destroy);
-  surf->surf_res = res;
-
   VT_TRACE(c->log, "compositor.surface_create: Setting surface implementation.")
+
+  if(!vt_proto_wl_surface_init(surf, client, id, 4)) {
+    VT_ERROR(c->log, "compositor.surface_create: Failed to create surface.");
+    return;
+  }
+
 }
 
 void 
@@ -532,309 +456,6 @@ _vt_comp_wl_surface_create_region(
     client, &wl_region_interface, 
     wl_resource_get_version(resource), id);
   wl_resource_set_implementation(res, &region_impl, NULL, NULL);
-}
-
-void 
-_vt_comp_wl_surface_attach(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  struct wl_resource *buffer,
-  int32_t x,
-  int32_t y) {
-  // When a client attaches an allocated buffer, store the resource handle 
-  // in the surface struct
-  struct vt_surface_t* surf = wl_resource_get_user_data(resource);
-  if(!surf) {
-    VT_ERROR(((struct vt_compositor_t*)wl_resource_get_user_data(resource))->log,
-             "surface_attach: NULL user_data");
-    return;
-  }
-  VT_TRACE(surf->comp->log, "Got compositor.surface_attach.")
-    surf->buf_res = buffer;
-}
-
-void 
-_vt_comp_wl_surface_commit(
-  struct wl_client *client,
-  struct wl_resource *resource) {
-  struct vt_surface_t* surf = wl_resource_get_user_data(resource);
-  if(!surf) {
-    VT_ERROR(surf->comp->log, "compositor.surface_attach: No internal surface data allocated.")
-    return;
-  }
-
-  VT_TRACE(surf->comp->log, "Got compositor.surface_commit.")
-    
-  if (!surf) { VT_ERROR(surf->comp->log, "surface_commit: NULL user_data"); return; }
-
-
-  surf->has_buffer = (surf->buf_res != NULL);
-  if (!surf->mapped && surf->has_buffer && surf->xdg_surf && surf->xdg_surf->toplevel.xdg_toplevel_res) {
-    // surface is becoming visible
-    surf->mapped = true;
-    vt_surface_mapped(surf);
-  } else if (surf->mapped && !surf->has_buffer) {
-    // surface lost its buffer (unmapped)
-    surf->mapped = false;
-    vt_surface_unmapped(surf);
-  }
-
-  // no buffer attached, this commit has no contents 
-  if (!surf->has_buffer) {
-    return;
-  }
-  if(pixman_region32_empty(&surf->pending_damage)) return;
-
-
-  if (!surf->current_damage.data) {
-    pixman_region32_init(&surf->current_damage);
-  }
-  pixman_box32_t ext =* pixman_region32_extents(&surf->pending_damage);
-  pixman_region32_clear(&surf->current_damage);
-  pixman_region32_union_rect(&surf->current_damage, &surf->current_damage,
-                             ext.x1, ext.y1, ext.x2 - ext.x1, ext.y2 - ext.y1);
-  pixman_region32_clear(&surf->pending_damage);
-
-
-  // If the size of the surface changed, 
-  // we need to recalculate the outputs that the surface is visible on 
-  if(surf->width != surf->tex.width || surf->height != surf->tex.height) {
-    surf->_mask_outputs_visible_on = 0;
-  }
-  surf->width = surf->tex.width;
-  surf->height = surf->tex.height;
-
-  if(!surf->_mask_outputs_visible_on) {
-    struct vt_output_t* output;
-    wl_list_for_each(output, &surf->comp->outputs, link_global) {
-      _vt_comp_associate_surface_with_output(surf->comp, surf, output);
-    }
-    // Mark as needing redraw
-    pixman_region32_clear(&surf->current_damage);
-    pixman_region32_union_rect(&surf->current_damage,
-                               &surf->current_damage, 0, 0, surf->width, surf->height);
-  }
- 
-  pixman_region32_intersect_rect(&surf->current_damage,
-                                 &surf->current_damage,
-                                 0, 0, surf->width, surf->height);
-
-
-  VT_TRACE(surf->comp->log, "compositor.surface_commit: Scheduling repaint to render commited buffer.");
-
-  // Schedule a repaint for all outputs that the surface intersects with
-  struct vt_output_t* output;
-
-  // importing the buffer
-  struct vt_renderer_t* r = surf->comp->renderer;
-  if(r && r->impl.import_buffer) {
-    r->impl.import_buffer(r, surf, surf->buf_res);
-    // Tell the client we're finsied uploading its buffer
-    VT_TRACE(surf->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Sending release."); 
-    wl_buffer_send_release(surf->buf_res);
-  }
-
-    VT_TRACE(surf->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Sending release."); 
-  wl_list_for_each(output, &surf->comp->outputs, link_global) {
-    if(!(surf->_mask_outputs_visible_on & (1u << output->id))) {
-      VT_WARN(surf->comp->log, "Not rerendering for surface %p because not on output %p.\n", surf, output);
-      continue;
-    }
-    pixman_box32_t ext = *pixman_region32_extents(&surf->current_damage);
-    pixman_region32_union_rect(&output->damage, &output->damage,
-                               surf->x + ext.x1, surf->y + ext.y1,
-                               ext.x2 - ext.x1, ext.y2 - ext.y1); 
-    vt_comp_schedule_repaint(surf->comp, output);
-  }
-
-  pixman_region32_clear(&surf->current_damage);
-  
-  VT_TRACE(surf->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Finsihed commit."); 
-}
-
-
-void
-_vt_comp_wl_surface_frame(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  uint32_t callback) {
-  struct vt_surface_t* surf = wl_resource_get_user_data(resource);
-  if(!surf) {
-    VT_ERROR(surf->comp->log, "compositor.surface_frame: No internal surface data allocated.")
-    return;
-  }
-
-  VT_TRACE(surf->comp->log, "Got compositor.surface_frame.")
-  struct wl_resource* res = wl_resource_create(client, &wl_callback_interface, 1, callback);
-
-  // Store the frame callback in the list of pending frame callbacks.
-  // wl_callback_send_done must be called for each of the pending callbacks
-  // after the next page flip event completes in order to correctly handle 
-  // frame pacing ( see send_frame_callbacks() ).
-  if(surf->cb_pool.n_cbs >= VT_MAX_FRAME_CBS) {
-    VT_WARN(surf->comp->log, "Surface %p already has %i frame callbacks queued - dropping new one.", surf->cb_pool.n_cbs);
-    return;
-  }
-  surf->cb_pool.cbs[surf->cb_pool.n_cbs++] = res;
-
-  VT_TRACE(surf->comp->log, "compositor.surface_frame: Inserting frame callback into list of surface %p.", surf)
-
-    surf->needs_frame_done = true;
-  surf->comp->any_frame_cb_pending = true;
-}
-
-void 
-_vt_comp_wl_surface_damage(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  int32_t x,
-  int32_t y,
-  int32_t width,
-  int32_t height) {
-  struct vt_surface_t* surf = wl_resource_get_user_data(resource);
-  if(!surf) {
-    VT_ERROR(surf->comp->log, "compositor.surface_damage: No internal surface data allocated.")
-    return;
-  }
-
-  pixman_region32_union_rect(&surf->pending_damage, &surf->pending_damage,
-                             x, y, width, height);
-
-  pixman_box32_t extents = *pixman_region32_extents(&surf->pending_damage);
-
-
-  struct vt_output_t* output;
-  wl_list_for_each(output, &surf->comp->outputs, link_global) {
-    if (!(surf->_mask_outputs_visible_on & (1u << output->id)))
-      continue;
-
-    output->needs_damage_rebuild = true;
-  }
-  surf->damaged = true;
-
-}
-void 
-_vt_comp_wl_surface_damage_buffer(struct wl_client *client,
-                                  struct wl_resource *resource,
-                               int32_t x,
-                               int32_t y,
-                               int32_t width,
-                               int32_t height) {
-  struct vt_surface_t* surf = wl_resource_get_user_data(resource);
-  if(!surf) {
-    VT_ERROR(surf->comp->log, "compositor.surface_damage: No internal surface data allocated.")
-    return;
-  }
-
-  pixman_region32_union_rect(&surf->pending_damage, &surf->pending_damage,
-                             x, y, width, height);
-
-  pixman_box32_t extents = *pixman_region32_extents(&surf->pending_damage);
-
-
-  struct vt_output_t* output;
-  wl_list_for_each(output, &surf->comp->outputs, link_global) {
-    if (!(surf->_mask_outputs_visible_on & (1u << output->id)))
-      continue;
-
-    output->needs_damage_rebuild = true;
-  }
-  surf->damaged = true;
-}
-
-
-void
-_vt_comp_wl_surface_set_opaque_region(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  struct wl_resource *region) {
-
-}
-
-void 
-_vt_comp_wl_surface_set_input_region(struct wl_client *client,
-                                  struct wl_resource *resource,
-                                  struct wl_resource *region) {
-
-}
-
-void
-_vt_comp_wl_surface_set_buffer_transform(struct wl_client *client,
-                                      struct wl_resource *resource,
-                                      int32_t transform) {
-
-}
-
-void
-_vt_comp_wl_surface_set_buffer_scale(struct wl_client *client,
-                                  struct wl_resource *resource,
-                                  int32_t scale) {
-
-}
-
-void
-_vt_comp_wl_surface_offset(struct wl_client *client,
-                        struct wl_resource *resource,
-                        int32_t x,
-                        int32_t y) {
-
-}
-
-void
-_vt_comp_wl_surface_destroy(struct wl_client *client,
-                         struct wl_resource *resource) {
-  struct vt_surface_t* surf = ((struct vt_surface_t*)wl_resource_get_user_data(resource));
-    
-  VT_TRACE(surf->comp->log, 
-            "Got surface.destroy: Destroying surface resource.")
-  wl_resource_destroy(resource);
-
-}
-
-void 
-_vt_comp_wl_surface_handle_resource_destroy(struct wl_resource* resource) {
-  struct vt_surface_t* surf = wl_resource_get_user_data(resource);
- 
-  if (surf->mapped) {
-    vt_surface_unmapped(surf);
-    surf->mapped = false;
-  }
-
-  int32_t x = surf->x;
-  int32_t y = surf->y;
-  int32_t w = surf->width;
-  int32_t h = surf->height;
-  VT_TRACE(surf->comp->log, 
-            "Got surface.destroy handler: Unmanaging client.")
-
-  wl_list_remove(&surf->link);
-
-  pixman_region32_fini(&surf->pending_damage);
-  pixman_region32_fini(&surf->current_damage);
-
-  // Schedule a repaint for all outputs that the surface intersects with
-  struct vt_output_t* output;
-  struct vt_renderer_t* r = surf->comp->renderer;
-  if(r && r->impl.destroy_surface_texture) {
-    r->impl.destroy_surface_texture(r, surf);
-  }
-
-  // destroy dmabuf resources of the surface
-  vt_proto_linux_dmabuf_v1_surface_destroy(surf);
-
-  wl_list_for_each(output, &surf->comp->outputs, link_global) {
-    if(!(surf->_mask_outputs_visible_on & (1u << output->id))) continue;
-    // Destory surface texture with the renderer associated with the first output 
-    // the surface is on
-    // Damage the part of the screen where the surface was located 
-    // and schedule a repaint
-    pixman_region32_union_rect(
-      &output->damage, &output->damage,
-      x, y, w, h); 
-    vt_comp_schedule_repaint(surf->comp, output);
-
-    output->needs_damage_rebuild = true;
-  }
 }
 
 void 
