@@ -118,7 +118,7 @@ _wl_surface_commit(
   if (!surf) { VT_ERROR(surf->comp->log, "surface_commit: NULL user_data"); return; }
 
   surf->has_buffer = (surf->buf_res != NULL);
-  if (!surf->mapped && surf->has_buffer && surf->xdg_surf && surf->xdg_surf->toplevel.xdg_toplevel_res) {
+  if (!surf->mapped && surf->has_buffer && surf->xdg_surf && surf->xdg_surf->toplevel->xdg_toplevel_res) {
     // surface is becoming visible
     surf->mapped = true;
     vt_surface_mapped(surf);

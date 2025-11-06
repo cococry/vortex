@@ -43,7 +43,7 @@ static void _vt_comp_wl_surface_create(
   struct wl_resource *resource,
   uint32_t id);
 
-static void _vt_comp_wl_region_handle_destroy(struct wl_resource* resource);
+static void _vt_comp_wl_region_handle_resource_destroy(struct wl_resource* resource);
 void _vt_comp_wl_surface_create_region(
   struct wl_client *client,
   struct wl_resource *resource,
@@ -452,7 +452,7 @@ _vt_comp_wl_surface_create(
 }
 
 void 
-_vt_comp_wl_region_handle_destroy(struct wl_resource* resource) {
+_vt_comp_wl_region_handle_resource_destroy(struct wl_resource* resource) {
   struct vt_region_t* r = wl_resource_get_user_data(resource);
   pixman_region32_fini(&r->region);
   free(r);
@@ -482,7 +482,7 @@ _vt_comp_wl_surface_create_region(struct wl_client *client,
     client, &wl_region_interface, wl_resource_get_version(resource), id);
 
   wl_resource_set_implementation(res, &region_impl, region,
-                                 _vt_comp_wl_region_handle_destroy);
+                                 _vt_comp_wl_region_handle_resource_destroy);
 
   VT_TRACE(comp->log, "compositor.create_region: created region %p", region);
 }
