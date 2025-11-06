@@ -107,22 +107,27 @@ void
 _wl_surface_commit(
   struct wl_client *client,
   struct wl_resource *resource) {
+    printf("commit.\n");
   struct vt_surface_t* surf = wl_resource_get_user_data(resource);
   if(!surf) {
-    VT_ERROR(surf->comp->log, "compositor.surface_attach: No internal surface data allocated.")
+    VT_ERROR(surf->comp->log, "surface.commit: No internal surface data allocated.")
     return;
   }
 
-  VT_TRACE(surf->comp->log, "Got compositor.surface_commit.")
+  VT_TRACE(surf->comp->log, "Got surface.commit for surface %p.", surf)
     
   if (!surf) { VT_ERROR(surf->comp->log, "surface_commit: NULL user_data"); return; }
 
   surf->has_buffer = (surf->buf_res != NULL);
-  if (!surf->mapped && surf->has_buffer && surf->xdg_surf && surf->xdg_surf->toplevel->xdg_toplevel_res) {
-    // surface is becoming visible
+  if (!surf->mapped && surf->has_buffer && surf->xdg_surf &&
+    ((surf->xdg_surf->toplevel && surf->xdg_surf->toplevel->xdg_toplevel_res) ||
+    (surf->xdg_surf->popup && surf->xdg_surf->popup->xdg_popup_res))) {
+    printf("Mapped.\n");
     surf->mapped = true;
     vt_surface_mapped(surf);
-  } else if (surf->mapped && !surf->has_buffer) {
+  }
+  else if (surf->mapped && !surf->has_buffer) {
+    printf("Unmapped.\n");
     // surface lost its buffer (unmapped)
     surf->mapped = false;
     vt_surface_unmapped(surf);

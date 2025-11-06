@@ -15,6 +15,7 @@ vt_surface_mapped(struct vt_surface_t* surf) {
 
 void
 vt_surface_unmapped(struct vt_surface_t* surf) {
+  printf("GOT EHRE>\n");
   struct vt_seat_t* seat = surf->comp->seat; 
   if (seat && seat->focused.surf == surf) {
     wl_keyboard_send_leave(seat->focused.keyboard, seat->serial++, surf->surf_res);

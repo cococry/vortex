@@ -17,7 +17,6 @@ bool vt_proto_wl_shm_init(
   
   bool has_argb = false, has_xrgb = false;
   for (size_t i = 0; i < n_formats; i++) {
-    printf("DRm FORMAT: %i\n", drm_formats[i]);
     if(drm_formats[i] == _VT_DRM_FORMAT_ARGB8888) has_argb = true;
     if(drm_formats[i] == _VT_DRM_FORMAT_XRGB8888) has_xrgb = true;
   }

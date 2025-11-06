@@ -240,7 +240,7 @@ static const struct xdg_toplevel_interface xdg_toplevel_impl = {
 static const struct xdg_popup_interface xdg_popup_impl = { 
   .grab = _xdg_popup_grab,
   .destroy = _xdg_popup_destroy,
-  .reposition = _xdg_popup_reposition
+  .reposition = _xdg_popup_reposition, 
 };
 
 
@@ -284,6 +284,9 @@ _xdg_wm_base_create_positioner(struct wl_client *client,
 
   struct wl_resource* pos = wl_resource_create(client, &xdg_positioner_interface,
                                                wl_resource_get_version(resource), id);
+  
+  VT_TRACE(comp->log, "VT_PROTO_XDG_SHELL: xdg_wm_base.create_positioner with res %p.", pos);
+
   if(!pos) {
     wl_client_post_no_memory(client);
     return;
@@ -303,28 +306,32 @@ _xdg_wm_base_create_positioner(struct wl_client *client,
 void 
 _xdg_wm_base_positioner_handle_resource_destroy(struct wl_resource* resource) {
   struct vt_xdg_positioner_t* pos = wl_resource_get_user_data(resource);
+  VT_TRACE(pos->comp->log, "VT_PROTO_XDG_SHELL: xdg_positioner.resource_destroy with res %p.", resource);
   if(!pos) return;
   free(pos);
+  wl_resource_set_user_data(resource, NULL);
   pos->res = NULL;
-  pos = NULL;
 }
 
 void 
 _xdg_toplevel_handle_resource_destroy(struct wl_resource* resource) {
   struct vt_xdg_toplevel_t* top = wl_resource_get_user_data(resource);
+  VT_TRACE(top->xdg_surf->surf->comp->log, "VT_PROTO_XDG_SHELL: xdg_toplevel.resource_destroy with res %p.", resource);
   if(!top) return;
   free(top);
+  wl_resource_set_user_data(resource, NULL);
   top->xdg_toplevel_res = NULL;
-  top = NULL;
 }
 
 void 
 _xdg_popup_handle_resource_destroy(struct wl_resource* resource) {
   struct vt_xdg_popup_t* popup = wl_resource_get_user_data(resource);
   if(!popup) return;
+  VT_TRACE(popup->parent_xdg_surf->surf->comp->log, "VT_PROTO_XDG_SHELL: xdg_popup.resource_destroy with res %p.", resource);
   free(popup);
+  wl_resource_set_user_data(resource, NULL);
   popup->xdg_popup_res = NULL;
-  popup = NULL;
+
 }
 
 void 
@@ -332,14 +339,19 @@ _xdg_wm_base_get_xdg_surface(struct wl_client *client,
                                      struct wl_resource *resource,
                                      uint32_t id, struct wl_resource *surface_res)
 {
+  printf("Get surface.\n");
   struct wl_resource* xdg_surf_res = wl_resource_create(client, &xdg_surface_interface,
                                                     wl_resource_get_version(resource), id);
+  
+  struct vt_surface_t* surf =  wl_resource_get_user_data(surface_res);
+
+  VT_TRACE(surf->comp->log, "VT_PROTO_XDG_SHELL: xdg_wm_base.get_xdg_surface with res %p.", xdg_surf_res);
+
   if(!xdg_surf_res) {
     wl_client_post_no_memory(client);
     return;
   }
 
-  struct vt_surface_t* surf =  wl_resource_get_user_data(surface_res);
   vt_xdg_surface_t* xdg_surf = VT_ALLOC(surf->comp, sizeof(*xdg_surf));
   xdg_surf->surf = surf;
   xdg_surf->xdg_surf_res = xdg_surf_res;
@@ -508,6 +520,7 @@ _xdg_surface_destroy(struct wl_client *client,
 void
 send_initial_configure(vt_xdg_surface_t* surf)
 {
+  printf("SEND INTIIAL CONFIGURE\n");
   struct wl_array states;
   wl_array_init(&states);
 
@@ -525,6 +538,7 @@ void
 _xdg_surface_get_toplevel(struct wl_client *client,
                                   struct wl_resource *resource,
                                   uint32_t id) {
+  printf("GET TOPLEVEL\n");
 
   vt_xdg_surface_t* xdg_surf = wl_resource_get_user_data(resource);
   if(!xdg_surf) return;
@@ -538,6 +552,7 @@ _xdg_surface_get_toplevel(struct wl_client *client,
   }
 
   xdg_surf->toplevel = calloc(1, sizeof(*xdg_surf->toplevel));
+  xdg_surf->toplevel->xdg_surf = xdg_surf;
   xdg_surf->toplevel->xdg_toplevel_res = top;
 
   wl_resource_set_implementation(top, &xdg_toplevel_impl, xdg_surf->toplevel, _xdg_toplevel_handle_resource_destroy);
@@ -552,6 +567,7 @@ _xdg_surface_get_popup(struct wl_client *client,
                                uint32_t id,
                                struct wl_resource *parent_surface,
                                struct wl_resource *positioner) {
+  printf("GET POPUP\n");
   vt_xdg_surface_t* xdg_surf = wl_resource_get_user_data(resource);
   if(!xdg_surf) return;
 
@@ -568,8 +584,21 @@ _xdg_surface_get_popup(struct wl_client *client,
   xdg_surf->popup->parent_xdg_surface_res = parent_surface;
   xdg_surf->popup->positioner_res = positioner;
   xdg_surf->popup->parent_xdg_surf = xdg_surf;
-  
+
   wl_resource_set_implementation(popup, &xdg_popup_impl, xdg_surf->popup, _xdg_popup_handle_resource_destroy);
+
+  struct vt_xdg_positioner_t *pos = wl_resource_get_user_data(positioner);
+  if (pos) {
+    int32_t x = pos->anchor_rect_pos.x + pos->offset_x;
+    int32_t y = pos->anchor_rect_pos.y + pos->offset_y;
+    uint32_t w = pos->width;
+    uint32_t h = pos->height;
+
+    xdg_popup_send_configure(popup, x, y, w, h);
+  }
+
+  uint32_t serial = wl_display_next_serial(xdg_surf->surf->comp->wl.dsp);
+  xdg_surface_send_configure(xdg_surf->xdg_surf_res, serial);
 
 }
 
@@ -578,8 +607,10 @@ _xdg_surface_ack_configure(struct wl_client *client,
                                    struct wl_resource *resource,
                                    uint32_t serial)
 {
+  printf("ACK CONFIGURE\n");
   vt_xdg_surface_t* surf = wl_resource_get_user_data(resource);
   surf->last_configure_serial = serial;
+  
 }
 
 void 
@@ -602,12 +633,12 @@ _xdg_surface_set_window_geometry(struct wl_client *client,
 
   xdg_surf->pending_geom.x = x;
   xdg_surf->pending_geom.y = y;
-  xdg_surf->pending_geom.x = (uint32_t)width;
+  xdg_surf->pending_geom.w = (uint32_t)width;
   xdg_surf->pending_geom.h = (uint32_t)height;
 
   VT_TRACE(
     xdg_surf->surf->comp->log,
-    "VT_PROTO_XDG_SHELL: xdg_surface.set_window_geometry: Set window window geometry of surface %p to (%ix%, %ix%i).",
+    "VT_PROTO_XDG_SHELL: xdg_surface.set_window_geometry: Set window window geometry of surface %p to (%ix%i, %ix%i).",
     xdg_surf->surf,
     x, y, width, height);
 }
@@ -622,16 +653,20 @@ _xdg_toplevel_set_parent(struct wl_client *client,
                                  struct wl_resource *resource,
                                  struct wl_resource *parent_resource)
 {
+  printf("Setting parent1 .\n");
   struct vt_xdg_toplevel_t* xdg_toplevel = wl_resource_get_user_data(resource);
   if(!xdg_toplevel) return;
 
+  printf("Setting parent 2 .\n");
   xdg_toplevel->xdg_parent_toplevel_res = parent_resource;
+  printf("Setting parent 3.\n");
 
   VT_TRACE(
     xdg_toplevel->xdg_surf->surf->comp->log,
     "VT_PROTO_XDG_SHELL: xdg_toplevel.set_parent: Set parent of toplevel %p to resource %p.",
     xdg_toplevel,
     parent_resource);
+  printf("Setting parent 4.\n");
 }
 
 void

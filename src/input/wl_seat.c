@@ -294,6 +294,7 @@ vt_seat_set_keyboard_focus(
     return; 
   }
 
+  printf("Got here.\n");
   struct wl_client* client = wl_resource_get_client(surface->surf_res);
 
   if(seat->focused.surf && seat->focused.keyboard) {

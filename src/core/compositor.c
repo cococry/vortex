@@ -299,25 +299,26 @@ _vt_comp_handle_cmd_flags(struct vt_compositor_t* c, int argc, char** argv) {
         bool disabled = false;
         i++;
         for(uint32_t j = i; j < argc; j++) {
-          if(strcmp(argv[i], "linux-dmabuf") == 0) {
+          if(argv[j][0] == '-') break;
+          if(strcmp(argv[j], "linux-dmabuf") == 0) {
             c->have_proto_dmabuf = false;
             disabled = true;
-            VT_WARN(c->log, "Disabled protcol '%s'", argv[i]);
-          } else if(strcmp(argv[i], "linux-dmabuf-explicit-sync") == 0) {
+            VT_WARN(c->log, "Disabled protcol '%s'", argv[j]);
+          } else if(strcmp(argv[j], "linux-dmabuf-explicit-sync") == 0) {
             c->have_proto_dmabuf_explicit_sync = false;
             disabled = true;
-            VT_WARN(c->log, "Disabled protocol '%s'", argv[i]);
+            VT_WARN(c->log, "Disabled protocol '%s'", argv[j]);
           } else {
             VT_ERROR(
               c->log, 
               "Protocol %s is not valid, valid protocols are: "
-              "[ 'linux-dmabuf', 'linux-dmabuf-explicit-sync' ] ", argv[i]);
+              "[ 'linux-dmabuf', 'linux-dmabuf-explicit-sync' ] ", argv[j]);
             exit(1);
           }
         }
       }
       else {
-        VT_ERROR(c->log, "invalid option -- '%s'", flag);
+        VT_ERROR(c->log, "invalid option -- '%s'. Use --help to see valid options", flag);
         exit(1);
       }
     }
@@ -454,6 +455,7 @@ _vt_comp_wl_surface_create(
 void 
 _vt_comp_wl_region_handle_resource_destroy(struct wl_resource* resource) {
   struct vt_region_t* r = wl_resource_get_user_data(resource);
+  VT_TRACE(r->comp->log, "region.destroy_resoure: destroying region %p", r);
   pixman_region32_fini(&r->region);
   free(r);
 }
@@ -468,6 +470,8 @@ _vt_comp_wl_surface_create_region(struct wl_client *client,
                            "compositor resource missing compositor user data");
     return;
   }
+
+  VT_TRACE(comp->log, "compositor.create_region: creating region...");
 
   struct vt_region_t* region = calloc(1, sizeof(*region));
   if (!region) {
@@ -607,13 +611,13 @@ static struct vt_compositor_t* vt_global_compositor;
 static void vt_sig_handler(int sig) {
     void *trace[32];
     size_t n = backtrace(trace, 32);
-    fprintf(stderr, "\n[VT] Caught signal %d (%s)\n", sig, strsignal(sig));
+    fprintf(stderr, "\n[vortex] Caught signal %d (%s)\n", sig, strsignal(sig));
 
     // Also log to compositor log file if open
     FILE *f = vt_global_compositor && vt_global_compositor->log.stream 
               ? vt_global_compositor->log.stream 
               : stderr;
-    fprintf(f, "\n[VT] ===== Fatal signal %d (%s) =====\n", sig, strsignal(sig));
+    fprintf(f, "\n[vortex] ===== Fatal signal %d (%s) =====\n", sig, strsignal(sig));
     backtrace_symbols_fd(trace, n, fileno(f));
     fflush(f);
 
