@@ -40,7 +40,10 @@ enum vt_backend_platform_t {
   VT_BACKEND_SURFACELESS,
 };
 
-
+struct vt_region_t {
+  pixman_region32_t region;
+  struct vt_compositor_t* comp;
+};
 
 struct vt_backend_interface_t {
   bool (*init)(struct vt_backend_t* backend);

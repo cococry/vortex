@@ -296,41 +296,93 @@ _wl_surface_set_opaque_region(
   struct wl_client *client,
   struct wl_resource *resource,
   struct wl_resource *region) {
+  struct vt_surface_t* surf = wl_resource_get_user_data(resource);
+  if (!surf) return;
 
+  if (region) {
+    struct vt_region_t* r = wl_resource_get_user_data(region);
+    pixman_region32_copy(&surf->opaque_region, &r->region);
+  } else {
+    pixman_region32_clear(&surf->opaque_region);
+  }
+
+  VT_TRACE(surf->comp->log, "compositor.surface_set_opaque_region: updated opaque region for surface %p", surf);
 }
 
 void 
 _wl_surface_set_input_region(struct wl_client *client,
-                                  struct wl_resource *resource,
-                                  struct wl_resource *region) {
+                             struct wl_resource *resource,
+                             struct wl_resource *region) {
+  struct vt_surface_t* surf = wl_resource_get_user_data(resource);
+  if (!surf) return;
 
+  if (region) {
+    struct vt_region_t* r = wl_resource_get_user_data(region);
+    pixman_region32_copy(&surf->input_region, &r->region);
+  } else {
+    // NULL means entire surface is input region
+    pixman_region32_init_rect(&surf->input_region, 0, 0, surf->width, surf->height);
+  }
+
+  VT_TRACE(surf->comp->log, "compositor.surface_set_input_region: updated input region for surface %p", surf);
 }
 
 void
 _wl_surface_set_buffer_transform(struct wl_client *client,
-                                      struct wl_resource *resource,
-                                      int32_t transform) {
+                                 struct wl_resource *resource,
+                                 int32_t transform) {
+  struct vt_surface_t* surf = wl_resource_get_user_data(resource);
+  if (!surf) return;
 
+  if (transform < WL_OUTPUT_TRANSFORM_NORMAL ||
+    transform > WL_OUTPUT_TRANSFORM_FLIPPED_270) {
+    wl_resource_post_error(resource, WL_SURFACE_ERROR_INVALID_TRANSFORM,
+                           "invalid transform %d", transform);
+    return;
+  }
+
+  surf->buffer_transform = transform;
+
+  VT_TRACE(surf->comp->log, "surface_set_buffer_transform: transform=%d for surface %p", transform, surf);
 }
 
 void
 _wl_surface_set_buffer_scale(struct wl_client *client,
-                                  struct wl_resource *resource,
-                                  int32_t scale) {
+                             struct wl_resource *resource,
+                             int32_t scale) {
+  struct vt_surface_t* surf = wl_resource_get_user_data(resource);
+  if (!surf) return;
 
+  if (scale < 1) {
+    wl_resource_post_error(resource, WL_SURFACE_ERROR_INVALID_SCALE,
+                           "invalid buffer scale %d", scale);
+    return;
+  }
+
+  surf->buffer_scale = scale;
+
+  VT_TRACE(surf->comp->log, "surface_set_buffer_scale: scale=%d for surface %p", scale, surf);
 }
 
 void
 _wl_surface_offset(struct wl_client *client,
-                        struct wl_resource *resource,
-                        int32_t x,
-                        int32_t y) {
+                   struct wl_resource *resource,
+                   int32_t x,
+                   int32_t y) {
+  struct vt_surface_t* surf = wl_resource_get_user_data(resource);
+  if (!surf) return;
 
+  surf->x = x;
+  surf->y = y;
+
+  surf->_mask_outputs_visible_on = 0; // Force re-evaluation on next commit
+
+  VT_TRACE(surf->comp->log, "surface_offset: moved surface %p to %d,%d", surf, x, y);
 }
 
 void
 _wl_surface_destroy(struct wl_client *client,
-                         struct wl_resource *resource) {
+                    struct wl_resource *resource) {
   struct vt_surface_t* surf = ((struct vt_surface_t*)wl_resource_get_user_data(resource));
     
   VT_TRACE(surf->comp->log, 
@@ -359,6 +411,8 @@ _wl_surface_handle_resource_destroy(struct wl_resource* resource) {
 
   pixman_region32_fini(&surf->pending_damage);
   pixman_region32_fini(&surf->current_damage);
+  pixman_region32_fini(&surf->input_region);
+  pixman_region32_fini(&surf->opaque_region);
 
   // Schedule a repaint for all outputs that the surface intersects with
   struct vt_output_t* output;

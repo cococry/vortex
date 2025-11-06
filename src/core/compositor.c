@@ -38,12 +38,12 @@ static bool _vt_comp_wl_init(struct vt_compositor_t* c);
 static void  _vt_comp_wl_bind(struct wl_client *client, void *data,
                            uint32_t version, uint32_t id);
 
-
-void _vt_comp_wl_surface_create(
+static void _vt_comp_wl_surface_create(
   struct wl_client *client,
   struct wl_resource *resource,
   uint32_t id);
 
+static void _vt_comp_wl_region_handle_destroy(struct wl_resource* resource);
 void _vt_comp_wl_surface_create_region(
   struct wl_client *client,
   struct wl_resource *resource,
@@ -435,6 +435,8 @@ _vt_comp_wl_surface_create(
   // Init the damage regions
   pixman_region32_init(&surf->current_damage);
   pixman_region32_init(&surf->pending_damage);
+  pixman_region32_init(&surf->opaque_region);
+  pixman_region32_init(&surf->input_region);
 
   // Add the surface to list of surfaces in the compositor
   wl_list_insert(&c->surfaces, &surf->link);
@@ -450,21 +452,46 @@ _vt_comp_wl_surface_create(
 }
 
 void 
-_vt_comp_wl_surface_create_region(
-  struct wl_client *client,
-  struct wl_resource *resource,
-  uint32_t id) {
+_vt_comp_wl_region_handle_destroy(struct wl_resource* resource) {
+  struct vt_region_t* r = wl_resource_get_user_data(resource);
+  pixman_region32_fini(&r->region);
+  free(r);
+}
+
+void 
+_vt_comp_wl_surface_create_region(struct wl_client *client,
+                                  struct wl_resource *resource,
+                                  uint32_t id) {
+  struct vt_compositor_t* comp = wl_resource_get_user_data(resource);
+  if (!comp) {
+    wl_resource_post_error(resource, WL_DISPLAY_ERROR_INVALID_OBJECT,
+                           "compositor resource missing compositor user data");
+    return;
+  }
+
+  struct vt_region_t* region = calloc(1, sizeof(*region));
+  if (!region) {
+    wl_client_post_no_memory(client);
+    return;
+  }
+
+  pixman_region32_init(&region->region);
+  region->comp = comp;
+
   struct wl_resource* res = wl_resource_create(
-    client, &wl_region_interface, 
-    wl_resource_get_version(resource), id);
-  wl_resource_set_implementation(res, &region_impl, NULL, NULL);
+    client, &wl_region_interface, wl_resource_get_version(resource), id);
+
+  wl_resource_set_implementation(res, &region_impl, region,
+                                 _vt_comp_wl_region_handle_destroy);
+
+  VT_TRACE(comp->log, "compositor.create_region: created region %p", region);
 }
 
 void 
 _vt_comp_wl_region_destroy(
   struct wl_client *client,
   struct wl_resource *resource) {
-
+  wl_resource_destroy(resource);
 }
 
 void
@@ -475,7 +502,9 @@ _vt_comp_wl_region_add(
   int32_t y,
   int32_t width,
   int32_t height) {
-
+  struct vt_region_t* r = wl_resource_get_user_data(resource);
+  if(!r) return;
+  pixman_region32_union_rect(&r->region, &r->region, x, y, width, height);
 }
 
 void 
@@ -486,7 +515,35 @@ _vt_comp_wl_region_subtract(
   int32_t y,
   int32_t width,
   int32_t height) {
+  struct vt_region_t* r = wl_resource_get_user_data(resource);
+  if(!r) return;
+  pixman_region32_t rect;
+  pixman_region32_init_rect(&rect, x, y, width, height);
+  pixman_region32_subtract(&r->region, &r->region, &rect);
+  pixman_region32_fini(&rect);
+}
 
+static void _wl_region_add(struct wl_client *client,
+                           struct wl_resource *resource,
+                           int32_t x, int32_t y, int32_t width, int32_t height) {
+  struct vt_region_t* r = wl_resource_get_user_data(resource);
+  pixman_region32_union_rect(&r->region, &r->region, x, y, width, height);
+}
+
+static void _wl_region_subtract(struct wl_client *client,
+                                struct wl_resource *resource,
+                                int32_t x, int32_t y, int32_t width, int32_t height) {
+  struct vt_region_t* r = wl_resource_get_user_data(resource);
+  pixman_region32_t rect;
+  pixman_region32_init_rect(&rect, x, y, width, height);
+  pixman_region32_subtract(&r->region, &r->region, &rect);
+  pixman_region32_fini(&rect);
+}
+
+static void _wl_region_handle_destroy(struct wl_resource* resource) {
+  struct vt_region_t* r = wl_resource_get_user_data(resource);
+  pixman_region32_fini(&r->region);
+  free(r);
 }
 
 uint32_t vt_comp_merge_damaged_regions(pixman_box32_t *merged,

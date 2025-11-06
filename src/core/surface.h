@@ -46,7 +46,14 @@ struct vt_surface_t {
 
   void* user_data;
 
-  pixman_region32_t current_damage, pending_damage;
+  pixman_region32_t current_damage;
+  pixman_region32_t pending_damage;
+  pixman_region32_t opaque_region;
+  pixman_region32_t input_region;
+
+  int32_t buffer_transform;
+  int32_t buffer_scale;
+
   bool damaged;
 
   struct vt_frame_cb_pool cb_pool;
