@@ -17,6 +17,12 @@ enum vt_input_key_state_t {
 	VT_KEY_STATE_INVALID = 2
 };
 
+enum vt_input_pointer_state_t {
+	VT_POINTER_STATE_RELEASED = 0,
+	VT_POINTER_STATE_PRESSED = 1,
+	VT_POINTER_STATE_INVALID = 2
+};
+
 struct vt_kb_modifiers_t {
   uint32_t shift;
   uint32_t ctrl;

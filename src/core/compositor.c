@@ -428,10 +428,11 @@ _vt_comp_wl_surface_create(
 
   VT_TRACE(c->log, "Got compositor.surface_create: Started managing surface.")
   // Allocate the struct to store protocol information about the surface
-  struct vt_surface_t* surf = VT_ALLOC(c, sizeof(*surf));
+  struct vt_surface_t* surf = calloc(1, sizeof(*surf));
   surf->comp = c;
   surf->x = 20;
   surf->y = 20;
+  surf->type = VT_SURFACE_TYPE_NORMAL;
 
   // Init the damage regions
   pixman_region32_init(&surf->current_damage);
@@ -874,4 +875,30 @@ void vt_comp_invalidate_all_surfaces(struct vt_compositor_t *comp) {
         wl_callback_send_done(cb, t);
     }
   }
+}
+
+struct vt_surface_t* 
+vt_comp_pick_surface(struct vt_compositor_t *comp, double x, double y) {
+  struct vt_surface_t* surf;
+  wl_list_for_each_reverse(surf, &comp->surfaces, link) {
+      if(surf->type != VT_SURFACE_TYPE_NORMAL) continue;
+    if (x >= surf->x && y >= surf->y &&
+      x < surf->x + surf->width && y < surf->y + surf->height)
+      return surf;
+  }
+  return NULL;
+}
+
+void 
+vt_comp_damage_entire_surface(struct vt_compositor_t *comp, struct vt_surface_t* surf) {
+  if(!surf->mapped) return;
+  struct vt_output_t* output;
+  wl_list_for_each(output, &comp->outputs, link_global) {
+    if(!(surf->_mask_outputs_visible_on & (1u << output->id))) continue;
+    output->needs_damage_rebuild = true;
+  }
+  pixman_region32_union_rect(
+    &surf->pending_damage, &surf->pending_damage,
+    0, 0, surf->width, surf->height);
+
 }

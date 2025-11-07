@@ -19,6 +19,11 @@ struct vt_surface_sync_state_t {
   struct wl_resource* res;
 };
 
+enum vt_surface_type_t {
+  VT_SURFACE_TYPE_NORMAL = 0,
+  VT_SURFACE_TYPE_CURSOR = 1,
+};
+
 struct vt_linux_dmabuf_v1_surface_t;
 
 struct vt_surface_t {
@@ -61,6 +66,8 @@ struct vt_surface_t {
   struct vt_surface_sync_state_t sync;
 
   struct vt_linux_dmabuf_v1_surface_t* dmabuf_surf;
+
+  enum vt_surface_type_t type;
 
 };
 

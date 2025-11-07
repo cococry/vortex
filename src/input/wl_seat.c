@@ -1,4 +1,4 @@
-#define _GNU_SOURCE  
+#define _GNU_SOURCE
 #include <sys/mman.h>
 
 #include "wl_seat.h"
@@ -24,8 +24,19 @@ static void _wl_seat_get_pointer(struct wl_client* client, struct wl_resource* s
 static void _wl_seat_get_keyboard(struct wl_client* client, struct wl_resource* seat_res, uint32_t id);
 static void _wl_seat_get_touch(struct wl_client* client, struct wl_resource* seat_res, uint32_t id);
 
+static void _wl_seat_pointer_set_cursor(
+  struct wl_client *client,
+  struct wl_resource *resource,
+  uint32_t serial,
+  struct wl_resource *surface,
+  int32_t hotspot_x,
+  int32_t hotspot_y);
+
 static void _wl_seat_release_kb(struct wl_client *client, struct wl_resource *resource);
-static void _wl_keyboard_destroy(struct wl_resource *res);
+static void _wl_seat_release_pointer(struct wl_client *client, struct wl_resource *resource);
+
+static void _wl_keyboard_handle_resource_destroy(struct wl_resource *res);
+static void _wl_pointer_handle_resource_destroy(struct wl_resource *res);
 
 static struct vt_kb_modifier_states_t _wl_kb_get_mod_states(struct xkb_state* state);
 
@@ -39,6 +50,11 @@ static const struct wl_keyboard_interface keyboard_impl = {
   .release = _wl_seat_release_kb 
 };
 
+static const struct wl_pointer_interface pointer_impl = {
+  .release = _wl_seat_release_pointer,
+  .set_cursor = _wl_seat_pointer_set_cursor 
+};
+
 void 
 _wl_seat_bind(struct wl_client* client, void* data, uint32_t version, uint32_t id) {
   struct vt_seat_t *seat = data;
@@ -48,7 +64,7 @@ _wl_seat_bind(struct wl_client* client, void* data, uint32_t version, uint32_t i
 
   wl_resource_set_implementation(resource, &seat_impl, seat, NULL);
 
-  uint32_t caps = WL_SEAT_CAPABILITY_KEYBOARD;
+  uint32_t caps = WL_SEAT_CAPABILITY_KEYBOARD | WL_SEAT_CAPABILITY_POINTER;
   wl_seat_send_capabilities(resource, caps);
 
   if (version >= WL_SEAT_NAME_SINCE_VERSION)
@@ -119,41 +135,98 @@ _wl_handle_keybind_term(struct vt_compositor_t* comp, void* user_data) {
 
 void 
 _wl_seat_get_pointer(struct wl_client* client, struct wl_resource* seat_res, uint32_t id) {
-    struct wl_resource* res =
-        wl_resource_create(client, &wl_pointer_interface, wl_resource_get_version(seat_res), id);
-    wl_resource_set_implementation(res, NULL, NULL, NULL);
+  struct vt_seat_t* seat = wl_resource_get_user_data(seat_res);
+  if(!seat) return;
+
+  struct wl_resource* res =
+    wl_resource_create(client, &wl_pointer_interface, wl_resource_get_version(seat_res), id);
+  if(!res) {
+    wl_client_post_no_memory(client);
+    return;
+  }
+  wl_resource_set_implementation(res, NULL, NULL, NULL);
+
+  struct vt_pointer_t* pointer = calloc(1, sizeof(*pointer));
+  if(!pointer) {
+    wl_client_post_no_memory(client);
+    return;
+  }
+  pointer->seat = seat;
+  pointer->res = res;
+  pointer->cursor.hotspot_x = 0;
+  pointer->cursor.hotspot_y = 0;
+  pointer->cursor.surf = NULL;
+ 
+  wl_list_insert(&seat->pointers, &pointer->link);
+
+  wl_resource_set_implementation(res, &pointer_impl, pointer, _wl_pointer_handle_resource_destroy);
 }
 
 void 
 _wl_seat_get_touch(struct wl_client* client, struct wl_resource* seat_res, uint32_t id) {
-    struct wl_resource* res =
-        wl_resource_create(client, &wl_touch_interface, wl_resource_get_version(seat_res), id);
-    wl_resource_set_implementation(res, NULL, NULL, NULL);
+  struct vt_seat_t* seat = wl_resource_get_user_data(seat_res);
+  if(!seat) return;
+
+  struct wl_resource* res =
+    wl_resource_create(client, &wl_touch_interface, wl_resource_get_version(seat_res), id);
+  if(!res) {
+    wl_client_post_no_memory(client);
+    return;
+  }
+
+  wl_resource_set_implementation(res, NULL, NULL, NULL); 
+
+}
+
+void 
+_wl_seat_pointer_set_cursor(
+  struct wl_client *client,
+  struct wl_resource *resource,
+  uint32_t serial,
+  struct wl_resource *surface,
+  int32_t hotspot_x,
+  int32_t hotspot_y) {
+  struct vt_pointer_t* ptr = wl_resource_get_user_data(resource);
+  ptr->cursor.surf = surface ? wl_resource_get_user_data(surface) : NULL;
+  if(wl_resource_get_user_data(surface)) {
+    struct vt_surface_t* surf = wl_resource_get_user_data(surface);
+    surf->type = VT_SURFACE_TYPE_CURSOR;
+  }
+  ptr->cursor.hotspot_x = hotspot_x;
+  ptr->cursor.hotspot_y = hotspot_y;
+
+  printf("SEAT: set_cursor surface=%p hotspot=(%d,%d)",
+           ptr->cursor.surf, hotspot_x, hotspot_y);
 }
 
 void 
 _wl_seat_get_keyboard(struct wl_client* client, struct wl_resource* seat_res, uint32_t id) {
   struct vt_seat_t* seat = wl_resource_get_user_data(seat_res);
+  if(!seat) return;
 
-  struct wl_resource* kbd_res =
+  struct wl_resource* res =
     wl_resource_create(client, &wl_keyboard_interface, wl_resource_get_version(seat_res), id);
+  if(!res) {
+    wl_client_post_no_memory(client);
+    return;
+  }
 
   struct vt_keyboard_t* kbd = calloc(1, sizeof(*kbd));
   kbd->seat = seat;
-  kbd->res = kbd_res;
-  wl_resource_set_implementation(kbd_res, &keyboard_impl, kbd, _wl_keyboard_destroy);
+  kbd->res = res;
+  wl_resource_set_implementation(res, &keyboard_impl, kbd, _wl_keyboard_handle_resource_destroy);
 
   wl_list_insert(&seat->keyboards, &kbd->link);
 
   int fd = _wl_create_keymap_fd(kbd);
-  wl_keyboard_send_keymap(kbd_res,
+  wl_keyboard_send_keymap(res,
                           WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1,
                           fd,
                           kbd->_keymap_size);
   close(fd);
   _wl_keyboard_send_initial_state(kbd);
-  if (wl_resource_get_version(kbd_res) >= 4)
-    wl_keyboard_send_repeat_info(kbd_res, 25, 600);
+  if (wl_resource_get_version(res) >= WL_KEYBOARD_REPEAT_INFO_SINCE_VERSION)
+    wl_keyboard_send_repeat_info(res, 25, 600);
 }
 
 void 
@@ -162,13 +235,48 @@ _wl_seat_release_kb(struct wl_client* client, struct wl_resource* resource) {
 }
 
 void 
-_wl_keyboard_destroy(struct wl_resource *res) {
+_wl_seat_release_pointer(struct wl_client *client, struct wl_resource *resource) {
+  wl_resource_destroy(resource);
+}
+
+void 
+_wl_keyboard_handle_resource_destroy(struct wl_resource *res) {
   struct vt_keyboard_t *kbd = wl_resource_get_user_data(res);
     if (!kbd || !kbd->seat) return;
 
+  // If this keyboard had focus, clear it
+  if (kbd->seat->kb_focus.res == res) {
+    kbd->seat->kb_focus.res = NULL;
+    kbd->seat->kb_focus.surf = NULL;
+  }
+
   // when a client destroys it's keyboard, we need to update our list to 
-  // reflect that aswell as free resources associated with the keyboard.
+  // reflect that 
   wl_list_remove(&kbd->link);
+  free(kbd);
+  wl_resource_set_user_data(res, NULL);
+  kbd = NULL;
+
+  printf("Destryoed resource.\n");
+}
+
+void 
+_wl_pointer_handle_resource_destroy(struct wl_resource *res) {
+  struct vt_pointer_t* ptr = wl_resource_get_user_data(res);
+    if (!ptr || !ptr->seat) return;
+
+    // If this pointer had focus, clear it
+    if (ptr->seat->ptr_focus.res == res) {
+        ptr->seat->ptr_focus.res = NULL;
+        ptr->seat->ptr_focus.surf = NULL;
+    }
+
+  // when a client destroys it's pointer, we need to update our list to 
+  // reflect that 
+  wl_list_remove(&ptr->link);
+  free(ptr);
+  wl_resource_set_user_data(res, NULL);
+  ptr = NULL;
 }
 
 struct vt_kb_modifier_states_t 
@@ -195,6 +303,7 @@ vt_seat_init(struct vt_seat_t* seat) {
   wl_list_init(&seat->keybinds);
   seat->serial = 1;
 
+  seat->ptr_focus.surf = NULL;
 
   // advertise chair 
   seat->global = wl_global_create(
@@ -207,7 +316,6 @@ vt_seat_init(struct vt_seat_t* seat) {
 
   if(seat->comp->input_backend->platform == VT_INPUT_LIBINPUT) {
     vt_seat_bind_global_keybinds(seat);
-    printf("Doign th at.\n");
   }
   
   return true;
@@ -261,9 +369,69 @@ vt_seat_handle_key(struct vt_seat_t* seat, uint32_t keycode, uint32_t state, uin
       ? WL_KEYBOARD_KEY_STATE_PRESSED
       : WL_KEYBOARD_KEY_STATE_RELEASED);
   }
-  
+
   seat->_last_mods = mod_states;
 
+}
+
+void 
+vt_seat_handle_pointer_motion(struct vt_seat_t* seat, double x, double y, uint32_t time) {
+  if(!seat) return;
+
+  seat->pointer_x = x;
+  seat->pointer_y = y;
+  struct vt_surface_t* surf = vt_comp_pick_surface(seat->comp, x, y);
+
+  printf("%p\n", surf);
+  if (surf != seat->ptr_focus.surf) {
+    if (surf) {
+      vt_seat_set_pointer_focus(seat, surf, x - surf->x, y - surf->y);
+    } else {
+      vt_seat_set_pointer_focus(seat, NULL, 0, 0);
+      printf("LEAVE\n");
+    }
+  }
+
+  if (!surf || !seat->ptr_focus.res)
+    return;
+
+  struct vt_pointer_t *ptr;
+  wl_list_for_each(ptr, &seat->pointers, link) {
+    if (ptr->cursor.surf) {
+      ptr->cursor.surf->x = x - ptr->cursor.hotspot_x;
+      ptr->cursor.surf->y = y - ptr->cursor.hotspot_y;
+
+      // Schedule repaint so the cursor moves visually
+      vt_comp_damage_entire_surface(ptr->cursor.surf->comp, ptr->cursor.surf);
+      struct vt_output_t* output;
+      wl_list_for_each(output, &ptr->cursor.surf->comp->outputs, link_global) {
+        if(!(surf->_mask_outputs_visible_on & (1u << output->id))) continue;
+        vt_comp_schedule_repaint(ptr->cursor.surf->comp, output);
+      }
+    }
+  }
+
+  wl_pointer_send_motion(
+    seat->ptr_focus.res, time,
+    wl_fixed_from_double(x - surf->x),
+    wl_fixed_from_double(y - surf->y));
+}
+
+
+void vt_seat_handle_pointer_button(
+  struct vt_seat_t *seat,
+  uint32_t button, 
+  bool pressed, uint32_t time
+) {
+  if(!seat) return;
+  if(!seat->ptr_focus.res) return;
+
+  wl_pointer_send_button(
+    seat->ptr_focus.res,
+    wl_display_next_serial(seat->comp->wl.dsp),
+    time, button,
+    pressed ? WL_POINTER_BUTTON_STATE_PRESSED
+    : WL_POINTER_BUTTON_STATE_RELEASED);
 }
 
 struct vt_keybind_t*
@@ -285,53 +453,107 @@ vt_seat_add_global_keybind(
   return keybind;
 }
 
-void 
-vt_seat_set_keyboard_focus(
-    struct vt_seat_t* seat, 
-    struct vt_surface_t* surface
-    ) {
-  if(seat->focused.surf == surface)  {
-    return; 
+void vt_seat_send_keyboard_leave(struct vt_seat_t* seat) {
+  if (seat->kb_focus.surf && seat->kb_focus.res) {
+    if (wl_resource_get_client(seat->kb_focus.res) ==
+      wl_resource_get_client(seat->kb_focus.surf->surf_res)) {
+      wl_keyboard_send_leave(seat->kb_focus.res,
+                             seat->serial++,
+                             seat->kb_focus.surf->surf_res);
+    }
   }
+}
 
-  printf("Got here.\n");
-  struct wl_client* client = wl_resource_get_client(surface->surf_res);
+void vt_seat_send_pointer_leave(struct vt_seat_t* seat) {
+  if (seat->ptr_focus.surf && seat->ptr_focus.res) {
+    if (wl_resource_get_client(seat->ptr_focus.res) ==
+      wl_resource_get_client(seat->ptr_focus.surf->surf_res)) {
+      wl_pointer_send_leave(seat->ptr_focus.res,
+                            seat->serial++,
+                            seat->ptr_focus.surf->surf_res);
+    }
+  }
+}
+void
+vt_seat_set_keyboard_focus(struct vt_seat_t *seat,
+                           struct vt_surface_t *surf) {
+  if (seat->kb_focus.surf == surf)
+    return;
 
-  if(seat->focused.surf && seat->focused.keyboard) {
-    // send leave to previously focused client
-    if (wl_resource_get_client(seat->focused.keyboard) ==
-      wl_resource_get_client(seat->focused.surf->surf_res)) {
-      wl_keyboard_send_leave(seat->focused.keyboard, seat->serial++,
-                             seat->focused.surf->surf_res);
+
+  seat->kb_focus.surf = surf;
+  seat->kb_focus.res  = NULL;
+
+  if (!surf) return; // no new focus
+
+  struct wl_client *client = wl_resource_get_client(surf->surf_res);
+  struct vt_keyboard_t *kbd;
+  wl_list_for_each(kbd, &seat->keyboards, link) {
+    if (wl_resource_get_client(kbd->res) == client) {
+      seat->kb_focus.res = kbd->res;
+      break;
+    }
+  }
+  if (!seat->kb_focus.res)
+    return;
+
+  struct wl_array keys;
+  wl_array_init(&keys);
+  wl_keyboard_send_enter(seat->kb_focus.res, seat->serial++,
+                         surf->surf_res, &keys);
+  wl_array_release(&keys);
+
+  struct vt_kb_modifier_states_t mods =
+    _wl_kb_get_mod_states(seat->comp->input_backend->kb_state);
+
+  wl_keyboard_send_modifiers(seat->kb_focus.res, seat->serial++,
+                             mods.depressed, mods.latched,
+                             mods.locked, mods.group);
+}
+void
+vt_seat_set_pointer_focus(struct vt_seat_t *seat,
+                          struct vt_surface_t *surf,
+                          double sx, double sy) {
+  struct vt_surface_t *old_surf = seat->ptr_focus.surf;
+  struct wl_resource *old_res   = seat->ptr_focus.res;
+
+  if (old_surf == surf)
+    return;
+
+  vt_seat_send_pointer_leave(seat);
+
+  // Reset focus
+  seat->ptr_focus.surf = surf;
+  seat->ptr_focus.res  = NULL;
+
+  // If no new surface, done
+  if (!surf)
+    return;
+
+  // Find the pointer resource for this client
+  struct wl_client *client = wl_resource_get_client(surf->surf_res);
+  struct vt_pointer_t *ptr;
+  wl_list_for_each(ptr, &seat->pointers, link) {
+    if (wl_resource_get_client(ptr->res) == client) {
+      seat->ptr_focus.res = ptr->res;
+      break;
     }
   }
 
-  seat->focused.surf = surface;
-  seat->focused.keyboard = NULL;
+  if (!seat->ptr_focus.res)
+    return;
 
-  struct vt_keyboard_t* kbd, *tmp; 
-  wl_list_for_each_safe(kbd, tmp, &seat->keyboards, link) {
-    if(wl_resource_get_client(kbd->res) != client) continue;
-    seat->focused.keyboard = kbd->res;
-    break;
+  if(seat->ptr_focus.surf) {
+  // Send enter for new surface
+  wl_pointer_send_enter(
+    seat->ptr_focus.res,
+    wl_display_next_serial(seat->comp->wl.dsp),
+    surf->surf_res,
+    wl_fixed_from_double(sx),
+    wl_fixed_from_double(sy));
+
+  printf("ENTER!!!\n");
   }
-  if(!seat->focused.keyboard) return;
-
-  struct vt_input_backend_t* backend = seat->comp->input_backend;
-  struct vt_kb_modifier_states_t mod_states = _wl_kb_get_mod_states(backend->kb_state);
-
-  // send enter event to the new focused client 
-  struct wl_array keys;
-  wl_array_init(&keys);
-  wl_keyboard_send_enter(
-    seat->focused.keyboard, seat->serial++,
-    surface->surf_res, &keys);
-  wl_array_release(&keys);
-
-  wl_keyboard_send_modifiers(
-    seat->focused.keyboard, seat->serial++,
-    mod_states.depressed, mod_states.latched, 
-    mod_states.locked, mod_states.group);
 }
 
 void 

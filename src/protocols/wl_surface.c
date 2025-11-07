@@ -1,5 +1,6 @@
 #include "wl_surface.h"
 #include "src/core/compositor.h"
+#include "src/input/wl_seat.h"
 #include "src/render/renderer.h"
 #include <wayland-server-core.h>
 #include <wayland-server-protocol.h>
@@ -107,7 +108,6 @@ void
 _wl_surface_commit(
   struct wl_client *client,
   struct wl_resource *resource) {
-    printf("commit.\n");
   struct vt_surface_t* surf = wl_resource_get_user_data(resource);
   if(!surf) {
     VT_ERROR(surf->comp->log, "surface.commit: No internal surface data allocated.")
@@ -137,7 +137,7 @@ _wl_surface_commit(
   if (!surf->has_buffer) {
     return;
   }
-  if(pixman_region32_empty(&surf->pending_damage)) return;
+  if(pixman_region32_empty( &surf->pending_damage)) return;
 
 
   if (!surf->current_damage.data) {
@@ -253,9 +253,6 @@ _wl_surface_damage(
   pixman_region32_union_rect(&surf->pending_damage, &surf->pending_damage,
                              x, y, width, height);
 
-  pixman_box32_t extents = *pixman_region32_extents(&surf->pending_damage);
-
-
   struct vt_output_t* output;
   wl_list_for_each(output, &surf->comp->outputs, link_global) {
     if (!(surf->_mask_outputs_visible_on & (1u << output->id)))
@@ -281,9 +278,6 @@ _wl_surface_damage_buffer(struct wl_client *client,
 
   pixman_region32_union_rect(&surf->pending_damage, &surf->pending_damage,
                              x, y, width, height);
-
-  pixman_box32_t extents = *pixman_region32_extents(&surf->pending_damage);
-
 
   struct vt_output_t* output;
   wl_list_for_each(output, &surf->comp->outputs, link_global) {
@@ -442,6 +436,22 @@ _wl_surface_handle_resource_destroy(struct wl_resource* resource) {
 
     output->needs_damage_rebuild = true;
   }
+
+  struct vt_seat_t* seat = surf->comp->seat;
+  if (seat) {
+    if (seat->ptr_focus.surf == surf) {
+      seat->ptr_focus.surf = NULL;
+      seat->ptr_focus.res = NULL;
+    }
+    if (seat->kb_focus.surf == surf) {
+      seat->kb_focus.surf = NULL;
+      seat->kb_focus.res = NULL;
+    }
+  }
+
+  wl_resource_set_user_data(resource, NULL);
+  free(surf);
+  surf = NULL;
 }
 
 void 
