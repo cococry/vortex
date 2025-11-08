@@ -28,6 +28,7 @@ struct vt_seat_t {
   struct wl_global* global;
   struct wl_list keyboards; 
   struct wl_list pointers;
+  struct wl_list focus_stack;
 
   struct  vt_seat_focus_t kb_focus, ptr_focus;
 
@@ -38,6 +39,7 @@ struct vt_seat_t {
   struct vt_kb_modifier_states_t _last_mods;
 
   double pointer_x, pointer_y;
+  
 };
 
 struct vt_keyboard_t {

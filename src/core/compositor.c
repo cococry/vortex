@@ -433,6 +433,7 @@ _vt_comp_wl_surface_create(
   surf->x = 20;
   surf->y = 20;
   surf->type = VT_SURFACE_TYPE_NORMAL;
+  wl_list_init(&surf->link_focus);
 
   // Init the damage regions
   pixman_region32_init(&surf->current_damage);

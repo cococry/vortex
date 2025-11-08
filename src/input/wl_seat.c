@@ -307,6 +307,9 @@ vt_seat_init(struct vt_seat_t* seat) {
   wl_list_init(&seat->keyboards);
   wl_list_init(&seat->pointers);
   wl_list_init(&seat->keybinds);
+
+  wl_list_init(&seat->focus_stack);
+
   seat->serial = 1;
 
   seat->pointer_x = 0;

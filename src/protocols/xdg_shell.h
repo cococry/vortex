@@ -10,7 +10,6 @@ enum vt_xdg_surface_role_t {
   VT_XDG_SURFACE_POPUP,
 };
 
-typedef struct vt_xdg_surface_t vt_xdg_surface_t;
 
 struct vt_xdg_window_geom_t {
   int32_t x, y;
@@ -25,7 +24,7 @@ struct vt_xdg_toplevel_t {
   struct wl_list childs;
   struct wl_list link;
 
-  vt_xdg_surface_t* xdg_surf;
+  struct  vt_xdg_surface_t* xdg_surf;
 };
 
 struct vt_xdg_popup_t {

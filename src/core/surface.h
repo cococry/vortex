@@ -35,7 +35,7 @@ struct vt_surface_t {
   RnTexture tex; 
   void* render_tex_handle;
 
-  struct wl_list link;
+  struct wl_list link, link_focus;
   
   struct vt_compositor_t* comp;
 

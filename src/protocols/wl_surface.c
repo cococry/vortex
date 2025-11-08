@@ -398,6 +398,8 @@ _wl_surface_handle_resource_destroy(struct wl_resource* resource) {
             "Got surface.destroy handler: Unmanaging client.")
 
   wl_list_remove(&surf->link);
+  if(!wl_list_empty(&surf->link_focus))
+    wl_list_remove(&surf->link_focus);
 
   pixman_region32_fini(&surf->pending_damage);
   pixman_region32_fini(&surf->current_damage);
@@ -411,7 +413,6 @@ _wl_surface_handle_resource_destroy(struct wl_resource* resource) {
     r->impl.destroy_surface_texture(r, surf);
   }
 
-  printf("Destroyed surface.\n");
 
   // destroy dmabuf resources of the surface
   vt_proto_linux_dmabuf_v1_surface_destroy(surf);
