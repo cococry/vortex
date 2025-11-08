@@ -22,6 +22,8 @@ void _xdg_wm_base_create_positioner(
 
 static void _xdg_wm_base_positioner_handle_resource_destroy(struct wl_resource* resource);
 
+static void _xdg_surface_handle_resource_destroy(struct wl_resource* resource);
+
 static void _xdg_toplevel_handle_resource_destroy(struct wl_resource* resource);
 
 static void _xdg_popup_handle_resource_destroy(struct wl_resource* resource);
@@ -301,6 +303,7 @@ _xdg_wm_base_create_positioner(struct wl_client *client,
   }
 
   wl_resource_set_implementation(pos, &xdg_positioner_impl, pos_data, _xdg_wm_base_positioner_handle_resource_destroy);
+
 }
 
 void 
@@ -310,33 +313,80 @@ _xdg_wm_base_positioner_handle_resource_destroy(struct wl_resource* resource) {
   if(!pos) return;
   wl_resource_set_user_data(resource, NULL);
   pos->res = NULL;
+  free(pos);
 }
 
 void 
 _xdg_toplevel_handle_resource_destroy(struct wl_resource* resource) {
   struct vt_xdg_toplevel_t* top = wl_resource_get_user_data(resource);
-  VT_TRACE(top->xdg_surf->surf->comp->log, "VT_PROTO_XDG_SHELL: xdg_toplevel.resource_destroy with res %p.", resource);
   if(!top) return;
-  //vt_surface_unmapped(top->xdg_surf->surf);
-  top->xdg_toplevel_res = NULL;
+
+  struct vt_xdg_toplevel_t *child, *tmp;
+  wl_list_for_each_safe(child, tmp, &top->childs, link) {
+    child->parent = NULL;
+    if (child->xdg_surf && child->xdg_surf->surf)
+      vt_surface_unmapped(child->xdg_surf->surf);
+
+    if (!wl_list_empty(&child->link))
+      wl_list_remove(&child->link);
+
+    wl_list_init(&child->link);
+  }
+
+  if(top->xdg_surf && top->xdg_surf->surf) {
+    vt_surface_unmapped(top->xdg_surf->surf);
+  }
+
+  if(top->xdg_surf)
+    top->xdg_surf->toplevel = NULL;
+
+  if (top->parent) {
+    wl_list_remove(&top->link);
+    top->parent = NULL;
+  }
+
   wl_resource_set_user_data(resource, NULL);
-  printf("Destroyed toplevel.\n");
   free(top);
+
+  {
+
+    struct vt_xdg_surface_t* surf = wl_resource_get_user_data(resource);
+    if (!surf) return;
+
+    if (surf->surf)
+      surf->surf->xdg_surf = NULL;
+
+    if (surf->popup)
+      surf->popup->parent_xdg_surf = NULL;
+
+    wl_resource_set_user_data(resource, NULL);
+    free(surf);
+  }
+}
+
+void 
+_xdg_surface_handle_resource_destroy(struct wl_resource* resource) {
 }
 
 void 
 _xdg_popup_handle_resource_destroy(struct wl_resource* resource) {
   struct vt_xdg_popup_t* popup = wl_resource_get_user_data(resource);
-  if(!popup) return;
-  VT_TRACE(popup->parent_xdg_surf->surf->comp->log, "VT_PROTO_XDG_SHELL: xdg_popup.resource_destroy with res %p.", resource);
+  if (!popup) return;
+  
+  if(popup->xdg_surf && popup->xdg_surf->surf) {
+    vt_surface_unmapped(popup->xdg_surf->surf);
+    printf("Unmapped popup.\n");
+  }
+
   popup->xdg_popup_res = NULL;
-  if (popup->parent_xdg_surf)
+  if (popup->parent_xdg_surf && popup->parent_xdg_surf->surf)
     popup->parent_xdg_surf->popup = NULL;
-  if (popup->positioner_res)
-    free(wl_resource_get_user_data(popup->positioner_res));
+  popup->parent_xdg_surf = NULL;
+
+  popup->positioner_res = NULL;
+  printf("destroyed popup.\n");
 
   wl_resource_set_user_data(resource, NULL);
-  printf("Destroyed popup.\n");
   free(popup);
 }
 
@@ -357,12 +407,12 @@ _xdg_wm_base_get_xdg_surface(struct wl_client *client,
     return;
   }
 
-  vt_xdg_surface_t* xdg_surf = VT_ALLOC(surf->comp, sizeof(*xdg_surf));
+  vt_xdg_surface_t* xdg_surf = calloc(1, sizeof(*xdg_surf));
   xdg_surf->surf = surf;
   xdg_surf->xdg_surf_res = xdg_surf_res;
   surf->xdg_surf = xdg_surf;
 
-  wl_resource_set_implementation(xdg_surf_res, &xdg_surface_impl, xdg_surf, NULL);
+  wl_resource_set_implementation(xdg_surf_res, &xdg_surface_impl, xdg_surf, _xdg_surface_handle_resource_destroy);
 }
 
 void 
@@ -517,8 +567,7 @@ _xdg_positioner_set_offset(struct wl_client *client,
 
 void 
 _xdg_surface_destroy(struct wl_client *client,
-                             struct wl_resource *resource)
-{
+                             struct wl_resource *resource) {
   wl_resource_destroy(resource);
 }
 
@@ -561,9 +610,12 @@ _xdg_surface_get_toplevel(struct wl_client *client,
     return;
   }
 
+  
   xdg_surf->toplevel = calloc(1, sizeof(*xdg_surf->toplevel));
   xdg_surf->toplevel->xdg_surf = xdg_surf;
   xdg_surf->toplevel->xdg_toplevel_res = top;
+  xdg_surf->toplevel->parent = NULL; 
+  wl_list_init(&xdg_surf->toplevel->childs);
 
   wl_resource_set_implementation(top, &xdg_toplevel_impl, xdg_surf->toplevel, _xdg_toplevel_handle_resource_destroy);
 
@@ -595,6 +647,7 @@ _xdg_surface_get_popup(struct wl_client *client,
   }
 
   popup_xdg_surf->popup = calloc(1, sizeof(*popup_xdg_surf->popup));
+  printf("Created popup %p\n", popup_xdg_surf->popup);
   popup_xdg_surf->popup->xdg_popup_res = popup;
   popup_xdg_surf->popup->parent_xdg_surf = parent_xdg_surf;
   popup_xdg_surf->popup->xdg_surf = popup_xdg_surf;
@@ -603,8 +656,7 @@ _xdg_surface_get_popup(struct wl_client *client,
 
   wl_resource_set_implementation(popup, &xdg_popup_impl, popup_xdg_surf->popup, _xdg_popup_handle_resource_destroy);
 
-
-  struct vt_xdg_positioner_t *pos = wl_resource_get_user_data(positioner);
+  struct vt_xdg_positioner_t* pos = wl_resource_get_user_data(positioner);
   if (pos) {
     int32_t x = pos->anchor_rect_pos.x + pos->offset_x;
     int32_t y = pos->anchor_rect_pos.y + pos->offset_y;
@@ -617,6 +669,7 @@ _xdg_surface_get_popup(struct wl_client *client,
   uint32_t serial = wl_display_next_serial(popup_xdg_surf->surf->comp->wl.dsp);
   xdg_surface_send_configure(popup_xdg_surf->xdg_surf_res, serial);
 
+
 }
 
 void 
@@ -626,7 +679,6 @@ _xdg_surface_ack_configure(struct wl_client *client,
 {
   vt_xdg_surface_t* surf = wl_resource_get_user_data(resource);
   surf->last_configure_serial = serial;
-  
 }
 
 void 
@@ -663,22 +715,29 @@ void
 _xdg_toplevel_destroy(struct wl_client *client, struct wl_resource *resource) {
   wl_resource_destroy(resource);
 }
-
 void
 _xdg_toplevel_set_parent(struct wl_client *client,
-                                 struct wl_resource *resource,
-                                 struct wl_resource *parent_resource)
-{
-  struct vt_xdg_toplevel_t* xdg_toplevel = wl_resource_get_user_data(resource);
-  if(!xdg_toplevel) return;
+                         struct wl_resource *resource,
+                         struct wl_resource *parent_resource) {
+  struct vt_xdg_toplevel_t *xdg_toplevel = wl_resource_get_user_data(resource);
+  if (!xdg_toplevel)
+    return;
 
-  xdg_toplevel->xdg_parent_toplevel_res = parent_resource;
+  struct vt_xdg_toplevel_t *parent = NULL;
+  if (parent_resource)
+    parent = wl_resource_get_user_data(parent_resource);
+
+  wl_list_insert(&parent->childs, &xdg_toplevel->link);
+  xdg_toplevel->parent = parent;
 
   VT_TRACE(
     xdg_toplevel->xdg_surf->surf->comp->log,
-    "VT_PROTO_XDG_SHELL: xdg_toplevel.set_parent: Set parent of toplevel %p to resource %p.",
+    "VT_PROTO_XDG_SHELL: xdg_toplevel.set_parent: Set parent of toplevel %p to %p.",
     xdg_toplevel,
-    parent_resource);
+    parent);
+
+  printf("Setting parent: child=%p parent=%p\n", xdg_toplevel, parent);
+
 }
 
 void
@@ -827,8 +886,17 @@ _xdg_popup_reposition(
   VT_TRACE(popup->parent_xdg_surf->surf->comp->log, "VT_PROTO_XDG_SHELL: xdg_popup_reposition: token=%i.", token);
 
   // TOD: replace with real geom 
-  xdg_popup_send_configure(resource, 100, 100, 200, 150);
-  xdg_popup_send_repositioned(resource, token);
+  struct vt_xdg_positioner_t* pos = wl_resource_get_user_data(positioner);
+  if (pos) {
+    int32_t x = pos->anchor_rect_pos.x + pos->offset_x;
+    int32_t y = pos->anchor_rect_pos.y + pos->offset_y;
+    uint32_t w = pos->width;
+    uint32_t h = pos->height;
+
+    xdg_popup_send_configure(resource, x, y, w, h);
+    xdg_popup_send_repositioned(resource, token);
+    exit(0);
+  }
 }
 
 
@@ -844,3 +912,81 @@ vt_proto_xdg_shell_init(struct vt_compositor_t* c, uint32_t version) {
   VT_TRACE(c->log, "VT_PROTO_XDG_SHELL: Initialized XDG shell protocol.");
   return true;
 }
+
+
+static bool 
+_proto_xdg_toplevel_send_state(struct vt_xdg_toplevel_t* top, uint32_t state, bool activated) {
+  /* [0]: The function returns whether or not the state has been sent successfully */
+  /* The 'state' parameter is a XDG_TOPLEVEL_STATE_* value. */
+  if(!top || !top->xdg_surf || !top->xdg_surf->surf || !top->xdg_toplevel_res) {
+    VT_ERROR_HEADLESS("VT_PROTO_XDG_SHELL _proto_xdg_toplevel_send_state: Did not pass paramater check.");
+    return false;
+  }
+
+  struct wl_client* client = wl_resource_get_client(top->xdg_toplevel_res);
+  if(!client) return false;
+  struct wl_display* dsp = wl_client_get_display(client);
+
+  uint32_t serial = wl_display_next_serial(dsp);
+
+  /* 1. Populate the states array with the single given state */
+  struct wl_array states;
+  wl_array_init(&states);
+
+  /* 2. If the requested state should be activated, add it 
+   * to the array of states. In the case of deactivation, 
+   * the array stays empty which results in the requested 
+   * state being cleared (removed).
+   * */
+  if(activated) {
+    uint32_t* state_elem = wl_array_add(&states, sizeof(*state_elem));
+    if(!state_elem) {
+      wl_array_release(&states);
+      wl_client_post_no_memory(wl_resource_get_client(top->xdg_toplevel_res));
+      VT_ERROR(top->xdg_surf->surf->comp->log, "VT_PROTO_XDG_SHELL: _proto_xdg_toplevel_send_state: Out of memory.",
+               top);
+      return false;
+    }
+    *state_elem =  state;
+  }
+ 
+  /* 3. Issue the configure request with the changed state
+   * (width, height: 0, 0 -> unchanged)*/
+  xdg_toplevel_send_configure(top->xdg_toplevel_res, 0, 0, &states);
+
+  /* Deallocate the states array */
+  wl_array_release(&states);
+
+  if(!top->xdg_surf->xdg_surf_res) {
+    VT_ERROR(top->xdg_surf->surf->comp->log, "VT_PROTO_XDG_SHELL: _proto_xdg_toplevel_send_state: Toplevel %p has no associated XDG surface resource.",
+             top);
+    return false;
+  }
+  
+  /* 4. Send the corresponding xdg_surface.configure with a fresh serial
+   * to the xdg surface associated with the toplevel */
+  xdg_surface_send_configure(top->xdg_surf->xdg_surf_res, serial); 
+
+  return true;
+}
+
+bool 
+vt_proto_xdg_toplevel_set_state_maximized(struct vt_xdg_toplevel_t* top, bool activated) {
+  return _proto_xdg_toplevel_send_state(top, XDG_TOPLEVEL_STATE_MAXIMIZED, activated);
+}
+
+bool
+vt_proto_xdg_toplevel_set_state_fullscreen(struct vt_xdg_toplevel_t* top, bool activated) {
+  return _proto_xdg_toplevel_send_state(top, XDG_TOPLEVEL_STATE_FULLSCREEN, activated);
+}
+
+bool
+vt_proto_xdg_toplevel_set_state_resizing(struct vt_xdg_toplevel_t* top, bool activated) {
+  return _proto_xdg_toplevel_send_state(top, XDG_TOPLEVEL_STATE_RESIZING, activated);
+}
+
+bool
+vt_proto_xdg_toplevel_set_state_activated(struct vt_xdg_toplevel_t* top, bool activated) {
+  return _proto_xdg_toplevel_send_state(top, XDG_TOPLEVEL_STATE_ACTIVATED, activated);
+}
+

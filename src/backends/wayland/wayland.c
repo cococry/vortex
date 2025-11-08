@@ -348,7 +348,6 @@ _wl_init_fake_dmabuf_feedback(
 
   fb->comp = comp;
   fb->dev_main = calloc(1, sizeof(*fb->dev_main)); 
-
   dev_t main_dev;
   struct stat st;
   if (stat("/dev/dri/renderD128", &st) == 0)

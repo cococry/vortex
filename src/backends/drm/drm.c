@@ -1109,7 +1109,7 @@ backend_init_drm(struct vt_backend_t* backend) {
       if(!vt_proto_linux_dmabuf_v1_init(backend->comp, default_feedback, dmabuf_ver)) {
         VT_ERROR(backend->comp->log, "DRM: Failed to initialize DMABUF protocol version %i.", dmabuf_ver);
       } else {
-        VT_TRACE(backend->comp->log, "WL: Successfully initialized DMABUF protocol version %i.", dmabuf_ver);
+        VT_TRACE(backend->comp->log, "DRM: Successfully initialized DMABUF protocol version %i.", dmabuf_ver);
       }
     }
 

@@ -2,6 +2,7 @@
 #include "src/input/input.h"
 #include <wayland-client-protocol.h>
 #include <wayland-client.h>
+#include <wayland-server-core.h>
 #include <xkbcommon/xkbcommon.h>
 #include <unistd.h>
 #include <sys/mman.h>
@@ -213,6 +214,8 @@ _wl_pointer_motion(
     wl_fixed_to_double(surface_x),   
     wl_fixed_to_double(surface_y),
     time);
+  // Hide parent cursor when entering the compositor’s surface
+  wl_pointer_set_cursor(wl_pointer, wl_display_next_serial(wl->comp->wl.dsp), NULL, 0, 0);
 }
 
 void _wl_pointer_button(
@@ -229,6 +232,8 @@ void _wl_pointer_button(
     button,
     (state == WL_POINTER_BUTTON_STATE_PRESSED), 
     time);
+  // Hide parent cursor when entering the compositor’s surface
+  wl_pointer_set_cursor(wl_pointer, serial, NULL, 0, 0);
 }
 
 void
@@ -245,7 +250,8 @@ _wl_pointer_enter(
   (void)surface;
   (void)surface_x;
   (void)surface_y;
-  // unimplemented
+  // Hide parent cursor when entering the compositor’s surface
+  wl_pointer_set_cursor(wl_pointer, serial, NULL, 0, 0);
 }
 
 void

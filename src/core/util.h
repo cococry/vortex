@@ -64,6 +64,33 @@
     exit(1);                                                                        \
   } while(0); }                                                                     \
 
+
+#define VT_TRACE_HEADLESS(...) do {                                                 \
+  vt_util_log_header(stdout, VT_LL_TRACE);                                          \
+  fprintf(stdout, __VA_ARGS__);                                                     \
+  fprintf(stdout, "\n");                                                            \
+} while(0)
+
+#define VT_WARN_HEADLESS(...) do {                                                  \
+  vt_util_log_header(stdout, VT_LL_WARN);                                           \
+  fprintf(stdout, __VA_ARGS__);                                                     \
+  fprintf(stdout, "\n");                                                            \
+} while(0)
+
+#define VT_ERROR_HEADLESS(...) do {                                                 \
+  vt_util_log_header(stderr, VT_LL_ERR);                                            \
+  fprintf(stderr, __VA_ARGS__);                                                     \
+  fprintf(stderr, "\n");                                                            \
+} while(0)
+
+#define VT_FATAL_HEADLESS(...) do {                                                 \
+  vt_util_log_header(stderr, VT_LL_FATAL);                                          \
+  fprintf(stderr, __VA_ARGS__);                                                     \
+  fprintf(stderr, "\n");                                                            \
+  exit(1);                                                                          \
+} while(0)
+
+
 typedef enum {
   VT_LL_TRACE = 0,
   VT_LL_WARN,

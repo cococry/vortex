@@ -11,6 +11,8 @@
 #include <string.h>
 
 #include "src/core/compositor.h"
+#include "src/core/util.h"
+#include "src/protocols/xdg_shell.h"
 
 static void _wl_seat_bind(struct wl_client* client, void* data, uint32_t version, uint32_t id);
 static int  _wl_create_keymap_fd(struct vt_keyboard_t* kbd);
@@ -186,17 +188,22 @@ _wl_seat_pointer_set_cursor(
   struct wl_resource *surface,
   int32_t hotspot_x,
   int32_t hotspot_y) {
-  struct vt_pointer_t* ptr = wl_resource_get_user_data(resource);
-  ptr->cursor.surf = surface ? wl_resource_get_user_data(surface) : NULL;
-  if(wl_resource_get_user_data(surface)) {
-    struct vt_surface_t* surf = wl_resource_get_user_data(surface);
+  if(!resource) return;
+  struct vt_surface_t* surf = NULL; 
+  if(surface) {
+    surf = wl_resource_get_user_data(surface);
+    surf->mapped = true;
     surf->type = VT_SURFACE_TYPE_CURSOR;
+    surf->x = surf->comp->seat->pointer_x - hotspot_x;
+    surf->y = surf->comp->seat->pointer_y - hotspot_y;
   }
+
+  struct vt_pointer_t* ptr = wl_resource_get_user_data(resource);
+  if(!ptr) return;
+
+  ptr->cursor.surf = surf; 
   ptr->cursor.hotspot_x = hotspot_x;
   ptr->cursor.hotspot_y = hotspot_y;
-
-  printf("SEAT: set_cursor surface=%p hotspot=(%d,%d)",
-           ptr->cursor.surf, hotspot_x, hotspot_y);
 }
 
 void 
@@ -257,7 +264,6 @@ _wl_keyboard_handle_resource_destroy(struct wl_resource *res) {
   wl_resource_set_user_data(res, NULL);
   kbd = NULL;
 
-  printf("Destryoed resource.\n");
 }
 
 void 
@@ -302,6 +308,9 @@ vt_seat_init(struct vt_seat_t* seat) {
   wl_list_init(&seat->pointers);
   wl_list_init(&seat->keybinds);
   seat->serial = 1;
+
+  seat->pointer_x = 0;
+  seat->pointer_y = 0;
 
   seat->ptr_focus.surf = NULL;
 
@@ -382,13 +391,23 @@ vt_seat_handle_pointer_motion(struct vt_seat_t* seat, double x, double y, uint32
   seat->pointer_y = y;
   struct vt_surface_t* surf = vt_comp_pick_surface(seat->comp, x, y);
 
-  printf("%p\n", surf);
-  if (surf != seat->ptr_focus.surf) {
+
+  if (surf != seat->ptr_focus.surf || surf != seat->kb_focus.surf) {
     if (surf) {
+      if(surf != seat->ptr_focus.surf)
+        vt_seat_send_pointer_leave(seat);
+      if(surf != seat->kb_focus.surf)
+        vt_seat_send_keyboard_leave(seat);
+
       vt_seat_set_pointer_focus(seat, surf, x - surf->x, y - surf->y);
+      vt_seat_set_keyboard_focus(seat, surf); 
     } else {
+      if(surf != seat->ptr_focus.surf)
+        vt_seat_send_keyboard_leave(seat);
+      if(surf != seat->kb_focus.surf)
+        vt_seat_send_pointer_leave(seat);
       vt_seat_set_pointer_focus(seat, NULL, 0, 0);
-      printf("LEAVE\n");
+      vt_seat_set_keyboard_focus(seat, NULL); 
     }
   }
 
@@ -403,11 +422,6 @@ vt_seat_handle_pointer_motion(struct vt_seat_t* seat, double x, double y, uint32
 
       // Schedule repaint so the cursor moves visually
       vt_comp_damage_entire_surface(ptr->cursor.surf->comp, ptr->cursor.surf);
-      struct vt_output_t* output;
-      wl_list_for_each(output, &ptr->cursor.surf->comp->outputs, link_global) {
-        if(!(surf->_mask_outputs_visible_on & (1u << output->id))) continue;
-        vt_comp_schedule_repaint(ptr->cursor.surf->comp, output);
-      }
     }
   }
 
@@ -471,6 +485,16 @@ void vt_seat_send_pointer_leave(struct vt_seat_t* seat) {
       wl_pointer_send_leave(seat->ptr_focus.res,
                             seat->serial++,
                             seat->ptr_focus.surf->surf_res);
+
+      struct wl_client* client = wl_resource_get_client(seat->ptr_focus.surf->surf_res);
+      struct vt_pointer_t* ptr;
+      wl_list_for_each(ptr, &seat->pointers, link) {
+        if(!ptr->res || !ptr->cursor.surf) continue;
+        if (wl_resource_get_client(ptr->res) == client) {
+          ptr->cursor.surf->mapped = false;
+          vt_comp_damage_entire_surface(ptr->cursor.surf->comp, ptr->cursor.surf);  
+        }
+      }
     }
   }
 }
@@ -480,11 +504,31 @@ vt_seat_set_keyboard_focus(struct vt_seat_t *seat,
   if (seat->kb_focus.surf == surf)
     return;
 
+  if(surf) {
+    struct vt_xdg_surface_t* new_focus_xdg_surf = surf->xdg_surf; 
+
+    if(new_focus_xdg_surf && new_focus_xdg_surf->toplevel) {
+      if(!vt_proto_xdg_toplevel_set_state_activated(new_focus_xdg_surf->toplevel, true)) {
+        VT_ERROR(seat->comp->log, "SEAT: vt_seat_set_pointer_focus: Cannot send XDG_TOPLEVEL_STATE_ACTIVATED to focused toplevel: %p.",
+                 new_focus_xdg_surf->toplevel);
+      }
+    }
+    
+    struct vt_surface_t* old_focus_xdg_surf = seat->kb_focus.surf; 
+    if(old_focus_xdg_surf && old_focus_xdg_surf->xdg_surf && old_focus_xdg_surf->xdg_surf->toplevel) {
+      if(!vt_proto_xdg_toplevel_set_state_activated(old_focus_xdg_surf->xdg_surf->toplevel, false)) {
+        VT_ERROR(seat->comp->log, "SEAT: vt_seat_set_pointer_focus: Cannot send XDG_TOPLEVEL_STATE_ACTIVATED to focused toplevel: %p.",
+                 old_focus_xdg_surf->xdg_surf->toplevel);
+      }
+    }
+
+  }
 
   seat->kb_focus.surf = surf;
   seat->kb_focus.res  = NULL;
 
   if (!surf) return; // no new focus
+
 
   struct wl_client *client = wl_resource_get_client(surf->surf_res);
   struct vt_keyboard_t *kbd;
@@ -520,7 +564,25 @@ vt_seat_set_pointer_focus(struct vt_seat_t *seat,
   if (old_surf == surf)
     return;
 
-  vt_seat_send_pointer_leave(seat);
+  if(surf) {
+    struct vt_xdg_surface_t* new_focus_xdg_surf = surf->xdg_surf; 
+
+    if(new_focus_xdg_surf && new_focus_xdg_surf->toplevel) {
+      if(!vt_proto_xdg_toplevel_set_state_activated(new_focus_xdg_surf->toplevel, true)) {
+        VT_ERROR(seat->comp->log, "SEAT: vt_seat_set_pointer_focus: Cannot send XDG_TOPLEVEL_STATE_ACTIVATED to focused toplevel: %p.",
+                 new_focus_xdg_surf->toplevel);
+      }
+    }
+    
+    struct vt_surface_t* old_focus_xdg_surf = seat->ptr_focus.surf; 
+    if(old_focus_xdg_surf && old_focus_xdg_surf->xdg_surf && old_focus_xdg_surf->xdg_surf->toplevel) {
+      if(!vt_proto_xdg_toplevel_set_state_activated(old_focus_xdg_surf->xdg_surf->toplevel, false)) {
+        VT_ERROR(seat->comp->log, "SEAT: vt_seat_set_pointer_focus: Cannot send XDG_TOPLEVEL_STATE_ACTIVATED to focused toplevel: %p.",
+                 old_focus_xdg_surf->xdg_surf->toplevel);
+      }
+    }
+
+  }
 
   // Reset focus
   seat->ptr_focus.surf = surf;
@@ -531,12 +593,18 @@ vt_seat_set_pointer_focus(struct vt_seat_t *seat,
     return;
 
   // Find the pointer resource for this client
-  struct wl_client *client = wl_resource_get_client(surf->surf_res);
-  struct vt_pointer_t *ptr;
-  wl_list_for_each(ptr, &seat->pointers, link) {
-    if (wl_resource_get_client(ptr->res) == client) {
-      seat->ptr_focus.res = ptr->res;
-      break;
+  struct wl_client* client = wl_resource_get_client(surf->surf_res);
+  {
+    struct vt_pointer_t* ptr;
+    wl_list_for_each(ptr, &seat->pointers, link) {
+      if (wl_resource_get_client(ptr->res) == client) {
+        seat->ptr_focus.res = ptr->res;
+        if(ptr->cursor.surf) {
+          ptr->cursor.surf->x = sx - ptr->cursor.hotspot_x;
+          ptr->cursor.surf->y = sy - ptr->cursor.hotspot_y;
+        }
+        break;
+      }
     }
   }
 
@@ -544,16 +612,16 @@ vt_seat_set_pointer_focus(struct vt_seat_t *seat,
     return;
 
   if(seat->ptr_focus.surf) {
-  // Send enter for new surface
-  wl_pointer_send_enter(
-    seat->ptr_focus.res,
-    wl_display_next_serial(seat->comp->wl.dsp),
-    surf->surf_res,
-    wl_fixed_from_double(sx),
-    wl_fixed_from_double(sy));
+    // Send enter for new surface
+    wl_pointer_send_enter(
+      seat->ptr_focus.res,
+      wl_display_next_serial(seat->comp->wl.dsp),
+      surf->surf_res,
+      wl_fixed_from_double(sx),
+      wl_fixed_from_double(sy));
 
-  printf("ENTER!!!\n");
   }
+
 }
 
 void 

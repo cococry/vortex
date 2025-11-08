@@ -119,19 +119,6 @@ _wl_surface_commit(
   if (!surf) { VT_ERROR(surf->comp->log, "surface_commit: NULL user_data"); return; }
 
   surf->has_buffer = (surf->buf_res != NULL);
-  if (!surf->mapped && surf->has_buffer && surf->xdg_surf &&
-    ((surf->xdg_surf->toplevel && surf->xdg_surf->toplevel->xdg_toplevel_res) ||
-    (surf->xdg_surf->popup && surf->xdg_surf->popup->xdg_popup_res))) {
-    printf("Mapped.\n");
-    surf->mapped = true;
-    vt_surface_mapped(surf);
-  }
-  else if (surf->mapped && !surf->has_buffer) {
-    printf("Unmapped.\n");
-    // surface lost its buffer (unmapped)
-    surf->mapped = false;
-    vt_surface_unmapped(surf);
-  }
 
   // no buffer attached, this commit has no contents 
   if (!surf->has_buffer) {
@@ -155,8 +142,7 @@ _wl_surface_commit(
   if(surf->width != surf->tex.width || surf->height != surf->tex.height) {
     surf->_mask_outputs_visible_on = 0;
   }
-  surf->width = surf->tex.width;
-  surf->height = surf->tex.height;
+
 
   if(!surf->_mask_outputs_visible_on) {
     struct vt_output_t* output;
@@ -186,6 +172,16 @@ _wl_surface_commit(
     // Tell the client we're finsied uploading its buffer
     VT_TRACE(surf->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Sending release."); 
     wl_buffer_send_release(surf->buf_res);
+  }
+  
+  surf->width = surf->tex.width;
+  surf->height = surf->tex.height;
+
+  if (!surf->mapped && surf->has_buffer && surf->xdg_surf &&
+    ((surf->xdg_surf->toplevel && surf->xdg_surf->toplevel->xdg_toplevel_res) ||
+    (surf->xdg_surf->popup && surf->xdg_surf->popup->xdg_popup_res))) {
+    surf->mapped = true;
+    vt_surface_mapped(surf);
   }
 
     VT_TRACE(surf->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Sending release."); 
@@ -393,11 +389,6 @@ _wl_surface_destroy(struct wl_client *client,
 void 
 _wl_surface_handle_resource_destroy(struct wl_resource* resource) {
   struct vt_surface_t* surf = wl_resource_get_user_data(resource);
- 
-  if (surf->mapped) {
-    vt_surface_unmapped(surf);
-    surf->mapped = false;
-  }
 
   int32_t x = surf->x;
   int32_t y = surf->y;
@@ -419,6 +410,8 @@ _wl_surface_handle_resource_destroy(struct wl_resource* resource) {
   if(r && r->impl.destroy_surface_texture) {
     r->impl.destroy_surface_texture(r, surf);
   }
+
+  printf("Destroyed surface.\n");
 
   // destroy dmabuf resources of the surface
   vt_proto_linux_dmabuf_v1_surface_destroy(surf);

@@ -824,7 +824,7 @@ void vt_comp_repaint_scene(struct vt_compositor_t *c, struct vt_output_t *output
 
   struct vt_surface_t* surf;
   wl_list_for_each_reverse(surf, &c->surfaces, link) {
-    if(!surf->damaged) continue;
+    if(!surf->damaged || !surf->mapped) continue;
     if(!(surf->_mask_outputs_visible_on & (1u << output->id))) continue;
 
     if(!pixman_region32_intersect_rect(&output->damage, &output->damage, surf->x, surf->y, surf->width, surf->height)) continue;
@@ -880,8 +880,9 @@ void vt_comp_invalidate_all_surfaces(struct vt_compositor_t *comp) {
 struct vt_surface_t* 
 vt_comp_pick_surface(struct vt_compositor_t *comp, double x, double y) {
   struct vt_surface_t* surf;
-  wl_list_for_each_reverse(surf, &comp->surfaces, link) {
-      if(surf->type != VT_SURFACE_TYPE_NORMAL) continue;
+  wl_list_for_each(surf, &comp->surfaces, link) {
+    if(!surf->mapped) continue;
+    if(surf->type != VT_SURFACE_TYPE_NORMAL) continue;
     if (x >= surf->x && y >= surf->y &&
       x < surf->x + surf->width && y < surf->y + surf->height)
       return surf;
@@ -891,14 +892,15 @@ vt_comp_pick_surface(struct vt_compositor_t *comp, double x, double y) {
 
 void 
 vt_comp_damage_entire_surface(struct vt_compositor_t *comp, struct vt_surface_t* surf) {
-  if(!surf->mapped) return;
-  struct vt_output_t* output;
-  wl_list_for_each(output, &comp->outputs, link_global) {
-    if(!(surf->_mask_outputs_visible_on & (1u << output->id))) continue;
-    output->needs_damage_rebuild = true;
-  }
   pixman_region32_union_rect(
     &surf->pending_damage, &surf->pending_damage,
     0, 0, surf->width, surf->height);
+
+  struct vt_output_t* output;
+  wl_list_for_each(output, &comp->outputs, link_global) {
+    if(!(surf->_mask_outputs_visible_on & (1u << output->id))) continue;
+    vt_comp_schedule_repaint(comp, output);
+    output->needs_damage_rebuild = true;
+  }
 
 }
