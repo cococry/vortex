@@ -14,6 +14,8 @@
 #include <dirent.h>
 #include <sys/mman.h>
 
+#define _SUBSYS_NAME "UTIL"
+
 
 // ===================================================
 // =================== PUBLIC API ====================
@@ -40,7 +42,7 @@ vt_util_alloc(struct vt_arena_t* a, size_t size)  {
     a->capacity += size;
     a->base = realloc(a->base, a->capacity);
   }
-  void *ptr = a->base + a->offset;
+  void* ptr = a->base + a->offset;
   a->offset += size;
   memset(ptr, 0, size);
   return ptr;
@@ -61,8 +63,8 @@ vt_util_arena_destroy(struct vt_arena_t* a) {
 char* 
 vt_util_log_get_filepath() {
   static char path[PATH_MAX];
-  char *state_home = getenv("XDG_STATE_HOME");
-  const char *home = getenv("HOME");
+  char* state_home = getenv("XDG_STATE_HOME");
+  const char* home = getenv("HOME");
   time_t now = time(NULL);
   struct tm t;
   pid_t pid = getpid();
@@ -132,12 +134,12 @@ vt_util_log_header(FILE* stream, log_level_t lvl) {
 
 
 // handle_noop + vt_util_emit_signal => https://github.com/swaywm/wlroots/blob/master/util/signal.c#L7
-static void handle_noop(struct wl_listener *listener, void *data) {
+static void handle_noop(struct wl_listener* listener, void* data) {
   (void)listener;
   (void)data;
 }
 void 
-vt_util_emit_signal(struct wl_signal *signal, void *data) {
+vt_util_emit_signal(struct wl_signal* signal, void* data) {
 
 	struct wl_listener cursor;
 	struct wl_listener end;
@@ -154,8 +156,8 @@ vt_util_emit_signal(struct wl_signal *signal, void *data) {
 	end.notify = handle_noop;
 
 	while (cursor.link.next != &end.link) {
-		struct wl_list *pos = cursor.link.next;
-		struct wl_listener *l = wl_container_of(pos, l, link);
+		struct wl_list* pos = cursor.link.next;
+		struct wl_listener* l = wl_container_of(pos, l, link);
 
 		wl_list_remove(&cursor.link);
 		wl_list_insert(pos, &cursor.link);
@@ -171,11 +173,11 @@ int
 vt_util_allocate_shm_file(struct vt_compositor_t* comp, size_t size) {
   int fd;
   if ((fd = memfd_create("vortex-shm", MFD_CLOEXEC | MFD_ALLOW_SEALING)) < 0) {
-    VT_ERROR(comp->log, "UTIL: vt_util_allocate_shm_file: memfd_create() failed: %s", strerror(errno));
+    VT_ERROR(comp->log, "memfd_create() failed: %s", strerror(errno));
     return -1;
   }
   if (ftruncate(fd, size) < 0) {
-    VT_ERROR(comp->log, "UTIL: vt_util_allocate_shm_file: ftruncate() failed: %s", strerror(errno));
+    VT_ERROR(comp->log, "ftruncate() failed: %s", strerror(errno));
     close(fd);
     return -1;
   }
@@ -189,7 +191,7 @@ vt_util_allocate_shm_rwro_pair(struct vt_compositor_t* comp, size_t size, int* r
 
   *rw_fd = vt_util_allocate_shm_file(comp, size);
   if(*rw_fd < 0) {
-    VT_ERROR(comp->log, "UTIL: vt_util_allocate_shm_rwro_pair: failed to allocate read-write shm file."); 
+    VT_ERROR(comp->log, "failed to allocate read-write shm file."); 
     return false;
   }
 

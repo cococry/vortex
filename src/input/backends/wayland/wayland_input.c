@@ -7,6 +7,8 @@
 #include <unistd.h>
 #include <sys/mman.h>
 
+#define _SUBSYS_NAME "INPUT/WL"
+
 #define _VT_XKB_GET_MOD_MASK(keymap, name) ({ \
   int idx = xkb_keymap_mod_get_index((keymap), (name)); \
   idx == XKB_MOD_INVALID ? 0 : (1u << idx); \
@@ -394,14 +396,14 @@ bool input_backend_init_wl(struct vt_input_backend_t* backend, void* native_hand
   wl_keyboard_add_listener(wl->wl_keyboard, &keyboard_listener, wl);
   wl_pointer_add_listener(wl->wl_pointer, &pointer_listener, wl);
 
-  VT_TRACE(backend->comp->log, "INPUT: Initialized Wayland nested keyboard backend.");
+  VT_TRACE(backend->comp->log, "Initialized Wayland nested keyboard backend.");
   return true;
 }
 
 bool input_backend_terminate_wl(struct vt_input_backend_t* backend) {
   if (!backend || !backend->user_data) return false;
   struct vt_input_backend_wl_t* wl = backend->user_data;
-  VT_TRACE(backend->comp->log, "INPUT: Terminated Wayland nested backend.");
+  VT_TRACE(backend->comp->log, "Terminated Wayland nested backend.");
   return true;
 }
 

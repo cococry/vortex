@@ -4,6 +4,8 @@
 #include "wl_shm.h"
 #include "src/core/util.h"
 
+#define _SUBSYS_NAME "VT_PROTO_WL_SHM"
+
 #define fourcc_code(a, b, c, d) ((__u32)(a) | ((__u32)(b) << 8) | \
 				 ((__u32)(c) << 16) | ((__u32)(d) << 24))
 
@@ -21,7 +23,7 @@ bool vt_proto_wl_shm_init(
     if(drm_formats[i] == _VT_DRM_FORMAT_XRGB8888) has_xrgb = true;
   }
   if(!(has_argb && has_xrgb)) {
-    log_fatal(comp->log, "VT_PROTO_WL_SHM: We do not have the minimal required protocols ARGB8888 and XRGB8888.");
+    log_fatal(comp->log, "We do not have the minimal required protocols ARGB8888 and XRGB8888.");
     return false; // cosmetic 
   }
 

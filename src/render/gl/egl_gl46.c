@@ -18,7 +18,6 @@
 
 #include <runara/runara.h>
 
-
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES2/gl2.h>
@@ -27,6 +26,8 @@
 #include <glad.h>
 
 #include "egl_gl46.h"
+
+#define _SUBSYS_NAME "EGL"
 
 
 // Minimal GBM interop
@@ -189,7 +190,7 @@ _egl_gl_import_buffer_dmabuf(struct vt_renderer_t* r,
     if (a->mod != _VT_DRM_FORMAT_MOD_INVALID &&
       a->mod != _VT_DRM_FORMAT_MOD_LINEAR &&
       !egl->has_dmabuf_modifiers_support) {
-      VT_ERROR(r->comp->log, "EGL: No support for DMABUF modifiers, skipping importing.");
+      VT_ERROR(r->comp->log, "No support for DMABUF modifiers, skipping importing.");
       return false;
     }
 
@@ -273,7 +274,6 @@ _egl_gl_import_buffer_dmabuf(struct vt_renderer_t* r,
       return false;
     }
 
-
     bool is_external_only = false;
     struct vt_dmabuf_drm_format_t* fmt = NULL;
     struct vt_dmabuf_drm_format_t* f;
@@ -324,7 +324,7 @@ bool _egl_pick_config_from_format(struct vt_compositor_t* c,
                                   uint32_t format) {
   EGLint num = 0;
   if (!eglGetConfigs(egl->egl_dsp, NULL, 0, &num) || num <= 0) {
-    VT_ERROR(c->log, "EGL: eglGetConfigs() failed or returned no configs");
+    VT_ERROR(c->log, "eglGetConfigs() failed or returned no configs");
     return false;
   }
 
@@ -344,14 +344,14 @@ bool _egl_pick_config_from_format(struct vt_compositor_t* c,
   if (!match) {
     VT_ERROR(
       c->log,
-      "EGL: could not find config for GBM format 0x%x, falling back to first config", format);
+      "could not find config for GBM format 0x%x, falling back to first config", format);
     match = configs[0];
   }
 
   egl->egl_conf = match;
   eglGetConfigAttrib(egl->egl_dsp, match, EGL_NATIVE_VISUAL_ID, &vis);
   if(match) {
-    VT_TRACE(c->log, "EGL: picked config with visual 0x%x", vis);
+    VT_TRACE(c->log, "picked config with visual 0x%x", vis);
   }
   egl->egl_native_vis = vis;
 
@@ -383,7 +383,7 @@ _egl_pick_config(struct vt_compositor_t *comp, struct egl_backend_state_t *egl, 
       };
       EGLint n = 0;
       if (!eglChooseConfig(egl->egl_dsp, attrs, &egl->egl_conf, 1, &n) || n == 0) {
-        VT_ERROR(comp->log, "EGL: no valid configs for Wayland backend");
+        VT_ERROR(comp->log, "no valid configs for Wayland backend");
         return false;
       }
       eglGetConfigAttrib(egl->egl_dsp, egl->egl_conf, EGL_NATIVE_VISUAL_ID, &egl->egl_native_vis);
@@ -407,7 +407,7 @@ _egl_pick_config(struct vt_compositor_t *comp, struct egl_backend_state_t *egl, 
     }
 
     default:
-      VT_ERROR(comp->log, "EGL: unsupported backend platform");
+      VT_ERROR(comp->log, "unsupported backend platform");
       return false;
   }
 }
@@ -461,7 +461,7 @@ bool _egl_send_surface_release_fences(struct vt_renderer_t* renderer, struct vt_
     if (fence_fd == -1) {
       log_fatal(
         renderer->comp->log, 
-        "EGL: A catastrophic scenario happend:"
+        "A catastrophic scenario happend:"
         "We were able to create an EGL Sync and now need a fence but"
         "for some reason eglDupNativeFenceFDANDROID()" 
         "failed. you're cooked.");
@@ -523,7 +523,7 @@ _egl_gl_create_output_fbo(struct vt_output_t *output) {
 
 
   if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-    VT_ERROR(output->backend->comp->log, "EGL: FBO creation for output %p (%u%u) failed.\n", output, output->width, output->height);
+    VT_ERROR(output->backend->comp->log, "FBO creation for output %p (%u%u) failed.\n", output, output->width, output->height);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     return false;
   }
@@ -584,7 +584,7 @@ _egl_create_renderer(
   struct egl_backend_state_t* egl = BACKEND_DATA(renderer, struct egl_backend_state_t);
 
   if(!(egl->egl_dsp = _egl_create_display(renderer->comp, platform, native_handle, log_error))) {
-    VT_ERROR(renderer->comp->log, "EGL: Failed to create EGL display.");
+    VT_ERROR(renderer->comp->log, "Failed to create EGL display.");
     return false;
   }
   return true;
@@ -654,7 +654,7 @@ renderer_init_egl(struct vt_backend_t* backend, struct vt_renderer_t *r, void* n
 
   if (!glEGLImageTargetTexture2DOES_ptr) {
     VT_ERROR(backend->comp->log,
-             "EGL: Failed to load glEGLImageTargetTexture2DOES (GL_OES_EGL_image), DMABUF imports will not be supported.");
+             "Failed to load glEGLImageTargetTexture2DOES (GL_OES_EGL_image), DMABUF imports will not be supported.");
     egl->has_dmabuf_support = false;
   }
 
@@ -664,11 +664,11 @@ renderer_init_egl(struct vt_backend_t* backend, struct vt_renderer_t *r, void* n
     eglDestroyImageKHR_ptr =
       (PFNEGLDESTROYIMAGEKHRPROC) eglGetProcAddress("eglDestroyImageKHR");
     if(!eglCreateImageKHR_ptr || !eglDestroyImageKHR_ptr) {
-      VT_ERROR(backend->comp->log, "EGL: Failed to load DMABUF procs, DMABUF imports will not be supported.");
+      VT_ERROR(backend->comp->log, "Failed to load DMABUF procs, DMABUF imports will not be supported.");
       egl->has_dmabuf_support = false;
     }
   } else {
-    VT_ERROR(backend->comp->log, "EGL: EGL_KHR_image_base extension not supported, DMABUF imports will not be supported.");
+    VT_ERROR(backend->comp->log, "EGL_KHR_image_base extension not supported, DMABUF imports will not be supported.");
     egl->has_dmabuf_support = false;
   }
 
@@ -680,15 +680,15 @@ renderer_init_egl(struct vt_backend_t* backend, struct vt_renderer_t *r, void* n
     eglDupNativeFenceFDANDROID_ptr = (PFNEGLDUPNATIVEFENCEFDANDROIDPROC)eglGetProcAddress("eglDupNativeFenceFDANDROID");
 
     if(!eglCreateSyncKHR_ptr || !eglDestroySyncKHR_ptr || !eglDupNativeFenceFDANDROID_ptr) {
-      VT_ERROR(backend->comp->log, "EGL: Failed to load explicit sync procs, explicit sync will not be used.");
+      VT_ERROR(backend->comp->log, "Failed to load explicit sync procs, explicit sync will not be used.");
       egl->has_explicit_sync_support = false;
     }
   } else {
-    VT_WARN(backend->comp->log, "EGL: Explicit sync extensions (EGL_KHR_fence_sync, EGL_ANDROID_native_fence_sync) not supported, explicit sync will not be used.");
+    VT_WARN(backend->comp->log, "Explicit sync extensions (EGL_KHR_fence_sync, EGL_ANDROID_native_fence_sync) not supported, explicit sync will not be used.");
     egl->has_explicit_sync_support = false;
   }
   VT_TRACE(r->comp->log, "EGL extensions: %s", exts);
-  VT_TRACE(r->comp->log, "EGL: initialized (vendor=%s, version=%s) with EGL display %p", vendor, version, egl->egl_dsp);
+  VT_TRACE(r->comp->log, "initialized (vendor=%s, version=%s) with EGL display %p", vendor, version, egl->egl_dsp);
 
   return true;
 }
@@ -713,7 +713,7 @@ renderer_query_dmabuf_formats_egl(struct vt_compositor_t* comp, void* native_han
 
   EGLDisplay egl_dsp;
   if(!(egl_dsp = _egl_create_display(comp, comp->backend->platform, native_handle, false))) {
-    VT_ERROR(comp->log, "EGL: Failed to create EGL display.");
+    VT_ERROR(comp->log, "Failed to create EGL display.");
     return false;
   }
 
@@ -728,7 +728,7 @@ renderer_query_dmabuf_formats_egl(struct vt_compositor_t* comp, void* native_han
     */
   eglQueryDmaBufFormatsEXT_ptr(egl_dsp, 0 /*max_formats*/, NULL, &n_formats);
   if (n_formats <= 0) {
-    VT_ERROR(comp->log, "EGL: No DMABUF formats available, falling back to SHM.\n");
+    VT_ERROR(comp->log, "No DMABUF formats available, falling back to SHM.\n");
     eglTerminate(egl_dsp);
     return false;
   }
@@ -791,7 +791,7 @@ renderer_query_dmabuf_formats_with_renderer_egl(struct vt_renderer_t* renderer, 
     eglQueryDmaBufModifiersEXT_ptr = (void*) eglGetProcAddress("eglQueryDmaBufModifiersEXT");
 
   if (!eglQueryDmaBufFormatsEXT_ptr || !eglQueryDmaBufModifiersEXT_ptr) {
-    VT_ERROR(renderer->comp->log, "EGL: DMABUF extensions not supported, falling back to SHM.\n");
+    VT_ERROR(renderer->comp->log, "DMABUF extensions not supported, falling back to SHM.\n");
     egl->has_dmabuf_modifiers_support = false;
     egl->has_dmabuf_support = false;
     return false;
@@ -809,7 +809,7 @@ renderer_query_dmabuf_formats_with_renderer_egl(struct vt_renderer_t* renderer, 
     */
   eglQueryDmaBufFormatsEXT_ptr(egl->egl_dsp, 0 /*max_formats*/, NULL, &n_formats);
   if (n_formats <= 0) {
-    VT_ERROR(renderer->comp->log, "EGL: No DMABUF formats available, falling back to SHM.\n");
+    VT_ERROR(renderer->comp->log, "No DMABUF formats available, falling back to SHM.\n");
     return false;
   }
 
@@ -898,7 +898,7 @@ renderer_setup_renderable_output_egl(struct vt_renderer_t *r, struct vt_output_t
   if(r->backend->platform == VT_BACKEND_WAYLAND) {
     struct wl_egl_window* egl_win = wl_egl_window_create(output->native_window, output->width, output->height);
     if(!egl_win) {
-      VT_ERROR(r->backend->comp->log, "EGL: Wayland Backend: Failed to create EGL window.");
+      VT_ERROR(r->backend->comp->log, "Wayland Backend: Failed to create EGL window.");
     }
     output->native_window = egl_win; 
   }
@@ -909,7 +909,7 @@ renderer_setup_renderable_output_egl(struct vt_renderer_t *r, struct vt_output_t
                            (EGLNativeWindowType)output->native_window, NULL);
   if (egl_surf == EGL_NO_SURFACE) {
     EGLint err = eglGetError();
-    VT_ERROR(r->comp->log, "EGL: eglCreateWindowSurface failed: 0x%04x (%s)", err, _egl_err_str(err));
+    VT_ERROR(r->comp->log, "eglCreateWindowSurface failed: 0x%04x (%s)", err, _egl_err_str(err));
     return false;
   }
 
@@ -924,10 +924,10 @@ renderer_setup_renderable_output_egl(struct vt_renderer_t *r, struct vt_output_t
   if (!egl->render) {
     egl->render = rn_init(0, 0, (RnGLLoader)eglGetProcAddress);
     if (!egl->render) {
-      VT_ERROR(r->comp->log, "EGL: Failed to initialize runara rendering backend.");
+      VT_ERROR(r->comp->log, "Failed to initialize runara rendering backend.");
       return false;
     } else {
-      VT_TRACE(r->comp->log, "EGL: Initialized runara rendering backend.");
+      VT_TRACE(r->comp->log, "Initialized runara rendering backend.");
     }
   }
 
@@ -944,7 +944,7 @@ renderer_setup_renderable_output_egl(struct vt_renderer_t *r, struct vt_output_t
 
   vt_comp_schedule_repaint(r->comp, output);
 
-  VT_TRACE(r->comp->log, "EGL: Created surface %p (%ux%u)", egl_surf, output->width, output->height);
+  VT_TRACE(r->comp->log, "Created surface %p (%ux%u)", egl_surf, output->width, output->height);
   return true;
 }
 
@@ -991,7 +991,7 @@ renderer_destroy_renderable_output_egl(struct vt_renderer_t *r, struct vt_output
   }
   output->render_surface = NULL;
 
-  VT_TRACE(r->comp->log, "EGL: Destroyed render surface."); 
+  VT_TRACE(r->comp->log, "Destroyed render surface."); 
   return true;
 }
 
@@ -1041,12 +1041,12 @@ bool renderer_destroy_surface_texture_egl(struct vt_renderer_t* r, struct vt_sur
 bool 
 renderer_drop_context_egl(struct vt_renderer_t* r) {
   if (!r || !r->impl.drop_context || !r->user_data) {
-    VT_ERROR(r->comp->log, "EGL: Renderer backend not initialized before dropping context.");
+    VT_ERROR(r->comp->log, "Renderer backend not initialized before dropping context.");
     return false;
   }
   struct egl_backend_state_t* egl = BACKEND_DATA(r, struct egl_backend_state_t);
   if(!eglMakeCurrent(egl->egl_dsp, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT)) {
-    VT_ERROR(r->comp->log, "EGL: Cannot drop context: eglMakeCurrent() failed: %s", _egl_err_str(eglGetError()));
+    VT_ERROR(r->comp->log, "Cannot drop context: eglMakeCurrent() failed: %s", _egl_err_str(eglGetError()));
     return false;
   }
   return true;
@@ -1055,7 +1055,7 @@ renderer_drop_context_egl(struct vt_renderer_t* r) {
 void 
 renderer_set_vsync_egl(struct vt_renderer_t* r, bool vsync) {
   if (!r || !r->impl.set_vsync || !r->user_data) {
-    VT_ERROR(r->comp->log, "EGL: Renderer backend not initialized before setting vsync.");
+    VT_ERROR(r->comp->log, "Renderer backend not initialized before setting vsync.");
     return;
   }
   struct egl_backend_state_t* egl = BACKEND_DATA(r, struct egl_backend_state_t);
@@ -1097,11 +1097,11 @@ void
 renderer_begin_scene_egl(struct vt_renderer_t *r, struct vt_output_t *output) {
   if(!output);
   if (!r || !r->impl.begin_scene || !r->user_data) {
-    VT_ERROR(r->comp->log, "EGL: Renderer backend not initialized before beginning frame.");
+    VT_ERROR(r->comp->log, "Renderer backend not initialized before beginning frame.");
     return;
   }
   if(!output->width || !output->height) {
-    VT_WARN(r->comp->log, "EGL: Trying to render on invalid output region (%ix%i).", output->width, output->height);
+    VT_WARN(r->comp->log, "Trying to render on invalid output region (%ix%i).", output->width, output->height);
     return;
   }
 
@@ -1115,7 +1115,7 @@ void
 renderer_begin_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output) {
   if(!output);
   if (!r || !r->impl.begin_frame|| !r->user_data) {
-    VT_ERROR(r->comp->log, "EGL: Renderer backend not initialized before beginning frame.");
+    VT_ERROR(r->comp->log, "Renderer backend not initialized before beginning frame.");
     return;
   }
 
@@ -1150,7 +1150,7 @@ renderer_draw_surface_egl(struct vt_renderer_t* r, struct vt_output_t* output, s
   if(!surface) return;
   if(!surface->tex.id) return;
   if (!r || !r->impl.draw_surface || !r->user_data) {
-    VT_ERROR(r->comp->log, "EGL: Renderer backend not initialized before rendering surface.");
+    VT_ERROR(r->comp->log, "Renderer backend not initialized before rendering surface.");
     return;
   }
   struct egl_backend_state_t* egl = BACKEND_DATA(r, struct egl_backend_state_t);
@@ -1161,7 +1161,7 @@ renderer_draw_surface_egl(struct vt_renderer_t* r, struct vt_output_t* output, s
   
   surface->_mask_outputs_presented_on |= (1u << output->id);
 
-  VT_TRACE(r->comp->log, "EGL: Presented surface %p (%.2f,%.2f).", surface, x, y);
+  VT_TRACE(r->comp->log, "Presented surface %p (%.2f,%.2f).", surface, x, y);
 
     
 }
@@ -1169,7 +1169,7 @@ renderer_draw_surface_egl(struct vt_renderer_t* r, struct vt_output_t* output, s
 void 
 renderer_draw_rect_egl(struct vt_renderer_t* r, float x, float y, float w, float h, uint32_t col) {
   if (!r || !r->impl.draw_rect || !r->user_data) {
-    VT_ERROR(r->comp->log, "EGL: Renderer backend not initialized before rendering rectangle.");
+    VT_ERROR(r->comp->log, "Renderer backend not initialized before rendering rectangle.");
     return;
   }
 
@@ -1180,7 +1180,7 @@ renderer_draw_rect_egl(struct vt_renderer_t* r, float x, float y, float w, float
 void 
 renderer_end_scene_egl(struct vt_renderer_t *r, struct vt_output_t *output) {
   if (!r || !r->impl.end_scene || !r->user_data) {
-    VT_ERROR(r->comp->log, "EGL: Renderer backend not initialized before ending frame.");
+    VT_ERROR(r->comp->log, "Renderer backend not initialized before ending frame.");
     return;
   }
   
@@ -1193,12 +1193,12 @@ renderer_end_scene_egl(struct vt_renderer_t *r, struct vt_output_t *output) {
 void
 renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,  const pixman_box32_t* damaged, int32_t n_damaged) {
   if (!r || !r->impl.end_frame || !r->user_data) {
-    VT_ERROR(r->comp->log, "EGL: Renderer backend not initialized before ending frame.");
+    VT_ERROR(r->comp->log, "Renderer backend not initialized before ending frame.");
     return;
   }
 
   if (!r || !r->impl.end_frame || !r->user_data) {
-    VT_ERROR(r->comp->log, "EGL: Renderer backend not initialized before ending frame.");
+    VT_ERROR(r->comp->log, "Renderer backend not initialized before ending frame.");
     return;
   }
   
@@ -1248,14 +1248,14 @@ renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,  con
   }
 
   if(!_egl_send_surface_release_fences(r, output)) {
-    VT_ERROR(r->comp->log, "EGL: Cannot release surface fences after render for output %p.", output);
+    VT_ERROR(r->comp->log, "Cannot release surface fences after render for output %p.", output);
   }
 }
 
 bool
 renderer_destroy_egl(struct vt_renderer_t* r) {
   if (!r || !r->impl.destroy || !r->user_data) {
-    VT_ERROR(r->comp->log, "EGL: Renderer backend not initialized before destroying backend.");
+    VT_ERROR(r->comp->log, "Renderer backend not initialized before destroying backend.");
     return false;
   }
   struct egl_backend_state_t* egl = BACKEND_DATA(r, struct egl_backend_state_t);
@@ -1272,7 +1272,7 @@ renderer_destroy_egl(struct vt_renderer_t* r) {
   }
 
   if(!eglTerminate(egl->egl_dsp)) {
-    VT_ERROR(r->comp->log, "EGL: eglTerminate() failed: %s", _egl_err_str(eglGetError()));
+    VT_ERROR(r->comp->log, "eglTerminate() failed: %s", _egl_err_str(eglGetError()));
     return false;
   }
 

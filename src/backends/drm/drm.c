@@ -42,6 +42,8 @@
 
 #include <linux/input-event-codes.h>
 
+#define _SUBSYS_NAME "DRM"
+
 
 struct drm_backend_state_t {
   int drm_fd;
@@ -129,7 +131,7 @@ _drm_page_flip_handler(int fd, unsigned int frame,
   struct drm_output_state_t* drm_output = BACKEND_DATA(output, struct drm_output_state_t);
   struct vt_compositor_t* comp = output->backend->comp;
 
-  VT_TRACE(comp->log, "DRM: _drm_page_flip_handler(): Handling page flip event.")
+  VT_TRACE(comp->log, "_drm_page_flip_handler(): Handling page flip event.")
 
   // Release the old, unused backbuffer
   if (drm_output->older_bo) {
@@ -296,7 +298,7 @@ _log_dmabuf_tranche(struct vt_compositor_t *comp,
   snprintf(dev_path, sizeof(dev_path), "%s", device_path);
 
   VT_TRACE(comp->log,
-           "DRM: ========== Added DMABUF Tranche for device '%s'  ========== ", dev_path);
+           "========== Added DMABUF Tranche for device '%s'  ========== ", dev_path);
 
   VT_TRACE(comp->log,
            "      target_device: %u:%u  (dev_t: 0x%lx)",
@@ -325,7 +327,7 @@ _log_dmabuf_tranche(struct vt_compositor_t *comp,
     }
   }
 
-  VT_TRACE(comp->log, "DRM: =========================================================== ", dev_path);
+  VT_TRACE(comp->log, "=========================================================== ", dev_path);
 }
 
 bool 
@@ -340,7 +342,7 @@ _drm_build_dmabuf_feedback(
   feedback->dev_main = master->main_drm->dev;
   wl_array_init(&feedback->tranches);
 
-  VT_TRACE(master->comp->log, "DRM: Building default DMABUF feedback...");
+  VT_TRACE(master->comp->log, "Building default DMABUF feedback...");
 
   uint32_t max_shm_formats = 256, n_shm_formats = 0;
   uint32_t shm_formats[max_shm_formats];
@@ -351,14 +353,14 @@ _drm_build_dmabuf_feedback(
   struct drm_backend_state_t* drm;
   wl_list_for_each(drm, &master->backends, link) {
     struct vt_device_t* dev = drm->dev;
-    VT_TRACE(master->comp->log, "DRM: Iterating possible DMABUF tranche device '%s' (FD: %i)...", dev->path, dev->fd);
+    VT_TRACE(master->comp->log, "Iterating possible DMABUF tranche device '%s' (FD: %i)...", dev->path, dev->fd);
     if(!drm->dev) {
-      VT_TRACE(master->comp->log, "DRM: Skipping possible tranche device '%s': No device associated.", dev->path);
+      VT_TRACE(master->comp->log, "Skipping possible tranche device '%s': No device associated.", dev->path);
       continue;
     }
     drmDevicePtr dev_drm = NULL;
     if (drmGetDevice(dev->fd, &dev_drm) != 0) {
-      VT_WARN(master->comp->log, "DRM: Failed to retrieve DRM device pointer from internal DRM device '%s'", dev->path);
+      VT_WARN(master->comp->log, "Failed to retrieve DRM device pointer from internal DRM device '%s'", dev->path);
       if (dev_drm) drmFreeDevice(&dev_drm);
       continue;
     }
@@ -366,13 +368,13 @@ _drm_build_dmabuf_feedback(
 
     // skip devices without any render nodes
     if (!(dev_drm->available_nodes & (1 << DRM_NODE_RENDER))) {
-      VT_TRACE(master->comp->log, "DRM: Skipping possible tranche device '%s': Has no available render nodes.", dev->path);
+      VT_TRACE(master->comp->log, "Skipping possible tranche device '%s': Has no available render nodes.", dev->path);
       continue;
     }
     // skip non-shareable GPUs
     if (!_drm_can_share_dmabuf(master->main_drm->dev, dev)) {
       VT_TRACE(
-        master->comp->log, "DRM: Skipping possible tranche device '%s': Cannot share DMABUFs with main device '%s'.",
+        master->comp->log, "Skipping possible tranche device '%s': Cannot share DMABUFs with main device '%s'.",
         dev->path, master->main_drm->dev->path);
       continue;  
     }
@@ -390,7 +392,7 @@ _drm_build_dmabuf_feedback(
     if(dev == master->main_drm->dev) { 
       if(r->impl.query_dmabuf_formats_with_renderer) {
         if(!master->comp->renderer->impl.query_dmabuf_formats_with_renderer(r, &tranche->formats)) {
-          VT_WARN(master->comp->log, "DRM: Cannot query DMABUF formats for main device '%s' from EGL.", dev->path);
+          VT_WARN(master->comp->log, "Cannot query DMABUF formats for main device '%s' from EGL.", dev->path);
           wl_array_init(&tranche->formats);
           continue;
         }
@@ -398,7 +400,7 @@ _drm_build_dmabuf_feedback(
     } else { 
       if(r->impl.query_dmabuf_formats) {
         if(!master->comp->renderer->impl.query_dmabuf_formats(master->comp, drm->gbm_dev,  &tranche->formats)) {
-          VT_WARN(master->comp->log, "DRM: Cannot query DMABUF formats for tranche device '%s' from EGL.", dev->path);
+          VT_WARN(master->comp->log, "Cannot query DMABUF formats for tranche device '%s' from EGL.", dev->path);
           wl_array_init(&tranche->formats);
           continue;
         }
@@ -407,7 +409,7 @@ _drm_build_dmabuf_feedback(
     struct vt_dmabuf_drm_format_t* formats = tranche->formats.data;
     for(uint32_t i = 0; i < tranche->formats.size; i++) {
       if(!(n_shm_formats < max_shm_formats - 1)) {
-        VT_WARN(master->comp->log, "DRM: Maximum number of SHM formats reached, not adding format %i.", formats[i].format);
+        VT_WARN(master->comp->log, "Maximum number of SHM formats reached, not adding format %i.", formats[i].format);
         break; 
       }
       shm_formats[n_shm_formats++] = formats[i].format; 
@@ -439,11 +441,11 @@ _drm_build_dmabuf_feedback(
   shm_formats[n_shm_formats++] = fmt->format;
 
   if(!vt_proto_wl_shm_init(master->comp, shm_formats, n_shm_formats)) {
-    VT_ERROR(master->comp->log, "DRM: Failed to initialize WL SHM protcol.\n");
+    VT_ERROR(master->comp->log, "Failed to initialize WL SHM protcol.\n");
     return false;
   }
 
-  VT_TRACE(master->comp->log, "DRM: Added default fallback tranche (LINEAR DRM_FORMAT_ARGB8888).\n");
+  VT_TRACE(master->comp->log, "Added default fallback tranche (LINEAR DRM_FORMAT_ARGB8888).\n");
 
   return true;
 }
@@ -456,7 +458,7 @@ _drm_suspend(struct drm_backend_state_t* backend) {
     return true;
 
   backend->comp->suspended = true;
-  VT_TRACE(backend->comp->log, "DRM: Suspending seat session (VT switch away)...");
+  VT_TRACE(backend->comp->log, "Suspending seat session (VT switch away)...");
 
   // we stop submitting new flips immediately
   struct vt_output_t* output;
@@ -489,7 +491,7 @@ _drm_suspend(struct drm_backend_state_t* backend) {
     struct drm_output_state_t* drm_output = BACKEND_DATA(output, struct drm_output_state_t);
 
     VT_TRACE(backend->comp->log, 
-             "DRM: Disabling CRTC %u for connector %u.", 
+             "Disabling CRTC %u for connector %u.", 
              drm_output->crtc_id, drm_output->conn_id);
 
     drmModeSetCrtc(backend->drm_fd, drm_output->crtc_id,
@@ -508,7 +510,7 @@ _drm_resume(struct drm_backend_state_t* backend) {
     return true;
 
   backend->comp->suspended = false;
-  VT_TRACE(backend->comp->log, "DRM: Resuming seat session (VT switch back)...");
+  VT_TRACE(backend->comp->log, "Resuming seat session (VT switch back)...");
 
 
   struct vt_output_t* output;
@@ -521,7 +523,7 @@ _drm_resume(struct drm_backend_state_t* backend) {
       continue;
 
     VT_TRACE(backend->comp->log,
-             "DRM: Re-enabling CRTC %u with existing framebuffer %u for connector %u.",
+             "Re-enabling CRTC %u with existing framebuffer %u for connector %u.",
              drm_output->crtc_id, drm_output->current_fb, drm_output->conn_id);
 
     // libseat has already called drmSetMaster() for us.
@@ -530,7 +532,7 @@ _drm_resume(struct drm_backend_state_t* backend) {
                        drm_output->current_fb, 0, 0,
                        &drm_output->conn_id, 1, &drm_output->mode) != 0) {
       VT_ERROR(backend->comp->log,
-               "DRM: Failed to restore CRTC %u: %s",
+               "Failed to restore CRTC %u: %s",
                drm_output->crtc_id, strerror(errno));
       drm_output->needs_modeset = true;
     } else {
@@ -581,16 +583,16 @@ bool _drm_init_for_device(struct vt_compositor_t* comp, struct drm_backend_state
   drm->dev = dev;
   drm->comp = comp;
 
-  VT_TRACE(comp->log, "DRM: Initializing DRM/KMS backend...");
+  VT_TRACE(comp->log, "Initializing DRM/KMS backend...");
 
 
   if(!(drm->gbm_dev = gbm_create_device(drm->drm_fd))) {
-    VT_ERROR(comp->log, "DRM: cannot create GBM device (fd: %i)", drm->drm_fd);
+    VT_ERROR(comp->log, "cannot create GBM device (fd: %i)", drm->drm_fd);
     _drm_terminate_for_device(drm);
     return false;
   }
 
-  VT_TRACE(comp->log, "DRM: Successfully created GBM device on FD: %i", drm->drm_fd);  
+  VT_TRACE(comp->log, "Successfully created GBM device on FD: %i", drm->drm_fd);  
 
   drm->evctx.version = DRM_EVENT_CONTEXT_VERSION;
   drm->evctx.page_flip_handler = _drm_page_flip_handler;
@@ -603,7 +605,7 @@ bool _drm_init_for_device(struct vt_compositor_t* comp, struct drm_backend_state
   struct drm_backend_master_state_t* drm_master = BACKEND_DATA(drm->root_backend, struct drm_backend_master_state_t);
 
   if(!comp->renderer) {
-    log_fatal(comp->log, "DRM: Must allocate renderer before initializing backend.");
+    log_fatal(comp->log, "Must allocate renderer before initializing backend.");
   }
   if(!drm_master->main_drm && comp->renderer->impl.is_handle_renderable(comp->renderer, drm->native_handle)) {
     comp->renderer->impl.init(comp->backend, comp->renderer, drm->native_handle);
@@ -612,7 +614,7 @@ bool _drm_init_for_device(struct vt_compositor_t* comp, struct drm_backend_state
 
   _drm_init_active_outputs_for_device(drm);
 
-  VT_TRACE(comp->log, "DRM: Successfully initialized DRM/KMS backend for GPU %i.", drm->drm_fd);
+  VT_TRACE(comp->log, "Successfully initialized DRM/KMS backend for GPU %i.", drm->drm_fd);
 
   return true;
 }
@@ -622,17 +624,17 @@ _drm_init_active_outputs_for_device(struct drm_backend_state_t* drm) {
   if(!drm) return false;
   struct vt_compositor_t* comp = drm->comp;
 
-  VT_TRACE(comp->log, "DRM: Initializing active outputs.");
+  VT_TRACE(comp->log, "Initializing active outputs.");
 
   if (!comp->renderer || !comp->renderer->impl.setup_renderable_output) {
-    VT_ERROR(comp->log, "DRM: Renderer backend not initialized before output setup.");
+    VT_ERROR(comp->log, "Renderer backend not initialized before output setup.");
     return false;
   }
 
 
   drm->res = drmModeGetResources(drm->drm_fd);
   if (!drm->res) {
-    VT_ERROR(comp->log, "DRM: drmModeGetResources() failed: %s", strerror(errno));
+    VT_ERROR(comp->log, "drmModeGetResources() failed: %s", strerror(errno));
     return false;
   }
 
@@ -645,20 +647,20 @@ _drm_init_active_outputs_for_device(struct drm_backend_state_t* drm) {
       wl_list_init(&output->link_local);
       wl_list_init(&output->link_global);
       if (!output) {
-        VT_ERROR(comp->log, "DRM: allocation failed for output.");
+        VT_ERROR(comp->log, "allocation failed for output.");
         drmModeFreeConnector(conn);
         continue;
       }
       pixman_region32_init(&output->damage);
       output->backend = comp->backend;
       if (!_drm_create_output_for_device(drm, output, conn)) {
-        VT_ERROR(comp->log, "DRM: Failed to setup internal DRM output output.");
+        VT_ERROR(comp->log, "Failed to setup internal DRM output output.");
         _drm_destroy_output_for_device(drm, output);
         drmModeFreeConnector(conn);
         continue;
       } 
       if(!comp->renderer->impl.setup_renderable_output(comp->renderer, output)) {
-        VT_ERROR(comp->log, "DRM: Failed to setup renderable output for DRM output (%ix%i@%.2f)",
+        VT_ERROR(comp->log, "Failed to setup renderable output for DRM output (%ix%i@%.2f)",
                  output->width, output->height, output->refresh_rate);
         _drm_destroy_output_for_device(drm, output);
         drmModeFreeConnector(conn);
@@ -669,7 +671,7 @@ _drm_init_active_outputs_for_device(struct drm_backend_state_t* drm) {
   }
 
   if (wl_list_empty(&drm->outputs)) {
-    VT_ERROR(comp->log, "DRM: No connected connector found");
+    VT_ERROR(comp->log, "No connected connector found");
     drmModeFreeResources(drm->res);
     return false;
   }
@@ -681,7 +683,7 @@ bool
 _drm_create_output_for_device(struct drm_backend_state_t* drm, struct vt_output_t* output, void* data) {
   if(!drm || !output || !data) return false;
 
-  VT_TRACE(drm->comp->log, "DMR: Creating DRM internal output.");
+  VT_TRACE(drm->comp->log, "Creating DRM internal output.");
   if(!(output->user_data = VT_ALLOC(drm->comp, sizeof(struct drm_output_state_t)))) {
     return false;
   }
@@ -738,7 +740,7 @@ _drm_create_output_for_device(struct drm_backend_state_t* drm, struct vt_output_
   }
 
   if (!drm_output->crtc_id) {
-    VT_ERROR(comp->log, "DRM: Failed to find CRTC for connector %u", drm_output->conn_id);
+    VT_ERROR(comp->log, "Failed to find CRTC for connector %u", drm_output->conn_id);
     drmModeFreeConnector(conn);
     return false;
   }
@@ -750,13 +752,13 @@ _drm_create_output_for_device(struct drm_backend_state_t* drm, struct vt_output_
     desired_format,
     GBM_BO_USE_SCANOUT | GBM_BO_USE_RENDERING
   ))) {
-    VT_ERROR(comp->log, "DRM: cannot create GBM surface (%ux%u@%u) for output on connector %i for rendering.", 
+    VT_ERROR(comp->log, "cannot create GBM surface (%ux%u@%u) for output on connector %i for rendering.", 
              drm_output->mode.hdisplay, drm_output->mode.vdisplay, drm_output->mode.vrefresh, drm_output->conn_id);
     return false;
   } 
 
 
-  VT_TRACE(comp->log, "DRM: Acknowledged connector: %u, CRTC %u, mode %ux%u@%u (%p)",
+  VT_TRACE(comp->log, "Acknowledged connector: %u, CRTC %u, mode %ux%u@%u (%p)",
            drm_output->conn_id, drm_output->crtc_id,
            drm_output->mode.hdisplay, drm_output->mode.vdisplay, drm_output->mode.vrefresh, output);
 
@@ -786,7 +788,7 @@ _drm_destroy_output_for_device(struct drm_backend_state_t* drm, struct vt_output
   if(!drm) return false;
   if(!output || !output->user_data) return false;
 
-  VT_TRACE(drm->comp->log, "DRM: Destroying output %p.\n", output);
+  VT_TRACE(drm->comp->log, "Destroying output %p.\n", output);
 
   _drm_release_all_scanout(output);
   struct drm_output_state_t* drm_output = BACKEND_DATA(output, struct drm_output_state_t);
@@ -878,7 +880,7 @@ void _drm_on_seat_disable(struct wl_listener* listener, void* data) {
   struct drm_backend_master_state_t* drm_master =
     BACKEND_DATA(session->comp->backend, struct drm_backend_master_state_t);
 
-  VT_TRACE(session->comp->log, "DRM: Seat disable event (VT switch away)");
+  VT_TRACE(session->comp->log, "Seat disable event (VT switch away)");
 
   struct drm_backend_state_t* drm;
   wl_list_for_each(drm, &drm_master->backends, link) {
@@ -891,7 +893,7 @@ void _drm_on_seat_disable(struct wl_listener* listener, void* data) {
 
   wl_list_init(&session->comp->seat->keyboards);
 
-  VT_TRACE(session->comp->log, "DRM: Seat disable complete (devices paused, not closed).");
+  VT_TRACE(session->comp->log, "Seat disable complete (devices paused, not closed).");
 }
 
 void   
@@ -909,7 +911,7 @@ void _drm_on_seat_enable(struct wl_listener *listener, void *data) {
   struct drm_backend_master_state_t* drm_master =
     BACKEND_DATA(session->comp->backend, struct drm_backend_master_state_t);
 
-  VT_TRACE(session->comp->log, "DRM: Seat enable event (VT switch back)");
+  VT_TRACE(session->comp->log, "Seat enable event (VT switch back)");
 
   struct drm_backend_state_t* drm;
   wl_list_for_each(drm, &drm_master->backends, link) {
@@ -920,7 +922,7 @@ void _drm_on_seat_enable(struct wl_listener *listener, void *data) {
   if(input && input->impl.resume)
     input->impl.resume(input);
 
-  VT_TRACE(session->comp->log, "DRM: Seat enable complete (devices resumed).");
+  VT_TRACE(session->comp->log, "Seat enable complete (devices resumed).");
 }
 
 bool 
@@ -928,11 +930,11 @@ _drm_handle_frame_for_device(struct drm_backend_state_t* drm, struct vt_output_t
   if(!drm || !output) return false;
   struct vt_compositor_t* comp = drm->comp;
 
-  VT_TRACE(comp->log, "DRM: Handling frame...");
+  VT_TRACE(comp->log, "Handling frame...");
   vt_comp_repaint_scene(comp, output);
 
   if (!comp->renderer) {
-    VT_ERROR(comp->log, "DRM: Renderer backend not initialized before handling frame.");
+    VT_ERROR(comp->log, "Renderer backend not initialized before handling frame.");
     return false;
   }
 
@@ -942,7 +944,7 @@ _drm_handle_frame_for_device(struct drm_backend_state_t* drm, struct vt_output_t
   struct gbm_bo *bo = gbm_surface_lock_front_buffer(drm_output->gbm_surf);
   // If we could not get the front buffer, we'll try again next frame.
   if (!bo) {
-    VT_WARN(comp->log, "DRM: Failed to get the GBM front buffer for frame in output %p.", output);
+    VT_WARN(comp->log, "Failed to get the GBM front buffer for frame in output %p.", output);
     output->needs_repaint = true; 
     return true;
   }
@@ -976,7 +978,7 @@ _drm_handle_frame_for_device(struct drm_backend_state_t* drm, struct vt_output_t
     gbm_surface_release_buffer(drm_output->gbm_surf, bo);
     // Try again next farme
     output->needs_repaint = true;
-    VT_ERROR(comp->log, "DRM: canot create DRM frame buffer for output %p: drmModeAddFB2(%ux%u, fmt=0x%08x) failed: %s",
+    VT_ERROR(comp->log, "canot create DRM frame buffer for output %p: drmModeAddFB2(%ux%u, fmt=0x%08x) failed: %s",
              output, w, h, fmt, strerror(errno));
     return false;
   }
@@ -988,11 +990,11 @@ _drm_handle_frame_for_device(struct drm_backend_state_t* drm, struct vt_output_t
       gbm_surface_release_buffer(drm_output->gbm_surf, bo);
       // Try again next farme
       output->needs_repaint = true;
-      VT_ERROR(comp->log, "DRM: cannot set CRTC mode for output %p: drmModeSetCrtc() failed: %s",
+      VT_ERROR(comp->log, "cannot set CRTC mode for output %p: drmModeSetCrtc() failed: %s",
                output, strerror(errno));
       return false;
     }
-    VT_TRACE(comp->log, "DRM: Successfully performed DRM CRTC mode set for output %p (%ux%u@%.2f, ID: %i)", output,
+    VT_TRACE(comp->log, "Successfully performed DRM CRTC mode set for output %p (%ux%u@%.2f, ID: %i)", output,
              output->width, output->height, output->refresh_rate, drm_output->conn_id);
 
     // Release the old buffer 
@@ -1016,7 +1018,7 @@ _drm_handle_frame_for_device(struct drm_backend_state_t* drm, struct vt_output_t
       wl_display_flush_clients(comp->wl.dsp);
       output->needs_repaint = false;
       drm_output->modeset_bootstrapped = true;
-      VT_TRACE(comp->log, "DRM: Successfully bootstrapped the first frame for output %p.", output);
+      VT_TRACE(comp->log, "Successfully bootstrapped the first frame for output %p.", output);
     }
     return true;
   }
@@ -1034,11 +1036,11 @@ _drm_handle_frame_for_device(struct drm_backend_state_t* drm, struct vt_output_t
     gbm_surface_release_buffer(drm_output->gbm_surf, drm_output->pending_bo);
     drm_output->pending_bo = NULL; drm_output->pending_fb = 0;
     output->needs_repaint = true;
-    VT_ERROR(comp->log, "DRM: cannot do a page flip: drmModePageFlip() failed: %s",
+    VT_ERROR(comp->log, "cannot do a page flip: drmModePageFlip() failed: %s",
              strerror(errno));
     return false;
   }
-  VT_TRACE(comp->log, "DRM: Successfully performed drmModePageFlip() call.");
+  VT_TRACE(comp->log, "Successfully performed drmModePageFlip() call.");
 
   drm_output->flip_inflight = true;
 
@@ -1086,14 +1088,14 @@ backend_init_drm(struct vt_backend_t* backend) {
     struct drm_backend_state_t* drm_backend = VT_ALLOC(backend->comp, sizeof(struct drm_backend_state_t));
     drm_backend->root_backend = backend;
     if(!_drm_init_for_device(backend->comp, drm_backend, gpus[i])) {
-      VT_ERROR(backend->comp->log, "DRM: Failed to initialize DRM backend for GPU (%i).", gpus[i]->fd);
+      VT_ERROR(backend->comp->log, "Failed to initialize DRM backend for GPU (%i).", gpus[i]->fd);
       return false;
     }
     wl_list_insert(&drm_master->backends, &drm_backend->link);
   }
 
   if(!drm_master->main_drm) {
-    log_fatal(drm_master->comp->log, "DRM: Failed to find renderable DRM device.");
+    log_fatal(drm_master->comp->log, "Failed to find renderable DRM device.");
   }
 
   if(backend->comp->have_proto_dmabuf) {
@@ -1102,14 +1104,14 @@ backend_init_drm(struct vt_backend_t* backend) {
     default_feedback->comp = drm_master->comp;
 
     if(!(_drm_build_dmabuf_feedback(drm_master, default_feedback))) {
-      VT_ERROR(backend->comp->log, "DRM: Failed to build default DMABUF feedback.");
+      VT_ERROR(backend->comp->log, "Failed to build default DMABUF feedback.");
       free(default_feedback);
     } else {
       const uint32_t dmabuf_ver = 4;
       if(!vt_proto_linux_dmabuf_v1_init(backend->comp, default_feedback, dmabuf_ver)) {
-        VT_ERROR(backend->comp->log, "DRM: Failed to initialize DMABUF protocol version %i.", dmabuf_ver);
+        VT_ERROR(backend->comp->log, "Failed to initialize DMABUF protocol version %i.", dmabuf_ver);
       } else {
-        VT_TRACE(backend->comp->log, "DRM: Successfully initialized DMABUF protocol version %i.", dmabuf_ver);
+        VT_TRACE(backend->comp->log, "Successfully initialized DMABUF protocol version %i.", dmabuf_ver);
       }
     }
 
@@ -1131,13 +1133,13 @@ backend_init_drm(struct vt_backend_t* backend) {
   if(backend->comp->have_proto_dmabuf_explicit_sync)  {
     const uint32_t dmabuf_explicit_sync_ver = 2;
     if(!vt_proto_linux_explicit_sync_v1_init(backend->comp, dmabuf_explicit_sync_ver)) {
-      VT_ERROR(backend->comp->log, "DRM: Failed to initialize DMABUF explicit sync protocol version %i.", dmabuf_explicit_sync_ver);
+      VT_ERROR(backend->comp->log, "Failed to initialize DMABUF explicit sync protocol version %i.", dmabuf_explicit_sync_ver);
     } else {
-      VT_TRACE(backend->comp->log, "DRM: Successfully initialized DMABUF explicit sync protocol version %i.", dmabuf_explicit_sync_ver);
+      VT_TRACE(backend->comp->log, "Successfully initialized DMABUF explicit sync protocol version %i.", dmabuf_explicit_sync_ver);
     }
   }
 
-  VT_TRACE(backend->comp->log, "DRM: Successfully initialized DRM backend.");
+  VT_TRACE(backend->comp->log, "Successfully initialized DRM backend.");
 
   return true;
 }
@@ -1165,7 +1167,7 @@ backend_handle_frame_drm(struct vt_backend_t* backend, struct vt_output_t* outpu
   struct drm_backend_master_state_t* drm_master = BACKEND_DATA(backend, struct drm_backend_master_state_t); 
 
   if (!drm_master->main_drm) {
-    VT_ERROR(backend->comp->log, "DRM: No main render device available for frame handling.");
+    VT_ERROR(backend->comp->log, "No main render device available for frame handling.");
     return false;
   }
   return _drm_handle_frame_for_device(drm_master->main_drm, output);
@@ -1219,7 +1221,7 @@ bool
 backend_implement_drm(struct vt_compositor_t* comp) {
   if(!comp || !comp->backend) return false;
 
-  VT_TRACE(comp->log, "DRM: Implementing backend...");
+  VT_TRACE(comp->log, "Implementing backend...");
 
   comp->backend->platform = VT_BACKEND_DRM_GBM; 
 

@@ -8,3 +8,4 @@ bool vt_proto_linux_explicit_sync_v1_init(
 
 void vt_proto_linux_explicit_sync_v1_err(
     struct wl_resource* resource, const char* msg);
+

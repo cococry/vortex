@@ -2,6 +2,7 @@
 #include "src/input/backends/libinput/libinput.h"
 #include "src/input/backends/wayland/wayland_input.h"
 
+#define _SUBSYS_NAME "INPUT"
 
 void 
 vt_input_implement(struct vt_input_backend_t* backend, enum vt_input_backend_platform_t platform) {
@@ -25,6 +26,6 @@ vt_input_implement(struct vt_input_backend_t* backend, enum vt_input_backend_pla
     };
   }
   else {
-    VT_ERROR(backend->comp->log, "INPUT: Invalid input backend.");
+    VT_ERROR(backend->comp->log, "Invalid input backend.");
   }
 }

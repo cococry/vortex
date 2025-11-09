@@ -15,6 +15,7 @@
 #include "../../core/core_types.h"
 
 #define _VT_DRM_PRIMARY_MINOR_NAME  "card"
+#define _SUBSYS_NAME "SESSION"
 
 static void                   _vt_session_seat_log_func(enum libseat_log_level level, const char* format, va_list args);
 static void                   _vt_session_seat_enable(struct libseat *seat, void* userdata);
@@ -100,7 +101,7 @@ _vt_session_seat_enable(struct libseat *seat, void* userdata) {
   session_drm->_first_libseat_enable = false;
 
   session->active = true;
-  VT_TRACE(session->comp->log, "SESSION: Seat enabled by libseat");
+  VT_TRACE(session->comp->log, "Seat enabled by libseat");
 }
 
 void 
@@ -112,10 +113,10 @@ _vt_session_seat_disable(struct libseat *seat, void* userdata) {
   vt_util_emit_signal(&session_drm->ev_seat_disable, session);
   
   if (libseat_disable_seat(seat) < 0) {
-    VT_ERROR(session->comp->log, "SESSION: Failed to disable seat %s.", session_drm->seat_name);
+    VT_ERROR(session->comp->log, "Failed to disable seat %s.", session_drm->seat_name);
   }
   session->active = false;
-  VT_TRACE(session->comp->log, "SESSION: Seat disabled by libseat");
+  VT_TRACE(session->comp->log, "Seat disabled by libseat");
 }
 
 int32_t
@@ -126,7 +127,7 @@ _vt_session_seat_dispatch(int fd, uint32_t mask, void* data) {
 
   int ret = libseat_dispatch(session_drm->seat, 0);
   if (ret < 0) {
-    VT_ERROR(session->comp->log, "SESSION: libseat_dispatch() failed: %s\n", strerror(errno));
+    VT_ERROR(session->comp->log, "libseat_dispatch() failed: %s\n", strerror(errno));
   }
   return 0;
 }
@@ -155,7 +156,7 @@ _vt_session_drm_udev_enumerate_cards(struct vt_session_t* session) {
 
   struct udev_enumerate* enumerate = udev_enumerate_new(session_drm->udev);
   if (!enumerate) {
-    VT_ERROR(session->comp->log, "SESSION: Cannot enumerate DRM devices with udev.");
+    VT_ERROR(session->comp->log, "Cannot enumerate DRM devices with udev.");
     return NULL;
   }
 
@@ -164,7 +165,7 @@ _vt_session_drm_udev_enumerate_cards(struct vt_session_t* session) {
   udev_enumerate_add_match_sysname(enumerate, _VT_DRM_PRIMARY_MINOR_NAME "[0-9]*");
 
   if (udev_enumerate_scan_devices(enumerate) != 0) {
-    VT_TRACE(session->comp->log, "SESSION: Cannot scan enumerted udev devices.");
+    VT_TRACE(session->comp->log, "Cannot scan enumerted udev devices.");
     udev_enumerate_unref(enumerate);
     return NULL;
   }
@@ -181,7 +182,7 @@ _vt_session_drm_open_device_if_kms(struct vt_session_t* session, const char* pat
 
   struct vt_device_t* dev = VT_ALLOC(session->comp, sizeof(*dev));
   if(!vt_session_open_device_drm(session, dev, path) || !_vt_session_drm_card_is_kms(dev->fd)) {
-    VT_TRACE(session->comp->log, "SESSION: Not using non-KMS device '%s'.\n", path); 
+    VT_TRACE(session->comp->log, "Not using non-KMS device '%s'.\n", path); 
     return NULL;
   }
 
@@ -201,7 +202,7 @@ _vt_session_drm_udev_dispatch(int fd, uint32_t mask, void *data) {
   const char* name = udev_device_get_sysname(udev_dev);
   const char* node = udev_device_get_devnode(udev_dev);
   const char* action = udev_device_get_action(udev_dev);
-  VT_TRACE(session->comp->log, "SESSION: Received udev event for device %s (%s)", name, action);
+  VT_TRACE(session->comp->log, "Received udev event for device %s (%s)", name, action);
 
   if (!_vt_session_drm_card_valid(name) || !action || !action) { 
     udev_device_unref(udev_dev);
@@ -218,7 +219,7 @@ _vt_session_drm_udev_dispatch(int fd, uint32_t mask, void *data) {
   }
 
   if (strcmp(action, "add") == 0) {
-    VT_TRACE(session->comp->log, "SESSION: Device %s added", name);
+    VT_TRACE(session->comp->log, "Device %s added", name);
     struct vt_session_drm_event_t ev = { .device_node_name = name };
     vt_util_emit_signal(&session_drm->ev_drm_add_card, &ev);
   } else if (strcmp(action, "change") == 0 || strcmp(action, "remove") == 0) {
@@ -230,18 +231,18 @@ _vt_session_drm_udev_dispatch(int fd, uint32_t mask, void *data) {
       }
 
       if (strcmp(action, "change") == 0) {
-        VT_TRACE(session->comp->log, "SESSION: Device %s changed", name);
+        VT_TRACE(session->comp->log, "Device %s changed", name);
         struct vt_session_drm_event_t ev = { .device_node_name = name };
         vt_util_emit_signal(&session_drm->ev_drm_change_card, &ev);
       } else if (strcmp(action, "remove") == 0) {
-        VT_TRACE(session->comp->log, "SESSION: Device %s removed", name);
+        VT_TRACE(session->comp->log, "Device %s removed", name);
         struct vt_session_drm_event_t ev = { .device_node_name = name };
         vt_util_emit_signal(&session_drm->ev_drm_remove_card, &ev);
       } 
       break;
     }
   } else {
-    VT_WARN(session->comp->log, "SESSION: Got unknown udev action for device %s", name);
+    VT_WARN(session->comp->log, "Got unknown udev action for device %s", name);
   }
 
   return 0;
@@ -281,12 +282,12 @@ vt_session_init_drm(struct vt_session_t* session) {
 
   session_drm->seat = libseat_open_seat(&_seat_listener, session);
   if(!session_drm->seat) {
-    VT_ERROR(session->comp->log, "SESSION: Cannot open seat.");
+    VT_ERROR(session->comp->log, "Cannot open seat.");
     return false;
   }
   const char *seat_name = libseat_seat_name(session_drm->seat);
   if (seat_name == NULL) {
-    VT_ERROR(session->comp->log, "SESSION: Unable to get seat name");
+    VT_ERROR(session->comp->log, "Unable to get seat name");
     vt_session_terminate_drm(session);
     return false;
   }
@@ -298,7 +299,7 @@ vt_session_init_drm(struct vt_session_t* session) {
   wl_event_loop_add_fd(session->comp->wl.evloop, fd, WL_EVENT_READABLE, _vt_session_seat_dispatch, session);
 
   if (libseat_dispatch(session_drm->seat, 0) == -1) {
-    VT_ERROR(session->comp->log, "SESSION: Cannot dispatch seat event on seat '%s'.", session_drm->seat_name);
+    VT_ERROR(session->comp->log, "Cannot dispatch seat event on seat '%s'.", session_drm->seat_name);
     vt_session_terminate_drm(session);
     return false;
   }
@@ -307,7 +308,7 @@ vt_session_init_drm(struct vt_session_t* session) {
 
   session_drm->udev = udev_new();
   if(!session_drm->udev) {
-    VT_ERROR(session->comp->log, "SESSION: Cannot initialize udev.");
+    VT_ERROR(session->comp->log, "Cannot initialize udev.");
     vt_session_terminate_drm(session);
     return false;
   }
@@ -320,7 +321,7 @@ vt_session_init_drm(struct vt_session_t* session) {
   // drinking seed oils to this (edgy comment) 
   session_drm->udev_mon = udev_monitor_new_from_netlink(session_drm->udev, "udev");
   if(!session_drm->udev_mon) {
-    VT_ERROR(session->comp->log, "SESSION: Cannot get udev monitor from netlink.");
+    VT_ERROR(session->comp->log, "Cannot get udev monitor from netlink.");
     vt_session_terminate_drm(session);
     return false;
   }
@@ -349,7 +350,7 @@ vt_session_terminate_drm(struct vt_session_t* session) {
 
   if(session_drm->seat) {
     if(libseat_close_seat(session_drm->seat) < 0) {
-      VT_ERROR(session->comp->log, "SESSION: Cannot close seat.");
+      VT_ERROR(session->comp->log, "Cannot close seat.");
     }
     session_drm->seat = NULL;
   }
@@ -375,13 +376,13 @@ vt_session_open_device_drm(struct vt_session_t* session, struct vt_device_t* dev
 
   int32_t device_fd, device_id;
   if((device_id = libseat_open_device(session_drm->seat, dev->path, &device_fd)) < 0) {
-    VT_ERROR(session->comp->log, "SESSION: Cannot open device '%s'.\n", dev->path);
+    VT_ERROR(session->comp->log, "Cannot open device '%s'.\n", dev->path);
     return false;
   }
 
   struct stat st; 
   if(fstat(device_fd, &st) < 0) {
-    VT_ERROR(session->comp->log, "SESSION: Failed to stat device (FD: %i): %s'.\n", device_fd, strerror(errno));
+    VT_ERROR(session->comp->log, "Failed to stat device (FD: %i): %s'.\n", device_fd, strerror(errno));
     vt_session_close_device_drm(session, dev);
     return false;
   }
@@ -390,7 +391,7 @@ vt_session_open_device_drm(struct vt_session_t* session, struct vt_device_t* dev
   dev->device_id = device_id;
   dev->dev = st.st_rdev;
   
-  VT_ERROR(session->comp->log, "SESSION: Opening device %s, device ID: %i", path, dev->dev);
+  VT_ERROR(session->comp->log, "Opening device %s, device ID: %i", path, dev->dev);
 
   return true;
 }
@@ -411,7 +412,7 @@ vt_session_close_device_drm(struct vt_session_t* session, struct vt_device_t* de
 
   // Just close lé device
   if(libseat_close_device(session_drm->seat, dev->device_id) < 0) {
-    VT_ERROR(session->comp->log, "SESSION: Failed to close device (ID: %i)'.\n", dev->device_id);
+    VT_ERROR(session->comp->log, "Failed to close device (ID: %i)'.\n", dev->device_id);
     return false;
   }
   // ah and the fd aswell
@@ -433,7 +434,7 @@ vt_session_get_native_handle_drm(struct vt_session_t* session, struct vt_device_
   if(!session || !dev) return NULL;
   drmDevice *device = NULL;
   if (drmGetDeviceFromDevId(dev->dev, 0, &device) != 0) {
-    VT_ERROR(session->comp->log, "SESSION: Failed to get native handle of device '%s': drmGetDeviceFromDevId failed.", dev->path);
+    VT_ERROR(session->comp->log, "Failed to get native handle of device '%s': drmGetDeviceFromDevId failed.", dev->path);
     return NULL;
   }
   return device;
@@ -488,7 +489,7 @@ vt_session_enumerate_cards_drm(struct vt_session_t* session, struct vt_device_t*
   // (e.g the user happend to plug in his GPU within the next ten seconds after starting the compositor.)
   if(!udev_enumerate_get_list_entry(enumerate)) {
     udev_enumerate_unref(enumerate);
-    VT_TRACE(session->comp->log, "SESSION: No DRM devices were found, we now wait for a DRM card device...");
+    VT_TRACE(session->comp->log, "No DRM devices were found, we now wait for a DRM card device...");
 
     // Waiting for the "add" signal 
     struct wait_for_gpu_handler_t handler;
@@ -499,7 +500,7 @@ vt_session_enumerate_cards_drm(struct vt_session_t* session, struct vt_device_t*
     int32_t max_wait_time = 10000; // ms
     while(!handler.found) {
       if(wl_event_loop_dispatch(session->comp->wl.evloop, max_wait_time) < 0) {
-        VT_ERROR(session->comp->log, "SESSION: Failed to wait for a DRM card device.");
+        VT_ERROR(session->comp->log, "Failed to wait for a DRM card device.");
         return false;
       }
       uint64_t now = vt_util_get_time_msec();
@@ -580,7 +581,7 @@ vt_session_switch_vt_drm(struct vt_session_t* session, uint32_t vt) {
   struct vt_session_drm_t* session_drm = BACKEND_DATA(session, struct vt_session_drm_t); 
 
   if(libseat_switch_session(session_drm->seat, vt) < 0) {
-    VT_ERROR(session->comp->log, "SESSION: Failed to switch to VT session %i.", vt);
+    VT_ERROR(session->comp->log, "Failed to switch to VT session %i.", vt);
     return false;
   }
 

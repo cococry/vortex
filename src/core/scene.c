@@ -3,11 +3,13 @@
 
 #define _SCENE_CHILD_CAP_INIT 4
 
+#define _SUBSYS_NAME "SCENE"
+
 struct vt_scene_node_t*
 vt_scene_node_create(struct vt_compositor_t* c, float x, float y, float w, float h) {
   struct vt_scene_node_t* n = VT_ALLOC(c, sizeof(*n));
   if(!n) {
-    VT_ERROR(c->log, "Scene: Failed to allocate scene node.");
+    VT_ERROR(c->log, "Failed to allocate scene node.");
     return NULL;
   }
 
@@ -20,7 +22,7 @@ vt_scene_node_create(struct vt_compositor_t* c, float x, float y, float w, float
 bool 
 vt_scene_node_add_child(struct vt_compositor_t* c, struct vt_scene_node_t* node, struct vt_scene_node_t* child) {
   if(!c || !node || !child) {
-    VT_ERROR(c->log, "Scene: One or more parameters of vt_scene_node_add_child() are invalid, cannot add child.");
+    VT_ERROR(c->log, "One or more parameters of vt_scene_node_add_child() are invalid, cannot add child.");
     return false;
   }
   if(node->child_count >= node->_child_cap) {

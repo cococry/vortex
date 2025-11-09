@@ -14,6 +14,8 @@
 #include "src/core/util.h"
 #include "src/protocols/xdg_shell.h"
 
+#define _SUBSYS_NAME "SEAT"
+
 static void _wl_seat_bind(struct wl_client* client, void* data, uint32_t version, uint32_t id);
 static int  _wl_create_keymap_fd(struct vt_keyboard_t* kbd);
 static void _wl_keyboard_send_initial_state(struct vt_keyboard_t *kbd);
@@ -512,7 +514,7 @@ vt_seat_set_keyboard_focus(struct vt_seat_t *seat,
 
     if(new_focus_xdg_surf && new_focus_xdg_surf->toplevel) {
       if(!vt_proto_xdg_toplevel_set_state_activated(new_focus_xdg_surf->toplevel, true)) {
-        VT_ERROR(seat->comp->log, "SEAT: vt_seat_set_pointer_focus: Cannot send XDG_TOPLEVEL_STATE_ACTIVATED to focused toplevel: %p.",
+        VT_ERROR(seat->comp->log, "vt_seat_set_pointer_focus: Cannot send XDG_TOPLEVEL_STATE_ACTIVATED to focused toplevel: %p.",
                  new_focus_xdg_surf->toplevel);
       }
     }
@@ -520,7 +522,7 @@ vt_seat_set_keyboard_focus(struct vt_seat_t *seat,
     struct vt_surface_t* old_focus_xdg_surf = seat->kb_focus.surf; 
     if(old_focus_xdg_surf && old_focus_xdg_surf->xdg_surf && old_focus_xdg_surf->xdg_surf->toplevel) {
       if(!vt_proto_xdg_toplevel_set_state_activated(old_focus_xdg_surf->xdg_surf->toplevel, false)) {
-        VT_ERROR(seat->comp->log, "SEAT: vt_seat_set_pointer_focus: Cannot send XDG_TOPLEVEL_STATE_ACTIVATED to focused toplevel: %p.",
+        VT_ERROR(seat->comp->log, "vt_seat_set_pointer_focus: Cannot send XDG_TOPLEVEL_STATE_ACTIVATED to focused toplevel: %p.",
                  old_focus_xdg_surf->xdg_surf->toplevel);
       }
     }
@@ -572,7 +574,7 @@ vt_seat_set_pointer_focus(struct vt_seat_t *seat,
 
     if(new_focus_xdg_surf && new_focus_xdg_surf->toplevel) {
       if(!vt_proto_xdg_toplevel_set_state_activated(new_focus_xdg_surf->toplevel, true)) {
-        VT_ERROR(seat->comp->log, "SEAT: vt_seat_set_pointer_focus: Cannot send XDG_TOPLEVEL_STATE_ACTIVATED to focused toplevel: %p.",
+        VT_ERROR(seat->comp->log, "Cannot send XDG_TOPLEVEL_STATE_ACTIVATED to focused toplevel: %p.",
                  new_focus_xdg_surf->toplevel);
       }
     }
@@ -580,7 +582,7 @@ vt_seat_set_pointer_focus(struct vt_seat_t *seat,
     struct vt_surface_t* old_focus_xdg_surf = seat->ptr_focus.surf; 
     if(old_focus_xdg_surf && old_focus_xdg_surf->xdg_surf && old_focus_xdg_surf->xdg_surf->toplevel) {
       if(!vt_proto_xdg_toplevel_set_state_activated(old_focus_xdg_surf->xdg_surf->toplevel, false)) {
-        VT_ERROR(seat->comp->log, "SEAT: vt_seat_set_pointer_focus: Cannot send XDG_TOPLEVEL_STATE_ACTIVATED to focused toplevel: %p.",
+        VT_ERROR(seat->comp->log, "Cannot send XDG_TOPLEVEL_STATE_ACTIVATED to focused toplevel: %p.",
                  old_focus_xdg_surf->xdg_surf->toplevel);
       }
     }

@@ -15,6 +15,8 @@
 
 #include "../core/util.h"
 
+#define _SUBSYS_NAME "VT_PROTO_LINUX_DMABUF_V1"
+
 struct vt_linux_dmabuf_v1_packed_feedback_tranche_t {
 	dev_t dev_target;
 	uint32_t flags; 
@@ -57,7 +59,7 @@ struct vt_linux_dmabuf_v1_params_t {
 };
 
 
-static void _proto_linux_dmabuf_v1_bind(struct wl_client *client, void *data,
+static void _proto_linux_dmabuf_v1_bind(struct wl_client* client, void* data,
                                         uint32_t version, uint32_t id);
 
 static void _proto_linux_dmabuf_v1_destroy(struct vt_proto_linux_dmabuf_v1_t* dmabuf);
@@ -99,16 +101,16 @@ static void _linux_dmabuf_v1_params_add(
   uint32_t modifier_lo);
 
 static void _linux_dmabuf_v1_params_create(
-  struct wl_client *client,
-  struct wl_resource *resource,
+  struct wl_client* client,
+  struct wl_resource* resource,
   int32_t width,
   int32_t height,
   uint32_t format,
   uint32_t flags);
 
 static void _linux_dmabuf_v1_params_create_immed(
-  struct wl_client *client,
-  struct wl_resource *resource,
+  struct wl_client* client,
+  struct wl_resource* resource,
   uint32_t buffer_id,
   int32_t width,
   int32_t height,
@@ -116,24 +118,24 @@ static void _linux_dmabuf_v1_params_create_immed(
   uint32_t flags);
 
 static void _linux_dmabuf_v1_params_handle_res_destroy(
-  struct wl_resource *resource
+  struct wl_resource* resource
 );
 
 static void _linux_dmabuf_v1_buffer_handle_res_destroy(
-  struct wl_resource *resource
+  struct wl_resource* resource
 );
 
 static void _linux_dmabuf_v1_surf_feedback_handle_res_destroy(
-  struct wl_resource *resource
+  struct wl_resource* resource
 );
 
 static void _linux_dmabuf_v1_feedback_destroy(
-  struct wl_client *client,
-  struct wl_resource *resource
+  struct wl_client* client,
+  struct wl_resource* resource
 );
 
-static void _linux_dmabuf_v1_buffer_destroy(struct wl_client *client,
-		struct wl_resource *resource);
+static void _linux_dmabuf_v1_buffer_destroy(struct wl_client* client,
+		struct wl_resource* resource);
 
 static bool _linux_dmabuf_set_default_feedback(
   struct vt_proto_linux_dmabuf_v1_t* proto,
@@ -197,114 +199,188 @@ static const struct wl_buffer_interface _dmabuf_wl_buffer_impl = {
 // ===================================================
 
 void 
-_proto_linux_dmabuf_v1_bind(struct wl_client *client, void *data,
-  uint32_t version, uint32_t id) {	
-  struct vt_proto_linux_dmabuf_v1_t* proto = data;
-	struct wl_resource* res;
-  if(!(res = wl_resource_create(client,
-		&zwp_linux_dmabuf_v1_interface, version, id))) {
-		wl_client_post_no_memory(client);
-		return;
+_proto_linux_dmabuf_v1_bind(
+  struct wl_client* client,
+  void* data,
+  uint32_t version,
+  uint32_t id) 
+{
+  /* 1. Validate protocol data pointer */
+  if (!data) {
+    VT_PARAM_CHECK_FAIL(_proto->comp);
+    return;
   }
-	wl_resource_set_implementation(res, &_proto_dmabuf_impl,
-		proto, NULL);
-  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Client bound with version %u", version);
 
-  if(version < ZWP_LINUX_DMABUF_V1_GET_DEFAULT_FEEDBACK_SINCE_VERSION)  {
+  struct vt_proto_linux_dmabuf_v1_t* proto = (struct vt_proto_linux_dmabuf_v1_t*)data;
+
+  /* 2. Allocate resource for the Linux DMA-BUF interface */
+  struct wl_resource* res = wl_resource_create(
+    client,
+    &zwp_linux_dmabuf_v1_interface,
+    version,
+    id);
+
+  if (!res) {
+    VT_WL_OUT_OF_MEMORY(_proto->comp, client);
+    return;
+  }
+
+  /* 3. Set handler functions via the implementation */
+  wl_resource_set_implementation(res, &_proto_dmabuf_impl, proto, NULL);
+
+  VT_TRACE(_proto->comp->log, "linux_dmabuf.bind: client bound with version %u.", version);
+
+  /* 4. For legacy clients (version < v4), send legacy formats */
+  if (version < ZWP_LINUX_DMABUF_V1_GET_DEFAULT_FEEDBACK_SINCE_VERSION) {
     _linux_dmabuf_legacy_send_default_formats(res);
     VT_TRACE(
-      _proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Sending legacy formats for client %p. (%i formats)", 
-             client, _proto->default_formats.size);
+      _proto->comp->log,
+      "linux_dmabuf.bind: sending legacy formats for client %p (%i formats).",
+      client,
+      _proto->default_formats.size);
   }
 }
 
-void _free_formats(struct wl_array *formats) {
+void 
+_free_formats(struct wl_array* formats) {
+  /* 1. Validate input parameter */
   if (!formats)
     return;
 
-  struct vt_dmabuf_drm_format_t *fmt;
+  /* 2. Free modifiers in each stored format */
+  struct vt_dmabuf_drm_format_t* fmt;
   wl_array_for_each(fmt, formats) {
     free(fmt->mods);
     fmt->mods = NULL;
   }
 
+  /* 3. Release the formats array */
   wl_array_release(formats);
 }
 
 void 
 _proto_linux_dmabuf_v1_destroy(struct vt_proto_linux_dmabuf_v1_t* dmabuf) {
-  
-  struct vt_linux_dmabuf_v1_surface_t* surface, *surface_tmp;
+  /* 1. Validate protocol handle */
+  if (!dmabuf) {
+    VT_PARAM_CHECK_FAIL(_proto->comp);
+    return;
+  }
+  /* 3. Free feedback and format resources */
+  _linux_dmabuf_free_feedback(dmabuf->default_feedback);
+  dmabuf->default_feedback = NULL;
+
+  /* 2. Destroy all associated DMA-BUF surfaces */
+  struct vt_linux_dmabuf_v1_surface_t* surface;
+  struct vt_linux_dmabuf_v1_surface_t* surface_tmp;
   wl_list_for_each_safe(surface, surface_tmp, &dmabuf->dmabuf_surfaces, link) {
     vt_proto_linux_dmabuf_v1_surface_destroy(surface->surf);
   }
-  _linux_dmabuf_free_feedback(dmabuf->default_feedback);
+
   _free_formats(&dmabuf->default_formats);
-  if(dmabuf->fd_main_dev >= 0) {
+
+  /* 4. Close main device FD if valid */
+  if (dmabuf->fd_main_dev >= 0)
     close(dmabuf->fd_main_dev);
-  }
+
+  /* 5. Remove compositor destroy listener link */
   wl_list_remove(&dmabuf->dsp_destroy.link);
+
+  VT_TRACE(dmabuf->comp->log, "linux_dmabuf.destroy: protocol destroyed.");
 }
 
 void 
 _proto_linux_dmabuf_v1_handle_dsp_destroy(struct wl_listener* listener, void* data) {
+  /* 1. Retrieve protocol handle from listener */
   struct vt_proto_linux_dmabuf_v1_t* dmabuf = wl_container_of(listener, dmabuf, dsp_destroy);
+  if (!dmabuf) {
+    VT_PARAM_CHECK_FAIL(_proto->comp);
+    return;
+  }
+
+  /* 2. Destroy protocol instance */
   _proto_linux_dmabuf_v1_destroy(dmabuf);
+
+  VT_TRACE(dmabuf->comp->log, "linux_dmabuf.display_destroy: compositor display destroyed.");
 }
-
-
 // ===================================================
 // ============== PER-BUFFER PROTOCOL ================
 // ===================================================
 
-
 void 
-_linux_dmabuf_v1_destroy(struct wl_client* client,
-			      struct wl_resource* resource) {
+_linux_dmabuf_v1_destroy(struct wl_client* client, struct wl_resource* resource) {
+  /* Destroy the linux-dmabuf global resource */
   wl_resource_destroy(resource);
 }
-	
+
 void 
-_linux_dmabuf_v1_create_params(struct wl_client* client,
-			      struct wl_resource* resource,
-			      uint32_t params_id) {
-  struct vt_linux_dmabuf_v1_params_t* params;
-  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_v1_create_params"); 
-  if(!(params = calloc(1, sizeof(*params)))) {
+_linux_dmabuf_v1_create_params(
+  struct wl_client* client,
+  struct wl_resource* resource,
+  uint32_t params_id) 
+{
+  VT_TRACE(_proto->comp->log, "linux_dmabuf.create_params: request received.");
+
+  /* 1. Allocate internal params handle */
+  struct vt_linux_dmabuf_v1_params_t* params = calloc(1, sizeof(*params));
+  if (!params) {
     wl_resource_post_no_memory(resource);
     return;
   }
+
+  /* 2. Initialize parameter attributes */
   memset(params->attr.fds, -1, sizeof(params->attr.fds));
 
-  if(!(params->res = wl_resource_create(
-    client, &zwp_linux_buffer_params_v1_interface,
-    wl_resource_get_version(resource), params_id))) {
-    free(params);
-    wl_client_post_no_memory(client);
-    return;
-  }
-	wl_resource_set_implementation(params->res,
-		&_dmabuf_params_impl, params, _linux_dmabuf_v1_params_handle_res_destroy);
-}
-	
-void 
-_linux_dmabuf_v1_get_default_feedback(struct wl_client *client,
-				     struct wl_resource *resource,
-				     uint32_t id) {
-	struct wl_resource* res;
-  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_v1_get_default_feedback"); 
-  if(!(res = wl_resource_create(client,
-		&zwp_linux_dmabuf_feedback_v1_interface, wl_resource_get_version(resource), id))) {
-    wl_client_post_no_memory(client);
-    return;
-  }
-  wl_resource_set_implementation(
-    res, &_dmabuf_feedback_impl,
-    NULL, NULL);
+  /* 3. Allocate resource for zwp_linux_buffer_params_v1 interface */
+  params->res = wl_resource_create(
+    client,
+    &zwp_linux_buffer_params_v1_interface,
+    wl_resource_get_version(resource),
+    params_id);
 
-  if (_proto && _proto->default_feedback) {
-    _linux_dmabuf_send_feedback(res, _proto->default_feedback);
+  if (!params->res) {
+    free(params);
+    VT_WL_OUT_OF_MEMORY(_proto->comp, client);
+    return;
   }
+
+  /* 4. Set handler functions via the implementation */
+  wl_resource_set_implementation(
+    params->res,
+    &_dmabuf_params_impl,
+    params,
+    _linux_dmabuf_v1_params_handle_res_destroy);
+
+  VT_TRACE(_proto->comp->log, "linux_dmabuf.create_params: created buffer params resource %p.", params->res);
+}
+
+void 
+_linux_dmabuf_v1_get_default_feedback(
+  struct wl_client* client,
+  struct wl_resource* resource,
+  uint32_t id) 
+{
+  VT_TRACE(_proto->comp->log, "linux_dmabuf.get_default_feedback: request received.");
+
+  /* 1. Allocate resource for zwp_linux_dmabuf_feedback_v1 interface */
+  struct wl_resource* res = wl_resource_create(
+    client,
+    &zwp_linux_dmabuf_feedback_v1_interface,
+    wl_resource_get_version(resource),
+    id);
+
+  if (!res) {
+    VT_WL_OUT_OF_MEMORY(_proto->comp, client);
+    return;
+  }
+
+  /* 2. Set handler functions via the implementation */
+  wl_resource_set_implementation(res, &_dmabuf_feedback_impl, NULL, NULL);
+
+  /* 3. Send feedback if available */
+  if (_proto && _proto->default_feedback)
+    _linux_dmabuf_send_feedback(res, _proto->default_feedback);
+
+  VT_TRACE(_proto->comp->log, "linux_dmabuf.get_default_feedback: sent default feedback to client %p.", client);
 }
 
 void 
@@ -312,46 +388,66 @@ _linux_dmabuf_v1_get_surface_feedback(
   struct wl_client* client,
   struct wl_resource* resource,
   uint32_t id,
-  struct wl_resource* surface) {
-  struct vt_surface_t* surf;
-  surf = wl_resource_get_user_data(surface);
-  if(!surf) return;
-  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_v1_get_surface_feedback"); 
+  struct wl_resource* surface) 
+{
+  VT_TRACE(_proto->comp->log, "linux_dmabuf.get_surface_feedback: request received.");
 
-	struct vt_linux_dmabuf_v1_surface_t* dmabuf_surf = _linux_dmabuf_surface_from_surf(surf);
-  if(!dmabuf_surf) {
-    wl_client_post_no_memory(client);
+  /* 1. Retrieve internal surface handle */
+  struct vt_surface_t* surf = surface ? wl_resource_get_user_data(surface) : NULL;
+  if (!surf) {
+    VT_PARAM_CHECK_FAIL(_proto->comp);
     return;
   }
 
+  /* 2. Retrieve internal DMA-BUF surface handle */
+  struct vt_linux_dmabuf_v1_surface_t* dmabuf_surf = _linux_dmabuf_surface_from_surf(surf);
+  if (!dmabuf_surf) {
+    VT_WL_OUT_OF_MEMORY(_proto->comp, client);
+    return;
+  }
+
+  /* 3. Create feedback resource */
   uint32_t version = wl_resource_get_version(resource);
   struct wl_resource* res_feedback = wl_resource_create(
     client,
-    &zwp_linux_dmabuf_feedback_v1_interface, version, id);
+    &zwp_linux_dmabuf_feedback_v1_interface,
+    version,
+    id);
+
   if (!res_feedback) {
-    wl_client_post_no_memory(client);
+    VT_WL_OUT_OF_MEMORY(_proto->comp, client);
     return;
   }
+
+  /* 4. Set handler functions via implementation */
   wl_resource_set_implementation(
-    res_feedback, &_dmabuf_feedback_impl,
-    NULL, _linux_dmabuf_v1_surf_feedback_handle_res_destroy);
+    res_feedback,
+    &_dmabuf_feedback_impl,
+    NULL,
+    _linux_dmabuf_v1_surf_feedback_handle_res_destroy);
+
+  /* 5. Track resource in DMA-BUF surface list */
   wl_list_insert(&dmabuf_surf->res_feedback, wl_resource_get_link(res_feedback));
 
+  /* 6. Send feedback for surface or fallback to default */
   _linux_dmabuf_send_feedback(
-    res_feedback, dmabuf_surf->feedback ? dmabuf_surf->feedback : _proto->default_feedback);
+    res_feedback,
+    dmabuf_surf->feedback ? dmabuf_surf->feedback : _proto->default_feedback);
 
-  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Got surface feedback from  surface with version: %i", wl_resource_get_version(surface));
-  
+  VT_TRACE(
+    _proto->comp->log,
+    "linux_dmabuf.get_surface_feedback: sent feedback to surface %p (version %i).",
+    surface,
+    wl_resource_get_version(surface));
 }
 
-void
-_linux_dmabuf_v1_params_destroy(
-  struct wl_client* client,
-  struct wl_resource* resource) {
+void 
+_linux_dmabuf_v1_params_destroy(struct wl_client* client, struct wl_resource* resource) {
+  /* Destroy the linux_dmabuf buffer params resource */
   wl_resource_destroy(resource);
 }
 
-void
+void 
 _linux_dmabuf_v1_params_add(
   struct wl_client* client,
   struct wl_resource* resource,
@@ -360,9 +456,12 @@ _linux_dmabuf_v1_params_add(
   uint32_t offset,
   uint32_t stride,
   uint32_t modifier_hi,
-  uint32_t modifier_lo) {
-  struct vt_linux_dmabuf_v1_params_t* params = wl_resource_get_user_data(resource);
-  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_v1_params_add"); 
+  uint32_t modifier_lo) 
+{
+  VT_TRACE(_proto->comp->log, "linux_dmabuf.params_add: request received.");
+
+  /* 1. Retrieve internal params handle */
+  struct vt_linux_dmabuf_v1_params_t* params = resource ? wl_resource_get_user_data(resource) : NULL;
   if (!params) {
     wl_resource_post_error(
       resource,
@@ -372,56 +471,75 @@ _linux_dmabuf_v1_params_add(
     return;
   }
 
+  /* 2. Validate plane index */
   if (plane_idx >= VT_DMABUF_PLANES_CAP) {
     wl_resource_post_error(
       resource,
       ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_PLANE_IDX,
-      "plane index %u > planes cap: %u", plane_idx, VT_DMABUF_PLANES_CAP);
+      "plane index %u > planes cap: %u",
+      plane_idx,
+      VT_DMABUF_PLANES_CAP);
     close(fd);
     return;
   }
+
+  /* 3. Check if the same plane was already set */
   if (params->attr.fds[plane_idx] != -1) {
     wl_resource_post_error(
       resource,
       ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_PLANE_SET,
       "a dmabuf with FD %d has already been added for plane %u",
-      params->attr.fds[plane_idx], plane_idx);
+      params->attr.fds[plane_idx],
+      plane_idx);
     close(fd);
     return;
   }
 
-  // all planes must have the same modifier 
+  /* 4. Validate and enforce consistent modifiers across planes */
   uint64_t mod = ((uint64_t)modifier_hi << 32) | modifier_lo;
   if (params->has_mod && mod != params->attr.mod) {
     wl_resource_post_error(
       resource,
       ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INVALID_FORMAT,
-      "sent modifier %" PRIu64 " for plane %u, expected"
-      " modifier %" PRIu64 " like other planes",
-      mod, plane_idx, params->attr.mod);
+      "sent modifier %" PRIu64 " for plane %u, expected modifier %" PRIu64 " like other planes",
+      mod,
+      plane_idx,
+      params->attr.mod);
     close(fd);
     return;
   }
 
-	params->attr.mod = mod;
-	params->has_mod  = true;
+  /* 5. Store plane parameters */
+  params->attr.mod = mod;
+  params->has_mod = true;
+  params->attr.fds[plane_idx] = fd;
+  params->attr.offsets[plane_idx] = offset;
+  params->attr.strides[plane_idx] = stride;
+  params->attr.num_planes++;
 
-	params->attr.fds[plane_idx] = fd;
-	params->attr.offsets[plane_idx] = offset;
-	params->attr.strides[plane_idx] = stride;
-	params->attr.num_planes++;
-
+  VT_TRACE(
+    _proto->comp->log,
+    "linux_dmabuf.params_add: added plane %u (FD=%i, stride=%u, offset=%u, mod=%" PRIu64 ").",
+    plane_idx,
+    fd,
+    stride,
+    offset,
+    mod);
 }
 
-void
+void 
 _linux_dmabuf_params_create(
   struct wl_resource* resource,
   uint32_t buf_id,
   int32_t width,
   int32_t height,
   uint32_t format,
-  uint32_t flags) {
-  struct vt_linux_dmabuf_v1_params_t* params = wl_resource_get_user_data(resource);
+  uint32_t flags) 
+{
+  VT_TRACE(_proto->comp->log, "linux_dmabuf.params_create: request received.");
+
+  /* 1. Retrieve internal params handle */
+  struct vt_linux_dmabuf_v1_params_t* params = resource ? wl_resource_get_user_data(resource) : NULL;
   if (!params) {
     wl_resource_post_error(
       resource,
@@ -429,19 +547,19 @@ _linux_dmabuf_params_create(
       "params was already used to create a wl_buffer");
     return;
   }
-  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_params_create"); 
-  
-  // we used up those params to create a buffer
+
+  /* 2. Mark params as consumed */
   wl_resource_set_user_data(resource, NULL);
 
+  /* 3. Validate that at least one plane was provided */
   if (!params->attr.num_planes) {
     wl_resource_post_error(
       resource,
       ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INCOMPLETE,
       "no dmabuf has been added to the params");
+  }
 
-	}
-
+  /* 4. Ensure plane 0 is set */
   if (params->attr.fds[0] == -1) {
     wl_resource_post_error(
       resource,
@@ -450,22 +568,19 @@ _linux_dmabuf_params_create(
     _linux_dmabuf_close_params(params);
   }
 
+  /* 5. Verify no gaps in plane indices */
   bool has_gap = false;
   int highest_plane = -1;
-
   for (int i = 0; i < VT_DMABUF_PLANES_CAP; i++) {
-    if (params->attr.fds[i] >= 0) {
+    if (params->attr.fds[i] >= 0)
       highest_plane = i;
-    }
   }
-
   for (int i = 0; i < highest_plane; i++) {
     if (params->attr.fds[i] < 0) {
       has_gap = true;
       break;
     }
   }
-
   if (has_gap) {
     wl_resource_post_error(
       resource,
@@ -474,17 +589,20 @@ _linux_dmabuf_params_create(
     _linux_dmabuf_close_params(params);
   }
 
-  if (!zwp_linux_buffer_params_v1_flags_is_valid(flags,  wl_resource_get_version(resource))) {
-    wl_resource_post_error(resource,
-                           ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INVALID_FORMAT,
-                           "Unknown dmabuf flags %"PRIu32, flags);
+  /* 6. Validate flags */
+  if (!zwp_linux_buffer_params_v1_flags_is_valid(flags, wl_resource_get_version(resource))) {
+    wl_resource_post_error(
+      resource,
+      ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INVALID_FORMAT,
+      "Unknown dmabuf flags %" PRIu32,
+      flags);
     _linux_dmabuf_close_params(params);
   }
 
-
+  /* 7. Check unsupported flags */
   if (flags != 0) {
     if (buf_id == 0) {
-      VT_ERROR(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: DMABUF flags aren't supported.");
+      VT_ERROR(_proto->comp->log, "DMABUF flags aren't supported.");
       zwp_linux_buffer_params_v1_send_failed(resource);
     } else {
       wl_resource_post_error(
@@ -495,7 +613,7 @@ _linux_dmabuf_params_create(
     _linux_dmabuf_close_params(params);
   }
 
-
+  /* 8. Assign width, height, and format */
   params->attr.width = width;
   params->attr.height = height;
   params->attr.format = format;
@@ -504,72 +622,54 @@ _linux_dmabuf_params_create(
     wl_resource_post_error(
       resource,
       ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INVALID_DIMENSIONS,
-      "invalid width %i or height %i", width, height);
+      "invalid width %i or height %i",
+      width,
+      height);
     _linux_dmabuf_close_params(params);
   }
 
+  /* 9. Validate plane sizes and offsets */
   for (int i = 0; i < params->attr.num_planes; i++) {
-    if ((uint64_t)params->attr.offsets[i]
-      + params->attr.strides[i] > UINT32_MAX) {
+    if ((uint64_t)params->attr.offsets[i] + params->attr.strides[i] > UINT32_MAX ||
+        (uint64_t)params->attr.offsets[i] + ((uint64_t)params->attr.strides[i] * height) > UINT32_MAX) {
       wl_resource_post_error(
         resource,
         ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_OUT_OF_BOUNDS,
-        "size overflow for plane %d", i);
-      _linux_dmabuf_close_params(params);
-    }
-
-    if ((uint64_t)params->attr.offsets[i]
-      + (uint64_t)params->attr.strides[i] * height > UINT32_MAX) {
-      wl_resource_post_error(
-        resource,
-        ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_OUT_OF_BOUNDS,
-        "size overflow for plane %d", i);
+        "size overflow for plane %d",
+        i);
       _linux_dmabuf_close_params(params);
     }
 
     off_t size = lseek(params->attr.fds[i], 0, SEEK_END);
-    if (size == -1) continue;
+    if (size == -1)
+      continue;
 
-    if (params->attr.offsets[i] > size) {
+    if (params->attr.offsets[i] > size ||
+        params->attr.offsets[i] + params->attr.strides[i] > size ||
+        params->attr.strides[i] == 0 ||
+        (i == 0 && params->attr.offsets[i] + (params->attr.strides[i] * height) > size)) {
       wl_resource_post_error(
         resource,
         ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_OUT_OF_BOUNDS,
-        "invalid offset %" PRIu32 " for plane %d",
-        params->attr.offsets[i], i);
+        "invalid offset or stride for plane %d",
+        i);
       _linux_dmabuf_close_params(params);
     }
-
-    if (params->attr.offsets[i] + params->attr.strides[i] > size ||
-				params->attr.strides[i] == 0) {
-			wl_resource_post_error(resource,
-				ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_OUT_OF_BOUNDS,
-				"invalid stride %" PRIu32 " for plane %d",
-				params->attr.strides[i], i);
-      _linux_dmabuf_close_params(params);
-		}
-
-		// planes > 0 might be subsampled according to fourcc format
-		if (i == 0 && params->attr.offsets[i] +
-				params->attr.strides[i] * height > size) {
-			wl_resource_post_error(resource,
-				ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_OUT_OF_BOUNDS,
-				"invalid buffer stride or height for plane %d", i);
-      _linux_dmabuf_close_params(params);
-		}
   }
 
+  /* 10. Validate backend importability */
   struct vt_backend_t* backend = _proto->comp->backend;
-  if(!backend->impl.is_dmabuf_importable) {
-      wl_resource_post_error(
-        resource,
-        ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INVALID_WL_BUFFER,
-        "DMABUFs are not supported by the compositor backend");
+  if (!backend->impl.is_dmabuf_importable) {
+    wl_resource_post_error(
+      resource,
+      ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INVALID_WL_BUFFER,
+      "DMABUFs are not supported by the compositor backend");
     _linux_dmabuf_close_params(params);
   }
 
-  if(!backend->impl.is_dmabuf_importable(backend, &params->attr, _proto->fd_main_dev)) {
+  if (!backend->impl.is_dmabuf_importable(backend, &params->attr, _proto->fd_main_dev)) {
     if (buf_id == 0) {
-      VT_ERROR(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: DMABUF flags aren't supported.");
+      VT_ERROR(_proto->comp->log, "DMABUF import failed: unsupported buffer attributes.");
       zwp_linux_buffer_params_v1_send_failed(resource);
     } else {
       wl_resource_post_error(
@@ -580,34 +680,49 @@ _linux_dmabuf_params_create(
     _linux_dmabuf_close_params(params);
   }
 
+  /* 11. Allocate DMABUF internal handle */
   struct vt_linux_dmabuf_v1_buffer_t* buf = calloc(1, sizeof(*buf));
-  if(!buf) {
+  if (!buf) {
     wl_resource_post_no_memory(resource);
     _linux_dmabuf_close_params(params);
   }
+
   buf->w = width;
   buf->h = height;
-
-	struct wl_client* client = wl_resource_get_client(resource);
-	buf->res = wl_resource_create(client, &wl_buffer_interface,1, buf_id);
-  if(!buf->res) {
-    free(buf);
-    wl_resource_post_no_memory(resource);
-    _linux_dmabuf_close_params(params);
-  }
-
   buf->attr = params->attr;
 
-	wl_resource_set_implementation(buf->res,
-		&_dmabuf_wl_buffer_impl, buf, _linux_dmabuf_v1_buffer_handle_res_destroy);
-
-  if (!buf_id) {
-    zwp_linux_buffer_params_v1_send_created(
-      resource,
-      buf->res);
+  /* 12. Create Wayland buffer resource */
+  struct wl_client* client = wl_resource_get_client(resource);
+  buf->res = wl_resource_create(client, &wl_buffer_interface, 1, buf_id);
+  if (!buf->res) {
+    free(buf);
+    _linux_dmabuf_close_params(params);
+    VT_WL_OUT_OF_MEMORY(_proto->comp, client);
+    return;
   }
-  
-	free(params);
+
+  /* 13. Set implementation for buffer resource */
+  wl_resource_set_implementation(
+    buf->res,
+    &_dmabuf_wl_buffer_impl,
+    buf,
+    _linux_dmabuf_v1_buffer_handle_res_destroy);
+
+  /* 14. Send created event for synchronous creation */
+  if (!buf_id) {
+    zwp_linux_buffer_params_v1_send_created(resource, buf->res);
+  }
+
+  /* 15. Clean up temporary params handle */
+  free(params);
+
+  VT_TRACE(
+    _proto->comp->log,
+    "linux_dmabuf.params_create: successfully created wl_buffer %p (%ix%i, format=%u).",
+    buf->res,
+    width,
+    height,
+    format);
 }
 
 void
@@ -618,7 +733,7 @@ _linux_dmabuf_v1_params_create(
   int32_t height,
   uint32_t format,
   uint32_t flags) {
-  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_v1_params_create"); 
+  VT_TRACE(_proto->comp->log, "_linux_dmabuf_v1_params_create"); 
   _linux_dmabuf_params_create(resource, 0, width, height, format, flags);
 }
 	
@@ -631,7 +746,7 @@ _linux_dmabuf_v1_params_create_immed(
   int32_t height,
   uint32_t format,
   uint32_t flags) {
-  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_v1_params_create_immed"); 
+  VT_TRACE(_proto->comp->log, "_linux_dmabuf_v1_params_create_immed"); 
   _linux_dmabuf_params_create(resource, buffer_id, width, height, format, flags);
 }
 
@@ -640,32 +755,38 @@ _linux_dmabuf_v1_params_handle_res_destroy(
   struct wl_resource* resource
 ) {
   if(!resource) return;
-  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_v1_params_handle_res_destroy"); 
-  struct vt_linux_dmabuf_v1_params_t* params;
-  if(!(params = wl_resource_get_user_data(resource))) {
+  VT_TRACE(_proto->comp->log, "_linux_dmabuf_v1_params_handle_res_destroy"); 
+  struct vt_linux_dmabuf_v1_params_t* params = resource ? wl_resource_get_user_data(resource) : NULL;
+  if(!params) {
+    VT_PARAM_CHECK_FAIL(_proto->comp);
     return;
   }
+
   _linux_dmabuf_close_params(params);
+  wl_resource_set_user_data(resource, NULL);
   free(params);
 }
 
 void 
 _linux_dmabuf_v1_buffer_handle_res_destroy(
-  struct wl_resource *resource
+  struct wl_resource* resource
 ) {
   if(!resource) return;
-  struct vt_linux_dmabuf_v1_buffer_t* buf = wl_resource_get_user_data(resource);
-  if(!buf) return;
+  struct vt_linux_dmabuf_v1_buffer_t* buf = resource ? wl_resource_get_user_data(resource) : NULL;
+  if(!buf) {
+    VT_PARAM_CHECK_FAIL(_proto->comp);
+    return;
+  }
+
   buf->res = NULL;
-  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_v1_buffer_handle_res_destroy()"); 
+  wl_resource_set_user_data(resource, NULL);
   free(buf);
 }
 
 void 
 _linux_dmabuf_v1_surf_feedback_handle_res_destroy(
-  struct wl_resource *resource
+  struct wl_resource* resource
 ) {
-  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_v1_surf_feedback_handle_res_destroy()"); 
   wl_list_remove(wl_resource_get_link(resource));
 }
 
@@ -675,15 +796,14 @@ _linux_dmabuf_v1_feedback_destroy(
   struct wl_resource* resource
 ) {
   (void)client;
-  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_v1_feedback_destroy()"); 
   wl_resource_destroy(resource);
 }
 
 
 void 
-_linux_dmabuf_v1_buffer_destroy(struct wl_client *client,
-		struct wl_resource *resource) {
-  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_v1_buffer_destroy()"); 
+_linux_dmabuf_v1_buffer_destroy(struct wl_client* client,
+		struct wl_resource* resource) {
+  VT_TRACE(_proto->comp->log, "_linux_dmabuf_v1_buffer_destroy()"); 
 	wl_resource_destroy(resource);
 }
 
@@ -755,80 +875,97 @@ static bool _accumulate_tranche_formats(
   return true;
 }
 
-bool
+bool 
 _linux_dmabuf_set_default_feedback(
   struct vt_proto_linux_dmabuf_v1_t* proto,
-  struct vt_dmabuf_feedback_t* feedback
-) {
-  if(!feedback || !feedback->comp || !feedback->comp->session) return false;
-  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_set_default_feedback"); 
+  struct vt_dmabuf_feedback_t* feedback)  {
+  /* 1. Validate input parameters */
+  if (!proto || !feedback || !feedback->comp || !feedback->comp->session) {
+    VT_PARAM_CHECK_FAIL(proto ? proto->comp : _proto->comp);
+    return false;
+  }
 
+  VT_TRACE(proto->comp->log, "linux_dmabuf.set_default_feedback: request received.");
+
+  /* 2. Pack provided feedback into transport form */
   struct vt_linux_dmabuf_v1_packed_feedback_t* packed = NULL;
-  if(!_linux_dmabuf_pack_feedback(feedback, &packed)) {
-    VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Failed to pack default DMABUF feedback.");
+  if (!_linux_dmabuf_pack_feedback(feedback, &packed)) {
+    VT_ERROR(feedback->comp->log, "Failed to pack default DMABUF feedback.");
     return false;
   }
 
   struct vt_session_t* s = feedback->comp->session;
-
   int32_t fd_main_dev = -1;
-  void* native_main_dev;
-  if(feedback->dev_main->dev != 0 && 
-    (s->impl.get_native_handle && s->impl.finish_native_handle && s->impl.get_native_handle_render_node)) {
+  void* native_main_dev = NULL;
 
+  /* 3. Attempt to acquire native device handle and open render node */
+  if (feedback->dev_main->dev != 0 &&
+      s->impl.get_native_handle &&
+      s->impl.finish_native_handle &&
+      s->impl.get_native_handle_render_node)  {
     native_main_dev = s->impl.get_native_handle(s, feedback->dev_main);
-
     const char* native_render_node = s->impl.get_native_handle_render_node(s, native_main_dev);
-    if(native_render_node) {
-      fd_main_dev = open(native_render_node,  O_RDWR | O_CLOEXEC);
-      if(fd_main_dev < 0) {
-        VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Failed to open render node '%s': %s",feedback->dev_main->path, strerror(errno)); 
+
+    if (native_render_node) {
+      fd_main_dev = open(native_render_node, O_RDWR | O_CLOEXEC);
+      if (fd_main_dev < 0) {
+        VT_ERROR(feedback->comp->log,
+                 "Failed to open render node '%s': %s",
+                 feedback->dev_main->path,
+                 strerror(errno));
         free(packed);
         s->impl.finish_native_handle(s, native_main_dev);
         return false;
       }
-      VT_TRACE(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Opened device '%s' for DMABUF imports.", native_render_node);
+
+      VT_TRACE(feedback->comp->log, "Opened device '%s' for DMABUF imports.", native_render_node);
       s->impl.finish_native_handle(s, native_main_dev);
     } else {
-      VT_TRACE(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Device '%s' is not a render node, skipping default feedback.");
+      VT_TRACE(feedback->comp->log,
+               "Device '%s' is not a render node, skipping default feedback.",
+               feedback->dev_main->path);
       s->impl.finish_native_handle(s, native_main_dev);
       free(packed);
       return false;
     }
   }
 
-  if(proto->default_formats.size != 0) {
+  /* 4. Reinitialize default formats */
+  if (proto->default_formats.size != 0) {
     _free_formats(&proto->default_formats);
     wl_array_init(&proto->default_formats);
   }
 
-  if(!_accumulate_tranche_formats(&proto->default_formats, &feedback->tranches, NULL, true)) {
-    VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Failed to accumulate default formats.");
-    s->impl.finish_native_handle(s, native_main_dev);
-    if(fd_main_dev != -1)
+  /* 5. Accumulate formats from tranches */
+  if (!_accumulate_tranche_formats(&proto->default_formats, &feedback->tranches, NULL, true)) {
+    VT_ERROR(feedback->comp->log, "Failed to accumulate default formats.");
+    if (native_main_dev)
+      s->impl.finish_native_handle(s, native_main_dev);
+    if (fd_main_dev != -1)
       close(fd_main_dev);
     free(packed);
     return false;
   }
 
-  if(proto->default_feedback) {
+  /* 6. Replace existing feedback data if present */
+  if (proto->default_feedback)
     free(proto->default_feedback);
-  }
+
   proto->default_feedback = packed;
 
+  /* 7. Replace existing main device FD */
+  if (proto->fd_main_dev >= 0)
+    close(proto->fd_main_dev);
 
-  if (proto->fd_main_dev >= 0) close(proto->fd_main_dev);
   proto->fd_main_dev = fd_main_dev;
 
   VT_TRACE(
     feedback->comp->log,
-    "VT_PROTO_LINUX_DMABUF_V1: Default feedback set: %i formats.",
-    proto->default_formats.size / sizeof(struct vt_dmabuf_drm_format_t));
+    "linux_dmabuf.set_default_feedback: set new default feedback (%i formats).",
+    proto->default_formats.size / (int)sizeof(struct vt_dmabuf_drm_format_t));
 
   return true;
-
 }
-
 
 bool 
 _linux_dmabuf_pack_feedback(
@@ -838,11 +975,11 @@ _linux_dmabuf_pack_feedback(
   if(!feedback) return false;
   if(!feedback->tranches.size) return false;
   
-  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_pack_feedback"); 
+  VT_TRACE(_proto->comp->log, "_linux_dmabuf_pack_feedback"); 
  
 
   VT_TRACE(feedback->comp->log,
-           "VT_PROTO_LINUX_DMABUF_V1: Packing feedback...");
+           "Packing feedback...");
 
   struct wl_array all_formats;
   wl_array_init(&all_formats);
@@ -850,10 +987,10 @@ _linux_dmabuf_pack_feedback(
   _accumulate_tranche_formats(&all_formats, &feedback->tranches, &entries_len, false);
   
   VT_TRACE(feedback->comp->log,
-           "VT_PROTO_LINUX_DMABUF_V1: Accumulated all formats of all tranches.");
+           "Accumulated all formats of all tranches.");
 
   if(!entries_len) {
-    VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Format entries of packed DMABUF feedback is empty.");
+    VT_ERROR(feedback->comp->log, "Format entries of packed DMABUF feedback is empty.");
     wl_array_release(&all_formats);
     return false;
   }
@@ -864,19 +1001,19 @@ _linux_dmabuf_pack_feedback(
   // so that clients can only read (not write to) the feedback data.
   int rw_fd, ro_fd;
   if(!(vt_util_allocate_shm_rwro_pair(feedback->comp, entries_size, &rw_fd, &ro_fd))) {
-    VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Failed to allocate SHM pair for packed DMABUF feedback format entries.");
+    VT_ERROR(feedback->comp->log, "Failed to allocate SHM pair for packed DMABUF feedback format entries.");
     wl_array_release(&all_formats);
     return false;
   }
 
   VT_TRACE(feedback->comp->log,
-           "VT_PROTO_LINUX_DMABUF_V1: Allocated SHM for the packed feedback data.");
+           "Allocated SHM for the packed feedback data.");
 
   // map the entries 
   struct vt_linux_dmabuf_v1_packed_feedback_entry_t* entries = mmap(
     NULL, entries_size, PROT_READ | PROT_WRITE, MAP_SHARED, rw_fd, 0);
   if(entries == MAP_FAILED) {
-    VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Failed to mmap SHM for packed DMABUF feedback format entries: %s.", strerror(errno));
+    VT_ERROR(feedback->comp->log, "Failed to mmap SHM for packed DMABUF feedback format entries: %s.", strerror(errno));
     close(ro_fd);
     close(rw_fd);
     wl_array_release(&all_formats);
@@ -884,7 +1021,7 @@ _linux_dmabuf_pack_feedback(
   }	
 
   VT_TRACE(feedback->comp->log,
-           "VT_PROTO_LINUX_DMABUF_V1: mmap()ed the packed feedback data.");
+           "mmap()ed the packed feedback data.");
   // fill the table 
   struct vt_dmabuf_drm_format_t* fmt;
   uint32_t n_entries = 0;
@@ -898,7 +1035,7 @@ _linux_dmabuf_pack_feedback(
     }
   }
   if(n_entries != entries_len) {
-    VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Mapped entries of DMABUF feedback entries does not match internal format entries."); 
+    VT_ERROR(feedback->comp->log, "Mapped entries of DMABUF feedback entries does not match internal format entries."); 
     wl_array_release(&all_formats);
     close(rw_fd);
     close(ro_fd);
@@ -907,7 +1044,7 @@ _linux_dmabuf_pack_feedback(
   }
   
   VT_TRACE(feedback->comp->log,
-           "VT_PROTO_LINUX_DMABUF_V1: Filled the table of packed feedback data.");
+           "Filled the table of packed feedback data.");
   
   // unmap the table (we are finished reading to it) 
   munmap(entries, entries_size);
@@ -915,25 +1052,25 @@ _linux_dmabuf_pack_feedback(
   // seal the read-write FD so that clients cannot do weird shit
   if (fcntl(rw_fd, F_ADD_SEALS,
             F_SEAL_SHRINK | F_SEAL_GROW | F_SEAL_WRITE) < 0) {
-    VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: fcntl(F_ADD_SEALS) failed: %s", strerror(errno));
+    VT_ERROR(feedback->comp->log, "fcntl(F_ADD_SEALS) failed: %s", strerror(errno));
     close(ro_fd);
     close(rw_fd);
     return false;
   }
   
   VT_TRACE(feedback->comp->log,
-           "VT_PROTO_LINUX_DMABUF_V1: Sealed RW FD for packed  feedback data.");
+           "Sealed RW FD for packed  feedback data.");
 
   // after sealing, close the read-write FD
   close(rw_fd);
   
   VT_TRACE(feedback->comp->log,
-           "VT_PROTO_LINUX_DMABUF_V1: Building packed feedback for %i tranche(s)...", feedback->tranches.size / sizeof(struct vt_dmabuf_tranche_t));
+           "Building packed feedback for %i tranche(s)...", feedback->tranches.size / sizeof(struct vt_dmabuf_tranche_t));
 
   struct vt_linux_dmabuf_v1_packed_feedback_t* packed = calloc(
     1, sizeof(*packed) + feedback->tranches.size);
   if(!packed) {
-    VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Out of memory."); 
+    VT_ERROR(feedback->comp->log, "Out of memory."); 
     close(ro_fd);
     wl_array_release(&all_formats);
     return false;
@@ -947,7 +1084,7 @@ _linux_dmabuf_pack_feedback(
  
   
   VT_TRACE(feedback->comp->log,
-           "VT_PROTO_LINUX_DMABUF_V1: Building packed feedback tranches (Total Tranches: %i)...", packed->n_tranches);
+           "Building packed feedback tranches (Total Tranches: %i)...", packed->n_tranches);
 
 
   // we need to get the all_fmt_data as a struct vt_dmabuf_drm_format_t* to correctly loop 
@@ -955,17 +1092,17 @@ _linux_dmabuf_pack_feedback(
   struct vt_dmabuf_drm_format_t* all_fmt_data = all_formats.data;
   size_t n_all_formats = all_formats.size / sizeof(struct vt_dmabuf_drm_format_t);
   if (all_formats.size % sizeof(struct vt_dmabuf_drm_format_t) != 0) {
-    VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Corrupted all_formats array: misaligned size %i", all_formats.size);
+    VT_ERROR(feedback->comp->log, "Corrupted all_formats array: misaligned size %i", all_formats.size);
     wl_array_release(&all_formats);
     close(ro_fd);
     free(packed);
     return false;
   }
 
-  struct vt_dmabuf_tranche_t *tranches = feedback->tranches.data;
+  struct vt_dmabuf_tranche_t* tranches = feedback->tranches.data;
   for (uint32_t i = 0; i < packed->n_tranches; i++) {
     VT_TRACE(feedback->comp->log,
-             "VT_PROTO_LINUX_DMABUF_V1: Building packed feedback tranche %i...", i);
+             "Building packed feedback tranche %i...", i);
 
     struct vt_linux_dmabuf_v1_packed_feedback_tranche_t* tranche_packed = &packed->tranches[i];
     struct vt_dmabuf_tranche_t* tranche = &tranches[i];
@@ -978,7 +1115,7 @@ _linux_dmabuf_pack_feedback(
       if (_format_exists(&tranche->formats, &all_fmt_data[j])) {
         uint16_t* add = wl_array_add(&tranche_packed->indices, sizeof(*add));
         if (!add) {
-          VT_ERROR(feedback->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Out of memory.");
+          VT_ERROR(feedback->comp->log, "Out of memory.");
           close(ro_fd);
           wl_array_release(&all_formats);
           return false;
@@ -993,119 +1130,154 @@ _linux_dmabuf_pack_feedback(
   wl_array_release(&all_formats);
 
   VT_TRACE(feedback->comp->log,
-           "VT_PROTO_LINUX_DMABUF_V1: Successfully packed default feedback.");
+           "Successfully packed default feedback.");
 
   return true;
 }
 
-void
-_linux_dmabuf_free_feedback(
-  struct vt_linux_dmabuf_v1_packed_feedback_t* packed
-) {
-  if(!packed) return;
-  for(uint32_t i = 0; i < packed->n_tranches; i++) {
-    wl_array_release(&packed->tranches[i].indices);
+
+void 
+_linux_dmabuf_free_feedback(struct vt_linux_dmabuf_v1_packed_feedback_t* packed) {
+  /* 1. Validate params */
+  if (!packed) {
+    return;
   }
+
+  /* 2. Release each tranche’s format index array */
+  for (uint32_t i = 0; i < packed->n_tranches; i++)
+    wl_array_release(&packed->tranches[i].indices);
+
+  /* 3. Close FD and free structure */
   close(packed->entries_fd);
   free(packed);
+
+  VT_TRACE(_proto->comp->log, "linux_dmabuf.free_feedback: freed packed feedback %p.", packed);
 }
 
-void
-_linux_dmabuf_close_params(
-  struct vt_linux_dmabuf_v1_params_t* params
-) {
-  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_close_params"); 
-  for(uint32_t i = 0; i < params->attr.num_planes; i++) {
-    if(params->attr.fds[i] < 0) continue;
-    close(params->attr.fds[i]) ;
+void 
+_linux_dmabuf_close_params(struct vt_linux_dmabuf_v1_params_t* params) {
+  /* 1. Validate params */
+  if (!params) {
+    VT_PARAM_CHECK_FAIL(_proto->comp);
+    return;
+  }
+
+  VT_TRACE(_proto->comp->log, "linux_dmabuf.close_params: closing %u planes.", params->attr.num_planes);
+
+  /* 2. Close all valid plane FDs */
+  for (uint32_t i = 0; i < params->attr.num_planes; i++) {
+    if (params->attr.fds[i] < 0)
+      continue;
+    close(params->attr.fds[i]);
     params->attr.fds[i] = -1;
   }
+
+  /* 3. Reset plane count */
   params->attr.num_planes = 0;
 }
 
-struct vt_linux_dmabuf_v1_surface_t*
-_linux_dmabuf_surface_from_surf(
-  struct vt_surface_t* surf 
-) {
-  if(surf->dmabuf_surf) return surf->dmabuf_surf;
+struct vt_linux_dmabuf_v1_surface_t* 
+_linux_dmabuf_surface_from_surf(struct vt_surface_t* surf) {
+  /* 1. Validate params */
+  if (!surf) {
+    VT_PARAM_CHECK_FAIL(_proto->comp);
+    return NULL;
+  }
 
+  /* 2. Reuse existing surface handle if present */
+  if (surf->dmabuf_surf)
+    return surf->dmabuf_surf;
+
+  /* 3. Allocate new DMA-BUF surface wrapper */
   struct vt_linux_dmabuf_v1_surface_t* dmabuf_surf = calloc(1, sizeof(*dmabuf_surf));
-  if(!dmabuf_surf) return NULL;
+  if (!dmabuf_surf)
+    return NULL;
 
+  /* 4. Initialize linkage */
   dmabuf_surf->surf = surf;
   surf->dmabuf_surf = dmabuf_surf;
-
   wl_list_init(&dmabuf_surf->res_feedback);
   wl_list_insert(&_proto->dmabuf_surfaces, &dmabuf_surf->link);
-  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: _linux_dmabuf_surface_from_surf"); 
 
+  VT_TRACE(_proto->comp->log, "linux_dmabuf.surface_from_surf: created dmabuf surface %p for %p.", dmabuf_surf, surf);
   return dmabuf_surf;
 }
 
-void
+void 
 _linux_dmabuf_send_feedback(
   struct wl_resource* res,
-  struct vt_linux_dmabuf_v1_packed_feedback_t* feedback
-) {
-  if(!res || !feedback) return;
-  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Sending feedback with %i tranches...", feedback->n_tranches);
+  struct vt_linux_dmabuf_v1_packed_feedback_t* feedback) 
+{
+  /* 1. Validate params */
+  if (!res || !feedback)
+    return;
 
-  struct stat s;
-  stat("/dev/dri/card128", &s);
+  VT_TRACE(_proto->comp->log,
+           "linux_dmabuf.send_feedback: sending feedback (%i tranches).",
+           feedback->n_tranches);
+
+  /* 2. Prepare main device descriptor */
+
   struct wl_array device;
-  dev_t *dev;
-
   wl_array_init(&device);
-  dev = wl_array_add(&device, sizeof(*dev));
+
+  dev_t* dev = wl_array_add(&device, sizeof(*dev));
   if (!dev) {
     wl_resource_post_no_memory(res);
     return;
   }
 
-  zwp_linux_dmabuf_feedback_v1_send_format_table(
-    res, feedback->entries_fd, feedback->entries_size);
-	
-  *dev = s.st_rdev;
+  *dev = 0; 
 
+  /* 3. Send format table and main device */
+  zwp_linux_dmabuf_feedback_v1_send_format_table(res, feedback->entries_fd, feedback->entries_size);
   zwp_linux_dmabuf_feedback_v1_send_main_device(res, &device);
 
-  VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Send main device %i.",feedback->dev_main);
-  
-	for (size_t i = 0; i < feedback->n_tranches; i++) {
-    VT_TRACE(_proto->comp->log, "VT_PROTO_LINUX_DMABUF_V1: Sending tranche %i.",feedback->dev_main);
-  struct vt_linux_dmabuf_v1_packed_feedback_tranche_t* tranche = &feedback->tranches[i];
-    /* tranche_target_device event */
+  VT_TRACE(_proto->comp->log, "linux_dmabuf.send_feedback: sent main device %i.", feedback->dev_main);
+
+  /* 4. Send tranche data */
+  for (size_t i = 0; i < feedback->n_tranches; i++) {
+    struct vt_linux_dmabuf_v1_packed_feedback_tranche_t* tranche = &feedback->tranches[i];
+
+    VT_TRACE(_proto->comp->log,
+             "linux_dmabuf.send_feedback: sending tranche %zu (dev=%u, flags=%u).",
+             i,
+             tranche->dev_target,
+             tranche->flags);
+
     *dev = tranche->dev_target;
     zwp_linux_dmabuf_feedback_v1_send_tranche_target_device(res, &device);
-
-    /* tranche_flags event */
     zwp_linux_dmabuf_feedback_v1_send_tranche_flags(res, tranche->flags);
-
-    /* tranche_formats event */
     zwp_linux_dmabuf_feedback_v1_send_tranche_formats(res, &tranche->indices);
-
-    /* tranche_done_event */
     zwp_linux_dmabuf_feedback_v1_send_tranche_done(res);
   }
 
-	zwp_linux_dmabuf_feedback_v1_send_done(res);
+  /* 5. Finalize and clean up */
+  zwp_linux_dmabuf_feedback_v1_send_done(res);
+  wl_array_release(&device);
 
-
-	wl_array_release(&device);
+  VT_TRACE(_proto->comp->log, "linux_dmabuf.send_feedback: feedback transmission complete.");
 }
 
+static bool 
+_format_has_mod(struct vt_dmabuf_drm_format_t* fmt, uint64_t mod) {
+  /* 1. Validate input */
+  if (!fmt)
+    return false;
 
-static bool _format_has_mod(struct vt_dmabuf_drm_format_t* fmt, uint64_t mod) {
-  for(size_t i = 0; i < fmt->len; i++) {
-    if(fmt->mods[i].mod == mod) return true;
+  /* 2. Search for matching modifier */
+  for (size_t i = 0; i < fmt->len; i++) {
+    if (fmt->mods[i].mod == mod)
+      return true;
   }
+
   return false;
 }
 
 #define _VT_DRM_FORMAT_MOD_INVALID 0x00FFFFFFFFFFFFFF
 #define _VT_DRM_FORMAT_MOD_LINEAR 0x0000000000000000
 
-static void _send_mods(struct wl_resource *resource,
+static void _send_mods(struct wl_resource* resource,
 		struct vt_dmabuf_drm_format_t* fmt) {
   if (wl_resource_get_version(resource) < ZWP_LINUX_DMABUF_V1_MODIFIER_SINCE_VERSION) {
     /* when the format has the INVALID modifier, it means it's modifier list is correctly 
@@ -1152,60 +1324,123 @@ _linux_dmabuf_legacy_send_default_formats(
   }
 }
 
-
 // ===================================================
 // =================== PUBLIC API ====================
 // ===================================================
+
 bool 
-vt_proto_linux_dmabuf_v1_init(struct vt_compositor_t* comp, struct vt_dmabuf_feedback_t* default_feedback, uint32_t version) {
-  if(!(_proto = VT_ALLOC(comp, sizeof(*_proto)))) return false;
-  _proto->comp = comp;
-
-  if(!(_proto->global = wl_global_create(comp->wl.dsp, &zwp_linux_dmabuf_v1_interface,
-     version, _proto, _proto_linux_dmabuf_v1_bind))) return false;
-  _proto->fd_main_dev = -1;
-  
-  wl_array_init(&_proto->default_formats);
-
-  if(!_linux_dmabuf_set_default_feedback(_proto, default_feedback)) {
-  VT_TRACE(comp->log, "VT_PROTO_LINUX_DMABUF_V1: Failed to set default feedback.");
-    wl_global_destroy(_proto->global);
+vt_proto_linux_dmabuf_v1_init(
+  struct vt_compositor_t* comp,
+  struct vt_dmabuf_feedback_t* default_feedback,
+  uint32_t version) 
+{
+  /* 1. Allocate protocol context */
+  if (!(_proto = VT_ALLOC(comp, sizeof(*_proto)))) {
+    VT_WL_OUT_OF_MEMORY(comp, NULL);
     return false;
   }
 
+  _proto->comp = comp;
+  _proto->fd_main_dev = -1;
+  wl_array_init(&_proto->default_formats);
+
+  /* 2. Create global interface */
+  _proto->global = wl_global_create(
+    comp->wl.dsp,
+    &zwp_linux_dmabuf_v1_interface,
+    version,
+    _proto,
+    _proto_linux_dmabuf_v1_bind);
+
+  if (!_proto->global) {
+    VT_ERROR(comp->log, "Failed to create wl_global for zwp_linux_dmabuf_v1_interface.");
+    free(_proto);
+    return false;
+  }
+
+  /* 3. Set default feedback */
+  if (!_linux_dmabuf_set_default_feedback(_proto, default_feedback)) {
+    VT_TRACE(comp->log, "linux_dmabuf.init: failed to set default feedback.");
+    wl_global_destroy(_proto->global);
+    free(_proto);
+    return false;
+  }
+
+  /* 4. Initialize surface list */
   wl_list_init(&_proto->dmabuf_surfaces);
 
+  /* 5. Attach display destroy listener */
   _proto->dsp_destroy.notify = _proto_linux_dmabuf_v1_handle_dsp_destroy;
   wl_display_add_destroy_listener(comp->wl.dsp, &_proto->dsp_destroy);
 
-  VT_TRACE(comp->log, "VT_PROTO_LINUX_DMABUF_V1: Initialized DMABUF protocol.");
-
+  VT_TRACE(comp->log, "Initialized linux-dmabuf-v1 protocol (version %u).", version);
   return true;
-
 }
 
 struct vt_linux_dmabuf_v1_buffer_t* 
-vt_proto_linux_dmabuf_v1_from_buffer_res(
-  struct wl_resource* res
-    ) {
-  if(!wl_resource_instance_of(res, &wl_buffer_interface, &_dmabuf_wl_buffer_impl) || 
-     wl_resource_get_user_data(res) == NULL) return NULL; 
-  return wl_resource_get_user_data(res);
+vt_proto_linux_dmabuf_v1_from_buffer_res(struct wl_resource* res) {
+  /* 1. Validate wl_buffer instance */
+  if (!res ||
+      !wl_resource_instance_of(res, &wl_buffer_interface, &_dmabuf_wl_buffer_impl) ||
+      wl_resource_get_user_data(res) == NULL) {
+    VT_TRACE(_proto->comp->log, "linux_dmabuf.from_buffer_res: invalid resource %p.", res);
+    return NULL;
+  }
+
+  /* 2. Retrieve internal DMABUF buffer handle */
+  struct vt_linux_dmabuf_v1_buffer_t* buf = wl_resource_get_user_data(res);
+  VT_TRACE(_proto->comp->log, "linux_dmabuf.from_buffer_res: resolved wl_buffer %p to %p.", res, buf);
+  return buf;
 }
 
 void 
 vt_proto_linux_dmabuf_v1_surface_destroy(struct vt_surface_t* surf) {
-  struct wl_resource *resource, *resource_tmp;
-	struct vt_linux_dmabuf_v1_surface_t* dmabuf_surf = _linux_dmabuf_surface_from_surf(surf);
-  if(!dmabuf_surf) return;
-	wl_resource_for_each_safe(resource, resource_tmp, &dmabuf_surf->res_feedback) {
-		struct wl_list *link = wl_resource_get_link(resource);
-		wl_list_remove(link);
-		wl_list_init(link);
-	}
+  /* 1. Validate surface pointer */
+  if (!surf) {
+    VT_PARAM_CHECK_FAIL(_proto->comp);
+    return;
+  }
+
+  /* 2. Retrieve associated DMABUF surface */
+  struct vt_linux_dmabuf_v1_surface_t* dmabuf_surf = _linux_dmabuf_surface_from_surf(surf);
+  if (!dmabuf_surf)
+    return;
+
+  VT_TRACE(_proto->comp->log, "linux_dmabuf.surface_destroy: destroying surface.", dmabuf_surf);
+
+  /* 3. Unlink all feedback resources */
+  struct wl_resource* resource;
+  struct wl_resource* resource_tmp;
+  wl_resource_for_each_safe(resource, resource_tmp, &dmabuf_surf->res_feedback) {
+    struct wl_list* link = wl_resource_get_link(resource);
+    wl_list_remove(link);
+    wl_list_init(link);
+  }
+
+  /* 4. Free feedback data and unlink from protocol list */
   _linux_dmabuf_free_feedback(dmabuf_surf->feedback);
-
   wl_list_remove(&dmabuf_surf->link);
-  free(dmabuf_surf);
 
+  /* 5. Release allocated memory */
+  free(dmabuf_surf);
+  surf->dmabuf_surf = NULL;
+
+  VT_TRACE(_proto->comp->log, "linux_dmabuf.surface_destroy: completed destruction of surface %p.", surf);
+}
+
+bool vt_proto_linux_dmabuf_v1_set_surface_feedback(struct vt_surface_t* surf) {
+	struct vt_linux_dmabuf_v1_surface_t* dmabuf_surf = _linux_dmabuf_surface_from_surf(surf);
+	if (dmabuf_surf == NULL) {
+		return false;
+	}
+  if(dmabuf_surf->feedback)
+	  _linux_dmabuf_free_feedback(dmabuf_surf->feedback);
+	dmabuf_surf->feedback = NULL; 
+
+	struct wl_resource *resource;
+	wl_resource_for_each(resource, &dmabuf_surf->res_feedback) {
+		_linux_dmabuf_send_feedback(resource, _proto->default_feedback);
+	}
+
+	return true;
 }

@@ -15,6 +15,8 @@
 #include <fcntl.h>
 #include <dlfcn.h>
 #include <dirent.h>
+#include <signal.h>
+#include <execinfo.h>
 
 #include <glad.h>
 #include <wayland-server.h>
@@ -25,6 +27,8 @@
 #include "core_types.h"
 
 #include "compositor.h"
+
+#define _SUBSYS_NAME "COMPOSITOR"
 
 static void _vt_comp_frame_handler(void* data);
 
@@ -138,7 +142,7 @@ vt_comp_frame_done(struct vt_compositor_t *c, struct vt_output_t* output, uint32
       surf->needs_frame_done = false;
       surf->cb_pool.n_cbs = 0;
       surf->_mask_outputs_presented_on = 0;
-      VT_TRACE(surf->comp->log, "Sent wl_callback.done() for all pending frame callbacks on output %p.", output)
+      VT_TRACE(surf->comp->log, "Sent wl_callback.done() for all pending frame callbacks on output %p.", output);
     }
   }
   c->any_frame_cb_pending = false;
@@ -163,7 +167,7 @@ vt_comp_frame_done_all(struct vt_compositor_t *c, uint32_t t) {
     }
     surf->needs_frame_done = false;
     surf->cb_pool.n_cbs = 0;
-    VT_TRACE(surf->comp->log, "Sent wl_callback.done() for all pending frame callbacks.")
+    VT_TRACE(surf->comp->log, "Sent wl_callback.done() for all pending frame callbacks.");
   }
   c->any_frame_cb_pending = false;
 }
@@ -214,7 +218,7 @@ static char** _scan_valid_backends(size_t *count_out) {
 
       // Extract <name> part between prefix and suffix
       size_t core_len = len - prefix_len - suffix_len;
-      char *backend = malloc(core_len + 1);
+      char*backend = malloc(core_len + 1);
       if (!backend) continue;
       memcpy(backend, name + prefix_len, core_len);
       backend[core_len] = '\0';
@@ -237,10 +241,11 @@ _vt_comp_handle_cmd_flags(struct vt_compositor_t* c, int argc, char** argv) {
       char* flag = argv[i];
       if(_flag_cmp(flag, "--logfile", "-lf")) {
         c->log.stream = fopen(vt_util_log_get_filepath(), "a");  
-        if (c->log.stream)
+        if (c->log.stream) {
           setvbuf(c->log.stream, NULL, _IONBF, 0);
-        else
+        } else {
           perror("log fopen");
+        }
       } else if(_flag_cmp(flag, "--verbose", "-vb")) {
         c->log.verbose = true;
       } else if(_flag_cmp(flag, "--quiet", "-q")) {
@@ -268,9 +273,12 @@ _vt_comp_handle_cmd_flags(struct vt_compositor_t* c, int argc, char** argv) {
           for(uint32_t i = 0; i < n; i++)
             fprintf(stderr, "%s%s ", valid_backends[i], i != n - 1 ? "," : "");
           fprintf(stderr, "]\n"); 
+          for(uint32_t i = 0; i < n; i++) {
+            free(valid_backends[i]);
+          }
+          free(valid_backends);
           exit(1);
         }
-        free(valid_backends);
         return backend_str;
       } 
       else if(_flag_cmp(flag, "-bp", "--backend-path")) {
@@ -287,7 +295,7 @@ _vt_comp_handle_cmd_flags(struct vt_compositor_t* c, int argc, char** argv) {
           exit(1);
         }
         c->n_virtual_outputs = atoi(argv[++i]);
-        if (c->n_virtual_outputs <= 0)
+        if (c->n_virtual_outputs <= 0);
           c->n_virtual_outputs = 1;
         VT_TRACE(c->log, "Virtual outputs set to %d", c->n_virtual_outputs);
       }
@@ -344,7 +352,11 @@ void _vt_comp_log_help() {
   for(uint32_t i = 0; i < n; i++)
     printf("'%s'%s ", valid_backends[i], i != n - 1 ? "," : "");
   printf("]\n"); 
+
+  for(uint32_t i = 0; i < n; i++)
+    free(valid_backends[i]);
   free(valid_backends);
+
   printf("%-35s %s\n", "-bp, --backend-path [val]", "Specifies the path of the .so file to load as the compositor's sink backend");
   exit(0);
 }
@@ -420,13 +432,10 @@ _vt_comp_wl_surface_create(
   struct wl_client *client,
   struct wl_resource *resource,
   uint32_t id) {
-  struct vt_compositor_t* c = wl_resource_get_user_data(resource);
-  if(!c) {
-    log_fatal(c->log, "compositor.surface_create: User data is NULL.");
-    return;
-  }
+  struct vt_compositor_t* c = resource ? wl_resource_get_user_data(resource) : NULL;
+  if(!c) return;
 
-  VT_TRACE(c->log, "Got compositor.surface_create: Started managing surface.")
+  VT_TRACE(c->log, "Got compositor.surface_create: Started managing surface.");
   // Allocate the struct to store protocol information about the surface
   struct vt_surface_t* surf = calloc(1, sizeof(*surf));
   surf->comp = c;
@@ -443,20 +452,21 @@ _vt_comp_wl_surface_create(
 
   // Add the surface to list of surfaces in the compositor
   wl_list_insert(&c->surfaces, &surf->link);
-  VT_TRACE(c->log, "compositor.surface_create: Inserted surface into list.")
+  VT_TRACE(c->log, "compositor.surface_create: Inserted surface into list.");
 
-  VT_TRACE(c->log, "compositor.surface_create: Setting surface implementation.")
+  VT_TRACE(c->log, "compositor.surface_create: Setting surface implementation.");
 
   if(!vt_proto_wl_surface_init(surf, client, id, 4)) {
     VT_ERROR(c->log, "compositor.surface_create: Failed to create surface.");
     return;
   }
+  vt_proto_linux_dmabuf_v1_set_surface_feedback(surf);
 
 }
 
 void 
 _vt_comp_wl_region_handle_resource_destroy(struct wl_resource* resource) {
-  struct vt_region_t* r = wl_resource_get_user_data(resource);
+  struct vt_region_t* r = resource ? wl_resource_get_user_data(resource) : NULL;
   VT_TRACE(r->comp->log, "region.destroy_resoure: destroying region %p", r);
   pixman_region32_fini(&r->region);
   free(r);
@@ -466,7 +476,7 @@ void
 _vt_comp_wl_surface_create_region(struct wl_client *client,
                                   struct wl_resource *resource,
                                   uint32_t id) {
-  struct vt_compositor_t* comp = wl_resource_get_user_data(resource);
+  struct vt_compositor_t* comp = resource ? wl_resource_get_user_data(resource) : NULL;
   if (!comp) {
     wl_resource_post_error(resource, WL_DISPLAY_ERROR_INVALID_OBJECT,
                            "compositor resource missing compositor user data");
@@ -478,6 +488,7 @@ _vt_comp_wl_surface_create_region(struct wl_client *client,
   struct vt_region_t* region = calloc(1, sizeof(*region));
   if (!region) {
     wl_client_post_no_memory(client);
+    VT_WL_OUT_OF_MEMORY(comp, client);
     return;
   }
 
@@ -508,7 +519,7 @@ _vt_comp_wl_region_add(
   int32_t y,
   int32_t width,
   int32_t height) {
-  struct vt_region_t* r = wl_resource_get_user_data(resource);
+  struct vt_region_t* r = resource ? wl_resource_get_user_data(resource) : NULL;
   if(!r) return;
   pixman_region32_union_rect(&r->region, &r->region, x, y, width, height);
 }
@@ -521,7 +532,7 @@ _vt_comp_wl_region_subtract(
   int32_t y,
   int32_t width,
   int32_t height) {
-  struct vt_region_t* r = wl_resource_get_user_data(resource);
+  struct vt_region_t* r = resource ? wl_resource_get_user_data(resource) : NULL;
   if(!r) return;
   pixman_region32_t rect;
   pixman_region32_init_rect(&rect, x, y, width, height);
@@ -532,14 +543,14 @@ _vt_comp_wl_region_subtract(
 static void _wl_region_add(struct wl_client *client,
                            struct wl_resource *resource,
                            int32_t x, int32_t y, int32_t width, int32_t height) {
-  struct vt_region_t* r = wl_resource_get_user_data(resource);
+  struct vt_region_t* r = resource ? wl_resource_get_user_data(resource) : NULL;
   pixman_region32_union_rect(&r->region, &r->region, x, y, width, height);
 }
 
 static void _wl_region_subtract(struct wl_client *client,
                                 struct wl_resource *resource,
                                 int32_t x, int32_t y, int32_t width, int32_t height) {
-  struct vt_region_t* r = wl_resource_get_user_data(resource);
+  struct vt_region_t* r = resource ? wl_resource_get_user_data(resource) : NULL;
   pixman_region32_t rect;
   pixman_region32_init_rect(&rect, x, y, width, height);
   pixman_region32_subtract(&r->region, &r->region, &rect);
@@ -547,7 +558,7 @@ static void _wl_region_subtract(struct wl_client *client,
 }
 
 static void _wl_region_handle_destroy(struct wl_resource* resource) {
-  struct vt_region_t* r = wl_resource_get_user_data(resource);
+  struct vt_region_t* r = resource ? wl_resource_get_user_data(resource) : NULL;
   pixman_region32_fini(&r->region);
   free(r);
 }
@@ -604,9 +615,6 @@ _vt_comp_wl_init(struct vt_compositor_t* c) {
 
   return true;
 }
-
-#include <signal.h>
-#include <execinfo.h>
 
 static struct vt_compositor_t* vt_global_compositor;
 
@@ -672,23 +680,25 @@ vt_comp_init(struct vt_compositor_t* c, int argc, char** argv) {
       backend_str = "drm";
   }
 
-  if(strcmp(backend_str, "wl") == 0 && !c->n_virtual_outputs)
+  if(strcmp(backend_str, "wl") == 0 && !c->n_virtual_outputs);
     c->n_virtual_outputs = 1;
 
   _vt_comp_load_backend(c, backend_str, c->_cmd_line_backend_path);
 
   if(!_vt_comp_wl_init(c)) {
-    VT_ERROR(c->log, "Failed to initialize wayland state.")
+    VT_ERROR(c->log, "Failed to initialize wayland state.");
     return false;
   }
 
   // Initialize session
-  if(c->session->impl.init)
+  if(c->backend->platform == VT_BACKEND_DRM_GBM) {
+  if(c->session->impl.init);
     c->session->impl.init(c->session);
+  }
   
   // Initialize backend 
   if(!c->backend->impl.init(c->backend)) {
-    VT_ERROR(c->log, "Failed to initialize compositor backend.")
+    VT_ERROR(c->log, "Failed to initialize compositor backend.");
     return false;
   }
 
@@ -872,7 +882,7 @@ void vt_comp_invalidate_all_surfaces(struct vt_compositor_t *comp) {
       struct wl_resource *cb = wl_resource_create(
         wl_resource_get_client(surf->buf_res),
         &wl_callback_interface, 1, 0);
-      if (cb)
+      if (cb);
         wl_callback_send_done(cb, t);
     }
   }

@@ -24,6 +24,8 @@
 #define _WL_DEFAULT_OUTPUT_WIDTH 1280
 #define _WL_DEFAULT_OUTPUT_HEIGHT 720
 
+#define _SUBSYS_NAME "WL"
+
 typedef struct {
   bool nested;
   struct wl_display* parent_display;
@@ -208,12 +210,12 @@ bool
 _wl_backend_init_active_outputs(struct vt_backend_t* backend){
   if(!backend) return false;
 
-  VT_TRACE(backend->comp->log, "WL: Initializing active outputs.");
+  VT_TRACE(backend->comp->log, "Initializing active outputs.");
   
   wayland_backend_state_t* wl_backend = BACKEND_DATA(backend, wayland_backend_state_t);
 
   if (!backend->comp->renderer || !backend->comp->renderer->impl.setup_renderable_output) {
-    VT_ERROR(backend->comp->log, "WL: Renderer backend not initialized before output setup.");
+    VT_ERROR(backend->comp->log, "Renderer backend not initialized before output setup.");
     return false;
   }
 
@@ -223,11 +225,11 @@ _wl_backend_init_active_outputs(struct vt_backend_t* backend){
     pixman_region32_init(&output->damage);
     output->backend = backend;
     if (!_wl_backend_create_output(backend, output, NULL)) {
-      VT_ERROR(backend->comp->log, "WL: Failed to setup internal WL output.");
+      VT_ERROR(backend->comp->log, "Failed to setup internal WL output.");
       continue;
     } 
     if(!backend->comp->renderer->impl.setup_renderable_output(backend->comp->renderer, output)) {
-      VT_ERROR(backend->comp->log, "WL: Failed to setup renderable output for WL output (%ix%i@%.2f)",
+      VT_ERROR(backend->comp->log, "Failed to setup renderable output for WL output (%ix%i@%.2f)",
                 output->width, output->height, output->refresh_rate);
       _wl_backend_destroy_output(backend, output);
       continue;
@@ -236,7 +238,7 @@ _wl_backend_init_active_outputs(struct vt_backend_t* backend){
   }
   
   if (wl_list_empty(&backend->comp->outputs)) {
-    VT_ERROR(backend->comp->log, "WL: No outputs have been initialized.");
+    VT_ERROR(backend->comp->log, "No outputs have been initialized.");
     return false;
   }
 
@@ -251,7 +253,7 @@ bool
 _wl_backend_create_output(struct vt_backend_t* backend, struct vt_output_t* output, void* data){
   if(!backend || !output) return false;
 
-  VT_TRACE(backend->comp->log, "WL: Creating WL internal output.");
+  VT_TRACE(backend->comp->log, "Creating WL internal output.");
   if(!(output->user_data = VT_ALLOC(backend->comp, sizeof(wayland_output_state_t)))) {
     return false;
   }
@@ -269,7 +271,7 @@ _wl_backend_create_output(struct vt_backend_t* backend, struct vt_output_t* outp
   sprintf(name, "Vortex Nested (%i)", wl_list_length(&backend->comp->outputs));
   xdg_toplevel_set_title(wl_output->parent_xdg_toplevel, name);
   
-  VT_TRACE(backend->comp->log, "WL: Created virtual nested output %s.", name);
+  VT_TRACE(backend->comp->log, "Created virtual nested output %s.", name);
 
   wl_output->parent_frame_cb = wl_surface_frame(wl_output->parent_surface);
   wl_callback_add_listener(wl_output->parent_frame_cb, &parent_surface_frame_listener, output);
@@ -356,7 +358,7 @@ _wl_init_fake_dmabuf_feedback(
     main_dev = st.st_rdev;
   else {
     main_dev = makedev(0, 0);
-    VT_WARN(comp->log, "WL: Cannot stat() /dev/dri/card0 and /dev/dri/renderD128, falling back to not providing a main device for DMABUF feedback.");
+    VT_WARN(comp->log, "Cannot stat() /dev/dri/card0 and /dev/dri/renderD128, falling back to not providing a main device for DMABUF feedback.");
   }
 
   fb->dev_main->dev = main_dev;
@@ -398,7 +400,7 @@ _wl_init_fake_dmabuf_feedback(
   shm_formats[1] = _VT_DRM_FORMAT_ARGB8888; 
 
   if(!vt_proto_wl_shm_init(comp, shm_formats, 2)) {
-    VT_ERROR(comp->log, "WL: Failed to initialize WL SHM protcol.\n");
+    VT_ERROR(comp->log, "Failed to initialize WL SHM protcol.\n");
     return false;
   }
 
@@ -419,12 +421,12 @@ backend_init_wl(struct vt_backend_t* backend) {
   wayland_backend_state_t* wl = BACKEND_DATA(backend, wayland_backend_state_t); 
   wl->comp = backend->comp;
 
-  VT_TRACE(c->log, "WL: Initializing Wayland backend...");
+  VT_TRACE(c->log, "Initializing Wayland backend...");
 
   // Connect to lé display
   wl->parent_display = wl_display_connect(NULL);
   if (!wl->parent_display) {
-    VT_ERROR(c->log, "WL: Failed to connect to parent Wayland compositor.");
+    VT_ERROR(c->log, "Failed to connect to parent Wayland compositor.");
     return false;
   }
   
@@ -433,10 +435,10 @@ backend_init_wl(struct vt_backend_t* backend) {
   wl_registry_add_listener(reg, &parent_registry_listener, wl);
   wl_display_roundtrip(wl->parent_display);
   if (!wl->parent_compositor || !wl->parent_xdg_wm_base || !wl->comp->session->native_handle) {
-    VT_ERROR(c->log, "WL: Required globals not found.");
+    VT_ERROR(c->log, "Required globals not found.");
     return false;
   }
-  VT_TRACE(c->log, "WL: Found required globals.");
+  VT_TRACE(c->log, "Found required globals.");
 
   xdg_wm_base_add_listener(wl->parent_xdg_wm_base, &parent_wm_listener, c);
 
@@ -455,13 +457,13 @@ backend_init_wl(struct vt_backend_t* backend) {
     default_feedback->comp = backend->comp;
 
     if(!(_wl_init_fake_dmabuf_feedback(backend->comp, default_feedback))) {
-      VT_ERROR(backend->comp->log, "WL: Failed to build default DMABUF feedback.");
+      VT_ERROR(backend->comp->log, "Failed to build default DMABUF feedback.");
     } else {
       const uint32_t dmabuf_ver = 4;
       if(!vt_proto_linux_dmabuf_v1_init(backend->comp, default_feedback, dmabuf_ver)) {
-        VT_ERROR(backend->comp->log, "WL: Failed to initialize DMABUF protocol version %i.", dmabuf_ver);
+        VT_ERROR(backend->comp->log, "Failed to initialize DMABUF protocol version %i.", dmabuf_ver);
       } else {
-        VT_TRACE(backend->comp->log, "WL: Successfully initialized DMABUF protocol version %i.", dmabuf_ver);
+        VT_TRACE(backend->comp->log, "Successfully initialized DMABUF protocol version %i.", dmabuf_ver);
       }
     }
 
@@ -482,21 +484,21 @@ backend_init_wl(struct vt_backend_t* backend) {
   // init explicit sync
   if(backend->comp->have_proto_dmabuf_explicit_sync)  {
     VT_WARN(backend->comp->log,
-            "WL: Running nested backend with linux-dmabuf-explicit-sync.\n"
+            "Running nested backend with linux-dmabuf-explicit-sync.\n"
             "This protocol provides no benefit without DRM fence support.\n"
             "Use --exclude-protocol=linux-dmabuf-explicit-sync for best performance.\n");
 
     const uint32_t dmabuf_explicit_sync_ver = 2;
     if(!vt_proto_linux_explicit_sync_v1_init(backend->comp, dmabuf_explicit_sync_ver)) {
-      VT_ERROR(backend->comp->log, "WL: Failed to initialize DMABUF explicit sync protocol version %i.", dmabuf_explicit_sync_ver);
+      VT_ERROR(backend->comp->log, "Failed to initialize DMABUF explicit sync protocol version %i.", dmabuf_explicit_sync_ver);
     } else {
-      VT_TRACE(backend->comp->log, "WL: Successfully initialized DMABUF explicit sync protocol version %i.", dmabuf_explicit_sync_ver);
+      VT_TRACE(backend->comp->log, "Successfully initialized DMABUF explicit sync protocol version %i.", dmabuf_explicit_sync_ver);
     }
   }
 
   _wl_backend_init_active_outputs(backend);
   
-  VT_TRACE(c->log, "WL: Successfully initialized Wayland backend.");
+  VT_TRACE(c->log, "Successfully initialized Wayland backend.");
 
   return true;
 
@@ -514,7 +516,7 @@ bool
 backend_implement_wl(struct vt_compositor_t* comp) {
   if(!comp || !comp->backend) return false; 
 
-  VT_TRACE(comp->log, "WL: Implementing backend...");
+  VT_TRACE(comp->log, "Implementing backend...");
 
   comp->backend->platform = VT_BACKEND_WAYLAND; 
   comp->backend->impl = (struct vt_backend_interface_t){
