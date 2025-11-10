@@ -42,6 +42,8 @@ void renderer_init_surface_egl(struct vt_renderer_t* r, struct vt_surface_t* sur
 
 void renderer_draw_surface_egl(struct vt_renderer_t* r, struct vt_output_t* output, struct vt_surface_t* surface, float x, float y);
   
+void renderer_draw_image_egl(struct vt_renderer_t* r, struct vt_output_t* output, uint32_t tex_id, uint32_t width, uint32_t height, float x, float y);
+  
 void renderer_draw_rect_egl(struct vt_renderer_t* r, float x, float y, float w, float h, uint32_t col);
 
 void renderer_end_scene_egl(struct vt_renderer_t* r, struct vt_output_t* output);

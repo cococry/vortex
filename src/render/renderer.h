@@ -26,6 +26,7 @@ struct vt_renderer_interface_t {
   void (*begin_scene)(struct vt_renderer_t* r, struct vt_output_t* output);
   void (*begin_frame)(struct vt_renderer_t* r, struct vt_output_t* output);
   void (*draw_surface)(struct vt_renderer_t* r, struct vt_output_t* output, struct vt_surface_t* surface, float x, float y);
+  void (*draw_image)(struct vt_renderer_t* r, struct vt_output_t* output, uint32_t tex_id, uint32_t width, uint32_t height, float x, float y);
   void (*draw_rect)(struct vt_renderer_t* r, float x, float y, float w, float h, uint32_t col);
   void (*end_scene)(struct vt_renderer_t* r, struct vt_output_t* output);
   void (*end_frame)(struct vt_renderer_t* r, struct vt_output_t* output, const pixman_box32_t* damaged, int32_t n_damaged);

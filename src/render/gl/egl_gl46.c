@@ -1147,7 +1147,7 @@ renderer_begin_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output) {
  
   egl->need_fence = false;
 
-  glBindFramebuffer(GL_FRAMEBUFFER, egl_output->fbo_id);
+  //glBindFramebuffer(GL_FRAMEBUFFER, egl_output->fbo_id);
   printf("Bound framebuffer: %i\n", egl_output->fbo_id);
 }
 
@@ -1175,6 +1175,16 @@ renderer_draw_surface_egl(struct vt_renderer_t* r, struct vt_output_t* output, s
     
 }
 
+void 
+renderer_draw_image_egl(struct vt_renderer_t* r, struct vt_output_t* output, uint32_t tex_id, uint32_t width, uint32_t height, float x, float y) {
+  struct egl_backend_state_t* egl = BACKEND_DATA(r, struct egl_backend_state_t);
+
+  rn_image_render(egl->render, (vec2s){x,y}, RN_WHITE, (RnTexture) {
+    .id = tex_id,
+    .width = width,
+    .height = height
+  });
+}
 void 
 renderer_draw_rect_egl(struct vt_renderer_t* r, float x, float y, float w, float h, uint32_t col) {
   if (!r || !r->impl.draw_rect || !r->user_data) {
@@ -1216,15 +1226,6 @@ renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,  con
 
   if(!egl || !egl_output) return;
 
-
-  glBindFramebuffer(GL_READ_FRAMEBUFFER, egl_output->fbo_id);
-  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-  glBlitFramebuffer(0, 0, output->width, output->height,
-                    0, 0, output->width, output->height, 
-                    GL_COLOR_BUFFER_BIT, GL_NEAREST);
-
-  glBindFramebuffer(GL_FRAMEBUFFER, 0); 
-
   if(r->backend->comp->have_proto_dmabuf_explicit_sync && egl->has_explicit_sync_support) {
     egl_output->end_sync = eglCreateSyncKHR_ptr(
       egl->egl_dsp, 
@@ -1261,6 +1262,9 @@ renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,  con
   if(!_egl_send_surface_release_fences(r, output)) {
     VT_ERROR(r->comp->log, "Cannot release surface fences after render for output %p.", output);
   }
+  printf("=====================\n"); 
+  printf("Drawcalls: %i\n", egl->render->drawcalls);
+  egl->render->drawcalls = 0;
 }
 
 bool

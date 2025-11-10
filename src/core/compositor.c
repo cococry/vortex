@@ -839,6 +839,41 @@ struct vt_surface_t *vt_seat_get_focused_cursor_surface(struct vt_seat_t *seat) 
     }
     return NULL;
 }
+
+static uint32_t fbo_tex_id = 0, fbo_id = 0, rbo_tex_depth = 0;
+bool
+_create_fbo(uint32_t w, uint32_t h) {
+
+  if (fbo_tex_id) glDeleteTextures(1, &fbo_tex_id);
+  if (fbo_id) glDeleteFramebuffers(1, &fbo_id);
+  if (rbo_tex_depth) glDeleteRenderbuffers(1, &rbo_tex_depth);
+
+
+  glGenFramebuffers(1, &fbo_id);
+  glBindFramebuffer(GL_FRAMEBUFFER, fbo_id);
+
+  glGenTextures(1, &fbo_tex_id);
+  glBindTexture(GL_TEXTURE_2D, fbo_tex_id);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+
+  // For crisp image during resize
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, fbo_tex_id, 0);
+
+  glGenRenderbuffers(1, &rbo_tex_depth);
+  glBindRenderbuffer(GL_RENDERBUFFER, rbo_tex_depth);
+glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, w, h);
+glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo_tex_depth);
+
+  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    return false;
+  }
+
+  return true;
+}
       
 static uint32_t first_time = true; 
 void vt_comp_repaint_scene(struct vt_compositor_t *c, struct vt_output_t *output) {
@@ -847,50 +882,15 @@ void vt_comp_repaint_scene(struct vt_compositor_t *c, struct vt_output_t *output
   struct vt_renderer_t* r = c->renderer;
   r->impl.begin_frame(r, output);
 
-
-  glEnable(GL_STENCIL_TEST);
-  glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-  glDepthMask(GL_FALSE);
-
-  glClear(GL_STENCIL_BUFFER_BIT | GL_COLOR_BUFFER_BIT);          // <-- only clear stencil!
-  glStencilMask(0xFF);
-  glStencilFunc(GL_ALWAYS, 1, 0xFF);
-  glStencilOp(GL_REPLACE, GL_REPLACE, GL_REPLACE);
-
   r->impl.begin_scene(r, output);
-  pixman_box32_t boxes[2];
-
-  int32_t n = 0;
-  if(first_time < 50) {
-    boxes[0] = (pixman_box32_t){200,200,400, 400};
-    boxes[1] = (pixman_box32_t){c->seat->pointer_x, c->seat->pointer_y, c->seat->pointer_x + 20, c->seat->pointer_y + 20};
-    first_time++;
-    n = 2;
-    printf("Rendering both.\n");
-  } else {
-    boxes[0] = (pixman_box32_t){c->seat->pointer_x, c->seat->pointer_y, c->seat->pointer_x + 20, c->seat->pointer_y + 20};
-    printf("Rendering only.\n");
-    n = 1;
-
-  }
-
-  for(uint32_t i = 0; i < n; i++) {
-    r->impl.draw_rect(r, boxes[i].x1, boxes[i].y1, boxes[i].x2 - boxes[i].x1, boxes[i].y2 - boxes[i].y1, 0x0);
-  }
+    r->impl.draw_rect(r, 200, 200, 50, 50, 0x00ff00);
   r->impl.end_scene(r, output);
 
-  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-  glDepthMask(GL_TRUE);
-  glEnable(GL_STENCIL_TEST);
-  glStencilMask(0x00);                     // don’t write stencil
-  glStencilFunc(GL_EQUAL, 1, 0xFF);        // only draw where stencil == 1
-  glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
-    
+
   r->impl.begin_scene(r, output);
-    r->impl.draw_rect(r, 0, 0, output->width, output->height, 0xff0000);
-  for(uint32_t i = 0; i < n; i++) {
-    r->impl.draw_rect(r, boxes[i].x1, boxes[i].y1, boxes[i].x2 - boxes[i].x1, boxes[i].y2 - boxes[i].y1, 0x00ff00);
-  }
+
+  r->impl.draw_rect(r, 80, 80, 80, 80, 0xffffff);
+
   r->impl.end_scene(r, output);
 
   r->impl.end_frame(r, output, NULL, 0);
