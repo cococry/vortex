@@ -1227,7 +1227,7 @@ _linux_dmabuf_send_feedback(
     return;
   }
 
-  *dev = 0; 
+  *dev = feedback->dev_main;
 
   /* 3. Send format table and main device */
   zwp_linux_dmabuf_feedback_v1_send_format_table(res, feedback->entries_fd, feedback->entries_size);

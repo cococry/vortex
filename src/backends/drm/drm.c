@@ -610,11 +610,12 @@ bool _drm_init_for_device(struct vt_compositor_t* comp, struct drm_backend_state
   if(!drm_master->main_drm && comp->renderer->impl.is_handle_renderable(comp->renderer, drm->native_handle)) {
     comp->renderer->impl.init(comp->backend, comp->renderer, drm->native_handle);
     drm_master->main_drm = drm;
+    VT_TRACE(comp->log, "Chose DRM main device: GPU %s (FD: %i).", dev->path, drm->drm_fd);
   }
 
   _drm_init_active_outputs_for_device(drm);
 
-  VT_TRACE(comp->log, "Successfully initialized DRM/KMS backend for GPU %i.", drm->drm_fd);
+  VT_TRACE(comp->log, "Successfully initialized DRM/KMS backend for GPU %s (FD: %i).", dev->path, drm->drm_fd);
 
   return true;
 }
@@ -1176,8 +1177,11 @@ backend_handle_frame_drm(struct vt_backend_t* backend, struct vt_output_t* outpu
 
 bool
 backend_terminate_drm(struct vt_backend_t* backend) {
-  struct vt_device_t* dev, *tmp_dev;
   struct drm_backend_master_state_t* drm_master = BACKEND_DATA(backend, struct drm_backend_master_state_t); 
+  if(!drm_master) {
+    VT_PARAM_CHECK_FAIL(backend->comp);
+    return false;
+  }
   struct drm_backend_state_t* drm;
   wl_list_for_each(drm, &drm_master->backends, link) {
     _drm_terminate_for_device(drm);
@@ -1186,6 +1190,8 @@ backend_terminate_drm(struct vt_backend_t* backend) {
   if(backend->user_data) {
     backend->user_data = NULL;
   }
+
+  return true;
 }
 
 bool 

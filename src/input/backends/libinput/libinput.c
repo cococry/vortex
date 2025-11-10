@@ -31,6 +31,8 @@ static int32_t    _vt_li_open_restricted(const char* path, int32_t flags, void* 
 static void       _vt_li_close_restricted(int32_t fd, void* user_data);
 static int32_t    _vt_li_input_dispatch(int fd, uint32_t mask, void *data);
 static bool       _vt_li_input_handle_key_event(struct vt_input_backend_li_t* li, struct libinput_event_keyboard* kbev);
+static bool       _vt_li_input_handle_pointer_motion_event(struct vt_input_backend_li_t* li, struct libinput_event_pointer* ptrev);
+static bool       _vt_li_input_handle_pointer_button_event(struct vt_input_backend_li_t* li, struct libinput_event_pointer* ptrev);
 static bool       _vt_li_init_xkb(struct vt_input_backend_li_t* li);
 static enum vt_input_key_state_t _vt_li_key_state_to_vt_key_state(enum libinput_key_state state);
 
@@ -81,13 +83,26 @@ _vt_li_input_dispatch(int fd, uint32_t mask, void *data) {
         VT_ERROR(li->comp->log, "Failed to handle key event.\n");
       }
     }
+    else if(type == LIBINPUT_EVENT_POINTER_MOTION) {
+      if(!_vt_li_input_handle_pointer_motion_event(li, libinput_event_get_pointer_event(event))) {
+        VT_ERROR(li->comp->log, "Failed to handle pointer motion event.\n");
+      }
+    }
+    else if(type == LIBINPUT_EVENT_POINTER_BUTTON) {
+      if(!_vt_li_input_handle_pointer_button_event(li, libinput_event_get_pointer_event(event))) {
+        VT_ERROR(li->comp->log, "Failed to handle pointer button.\n");
+      }
+    }
     libinput_event_destroy(event);
   }
 }
 
 bool
 _vt_li_input_handle_key_event(struct vt_input_backend_li_t* li, struct libinput_event_keyboard* kbev) {
-  if(!li || !kbev) return false;
+  if(!li || !kbev) {
+    VT_PARAM_CHECK_FAIL_HEADLESS();
+    return false;
+  }
 
   const enum libinput_key_state state = libinput_event_keyboard_get_key_state(kbev);
   const uint32_t time = libinput_event_keyboard_get_time(kbev);
@@ -95,6 +110,83 @@ _vt_li_input_handle_key_event(struct vt_input_backend_li_t* li, struct libinput_
   const uint32_t key_xkb = key + 8;
 
   vt_seat_handle_key(li->comp->seat, key_xkb, _vt_li_key_state_to_vt_key_state(state), time);
+
+  return true;
+}
+bool 
+_vt_li_input_handle_pointer_motion_event(struct vt_input_backend_li_t* li, struct libinput_event_pointer* ptrev) {
+  if(!li || !li->comp || !ptrev) {
+    VT_PARAM_CHECK_FAIL_HEADLESS();
+    return false;
+  }
+
+
+  const uint32_t time = libinput_event_pointer_get_time(ptrev);
+  double posx, posy;
+  enum libinput_event_type type = libinput_event_get_type(
+    libinput_event_pointer_get_base_event(ptrev));
+  if (type == LIBINPUT_EVENT_POINTER_MOTION_ABSOLUTE) {
+
+    uint32_t output_width = 0, output_height = 0;
+    struct vt_surface_t* ptr_focus = li->comp->seat->ptr_focus.surf;
+    if(ptr_focus) {
+      struct vt_output_t* output;
+      wl_list_for_each(output, &li->comp->outputs, link_global) {
+        if(!(ptr_focus->_mask_outputs_visible_on & (1u << output->id))) continue;
+        output_width = output->width;
+        output_height = output->height;
+        break;
+      } 
+    } else {
+      struct vt_output_t* output;
+      wl_list_for_each(output, &li->comp->outputs, link_global) {
+        if(
+          li->comp->seat->pointer_x >= output->x && 
+          li->comp->seat->pointer_x < output->x + output->width && 
+          li->comp->seat->pointer_y >= output->y && 
+          li->comp->seat->pointer_y < output->y + output->height
+        ) {
+          output_width = output->width;
+          output_height = output->height;
+          break;
+        }
+      } 
+    }
+    if(!output_width || !output_height) {
+      VT_WARN(li->comp->log, "Cannot retrieve output dimensions.");
+      return false;
+    }
+    posx = libinput_event_pointer_get_absolute_x_transformed(ptrev, output_width); 
+    posy = libinput_event_pointer_get_absolute_y_transformed(ptrev, output_height); 
+  }  else { // relative motion
+    double dx = libinput_event_pointer_get_dx(ptrev);
+    double dy = libinput_event_pointer_get_dy(ptrev);
+    posx = li->comp->seat->pointer_x + dx;
+    posy = li->comp->seat->pointer_y + dy;
+  }
+
+
+  VT_TRACE(li->comp->log, "Handled pointer motion event: %lfx%lf", posx, posy)
+  vt_seat_handle_pointer_motion(li->comp->seat, posx, posy, time); 
+
+  return true;
+}
+
+bool 
+_vt_li_input_handle_pointer_button_event(struct vt_input_backend_li_t* li, struct libinput_event_pointer* ptrev) {
+  if(!li || !li->comp || !ptrev) {
+    VT_PARAM_CHECK_FAIL_HEADLESS();
+    return false;
+  }
+
+  const uint32_t time = libinput_event_pointer_get_time(ptrev);
+  const uint32_t button = libinput_event_pointer_get_button(ptrev); 
+  const enum libinput_button_state state = libinput_event_pointer_get_button_state(ptrev); 
+  
+  vt_seat_handle_pointer_button(
+    li->comp->seat, button, 
+    state == LIBINPUT_BUTTON_STATE_PRESSED,
+    time);
 
   return true;
 }

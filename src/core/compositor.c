@@ -733,6 +733,24 @@ vt_comp_init(struct vt_compositor_t* c, int argc, char** argv) {
  
   vt_scene_node_add_child(c, root, vt_scene_node_create(c, 20, 20, 20, 20));
 
+  // Allocate the struct to store protocol information about the surface
+  c->root_cursor = calloc(1, sizeof(*c->root_cursor));
+  c->root_cursor->comp = c;
+  c->root_cursor->x = 20;
+  c->root_cursor->y = 20;
+  c->root_cursor->type = VT_SURFACE_TYPE_CURSOR;
+  c->root_cursor->width = 20;
+  c->root_cursor->height = 20;
+  wl_list_init(&c->root_cursor->link_focus);
+
+  // Init the damage regions
+  pixman_region32_init(&c->root_cursor->current_damage);
+  pixman_region32_init(&c->root_cursor->pending_damage);
+  pixman_region32_init(&c->root_cursor->opaque_region);
+  pixman_region32_init(&c->root_cursor->input_region);
+
+  wl_list_insert(&c->surfaces, &c->root_cursor->link);
+
   return true;
 }
 
@@ -808,47 +826,74 @@ vt_comp_schedule_repaint(struct vt_compositor_t *c, struct vt_output_t* output) 
   VT_TRACE(c->log, "Scheduling repaint on output %p.", output);
 
 }
+
+struct vt_surface_t *vt_seat_get_focused_cursor_surface(struct vt_seat_t *seat) {
+    if (!seat->ptr_focus.res)
+        return NULL;
+
+    struct wl_client *focused_client = wl_resource_get_client(seat->ptr_focus.res);
+    struct vt_pointer_t *ptr;
+    wl_list_for_each(ptr, &seat->pointers, link) {
+        if (wl_resource_get_client(ptr->res) == focused_client)
+            return ptr->cursor.surf;
+    }
+    return NULL;
+}
+      
+static uint32_t first_time = true; 
 void vt_comp_repaint_scene(struct vt_compositor_t *c, struct vt_output_t *output) {
   if (!c || !output || !c->backend || !c->renderer) return;
 
   struct vt_renderer_t* r = c->renderer;
   r->impl.begin_frame(r, output);
 
-  if(output->needs_damage_rebuild) {
-    output->n_damage_boxes = vt_comp_merge_damaged_regions(output->cached_damage, &output->damage);
-    output->needs_damage_rebuild = false;
-  }
-  // Damage Pass
-  r->impl.stencil_damage_pass(r, output);
+
+  glEnable(GL_STENCIL_TEST);
+  glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+  glDepthMask(GL_FALSE);
+
+  glClear(GL_STENCIL_BUFFER_BIT | GL_COLOR_BUFFER_BIT);          // <-- only clear stencil!
+  glStencilMask(0xFF);
+  glStencilFunc(GL_ALWAYS, 1, 0xFF);
+  glStencilOp(GL_REPLACE, GL_REPLACE, GL_REPLACE);
+
   r->impl.begin_scene(r, output);
-  for(uint32_t i = 0; i < output->n_damage_boxes; i++) {
-    const pixman_box32_t b = output->cached_damage[i];
-    r->impl.draw_rect(r, b.x1, b.y1, b.x2 - b.x1, b.y2 - b.y1, 0xFFFFFF);
-  }
-    r->impl.end_scene(r, output);
+  pixman_box32_t boxes[2];
 
+  int32_t n = 0;
+  if(first_time < 50) {
+    boxes[0] = (pixman_box32_t){200,200,400, 400};
+    boxes[1] = (pixman_box32_t){c->seat->pointer_x, c->seat->pointer_y, c->seat->pointer_x + 20, c->seat->pointer_y + 20};
+    first_time++;
+    n = 2;
+    printf("Rendering both.\n");
+  } else {
+    boxes[0] = (pixman_box32_t){c->seat->pointer_x, c->seat->pointer_y, c->seat->pointer_x + 20, c->seat->pointer_y + 20};
+    printf("Rendering only.\n");
+    n = 1;
 
-  //Composite pass
-  r->impl.composite_pass(r, output);
-  r->impl.begin_scene(r, output);
-  r->impl.set_clear_color(r, output, 0xffffff);
-
-  struct vt_surface_t* surf;
-  wl_list_for_each_reverse(surf, &c->surfaces, link) {
-    if(!surf->damaged || !surf->mapped) continue;
-    if(!(surf->_mask_outputs_visible_on & (1u << output->id))) continue;
-
-    if(!pixman_region32_intersect_rect(&output->damage, &output->damage, surf->x, surf->y, surf->width, surf->height)) continue;
-
-    r->impl.draw_surface(r, output, surf, surf->x - output->x, surf->y - output->y);
   }
 
+  for(uint32_t i = 0; i < n; i++) {
+    r->impl.draw_rect(r, boxes[i].x1, boxes[i].y1, boxes[i].x2 - boxes[i].x1, boxes[i].y2 - boxes[i].y1, 0x0);
+  }
   r->impl.end_scene(r, output);
 
-  r->impl.end_frame(r, output, output->cached_damage, output->n_damage_boxes);
+  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  glDepthMask(GL_TRUE);
+  glEnable(GL_STENCIL_TEST);
+  glStencilMask(0x00);                     // don’t write stencil
+  glStencilFunc(GL_EQUAL, 1, 0xFF);        // only draw where stencil == 1
+  glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+    
+  r->impl.begin_scene(r, output);
+    r->impl.draw_rect(r, 0, 0, output->width, output->height, 0xff0000);
+  for(uint32_t i = 0; i < n; i++) {
+    r->impl.draw_rect(r, boxes[i].x1, boxes[i].y1, boxes[i].x2 - boxes[i].x1, boxes[i].y2 - boxes[i].y1, 0x00ff00);
+  }
+  r->impl.end_scene(r, output);
 
-  pixman_region32_clear(&output->damage);
-  output->needs_repaint = false;
+  r->impl.end_frame(r, output, NULL, 0);
 }
 
 void vt_comp_invalidate_all_surfaces(struct vt_compositor_t *comp) {
@@ -895,23 +940,32 @@ vt_comp_pick_surface(struct vt_compositor_t *comp, double x, double y) {
     if(!surf->mapped) continue;
     if(surf->type != VT_SURFACE_TYPE_NORMAL) continue;
     if (x >= surf->x && y >= surf->y &&
-      x < surf->x + surf->width && y < surf->y + surf->height)
+      x < surf->x + surf->width && y < surf->y + surf->height) {
+      //printf("Picked surface: %s\n", surf->xdg_surf->toplevel->title);
       return surf;
+    }
   }
   return NULL;
 }
 
 void 
 vt_comp_damage_entire_surface(struct vt_compositor_t *comp, struct vt_surface_t* surf) {
-  pixman_region32_union_rect(
-    &surf->pending_damage, &surf->pending_damage,
-    0, 0, surf->width, surf->height);
 
+  surf->damaged = true;
   struct vt_output_t* output;
   wl_list_for_each(output, &comp->outputs, link_global) {
-    if(!(surf->_mask_outputs_visible_on & (1u << output->id))) continue;
-    vt_comp_schedule_repaint(comp, output);
+    if(surf != comp->root_cursor && !(surf->_mask_outputs_visible_on & (1u << output->id))) continue;
+    pixman_region32_union_rect(
+      &output->damage, &output->damage,
+      surf->x - 2, surf->y - 2, surf->width + 2, surf->height + 2);
+    if(first_time) {
+      pixman_region32_union_rect(
+        &output->damage, &output->damage,
+       200,200,200,200);
+    }
     output->needs_damage_rebuild = true;
+    vt_comp_schedule_repaint(comp, output);
   }
+
 
 }

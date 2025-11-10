@@ -26,8 +26,10 @@ vt_surface_mapped(struct vt_surface_t* surf) {
     vt_seat_send_keyboard_leave(surf->comp->seat);
   vt_seat_set_keyboard_focus(seat, surf);
   if(under_cursor) {
-    if(under_cursor != seat->ptr_focus.surf)
+    if(under_cursor != seat->ptr_focus.surf) {
       vt_seat_send_pointer_leave(seat);
+      printf("Sent leave.\n");
+    }
     vt_seat_set_pointer_focus(seat, under_cursor, seat->pointer_x, seat->pointer_y);
   } 
   

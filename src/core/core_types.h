@@ -110,6 +110,8 @@ struct vt_compositor_t {
 
   bool have_proto_dmabuf,
        have_proto_dmabuf_explicit_sync;
+
+  struct vt_surface_t* root_cursor;
 };
 
 typedef bool (*backend_implement_func_t)(struct vt_compositor_t* comp);

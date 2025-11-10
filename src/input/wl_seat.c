@@ -198,7 +198,7 @@ _wl_seat_pointer_set_cursor(
     surf->type = VT_SURFACE_TYPE_CURSOR;
     surf->x = surf->comp->seat->pointer_x - hotspot_x;
     surf->y = surf->comp->seat->pointer_y - hotspot_y;
-  }
+  } 
 
   struct vt_pointer_t* ptr = wl_resource_get_user_data(resource);
   if(!ptr) return;
@@ -281,6 +281,7 @@ _wl_pointer_handle_resource_destroy(struct wl_resource *res) {
 
   // when a client destroys it's pointer, we need to update our list to 
   // reflect that 
+  printf("Destroyed pointer.\n");
   wl_list_remove(&ptr->link);
   free(ptr);
   wl_resource_set_user_data(res, NULL);
@@ -369,14 +370,14 @@ vt_seat_handle_key(struct vt_seat_t* seat, uint32_t keycode, uint32_t state, uin
       seat->_last_mods.group      != mod_states.group) {
       wl_keyboard_send_modifiers(
         kbd->res,
-        seat->serial++, 
+        wl_display_next_serial(seat->comp->wl.dsp), 
         mod_states.depressed, mod_states.latched, 
         mod_states.locked, mod_states.group);
     }
 
     wl_keyboard_send_key(
       kbd->res,
-      seat->serial++,
+      wl_display_next_serial(seat->comp->wl.dsp), 
       time,
       keycode - 8, // wayland expects evdev codes
       state == VT_KEY_STATE_PRESSED 
@@ -392,8 +393,6 @@ void
 vt_seat_handle_pointer_motion(struct vt_seat_t* seat, double x, double y, uint32_t time) {
   if(!seat) return;
 
-  seat->pointer_x = x;
-  seat->pointer_y = y;
   struct vt_surface_t* surf = vt_comp_pick_surface(seat->comp, x, y);
 
 
@@ -416,24 +415,33 @@ vt_seat_handle_pointer_motion(struct vt_seat_t* seat, double x, double y, uint32
     }
   }
 
-  if (!surf || !seat->ptr_focus.res)
-    return;
 
   struct vt_pointer_t *ptr;
   wl_list_for_each(ptr, &seat->pointers, link) {
     if (ptr->cursor.surf) {
+      // Schedule repaint so the cursor moves visually
+      vt_comp_damage_entire_surface(seat->comp, ptr->cursor.surf);
       ptr->cursor.surf->x = x - ptr->cursor.hotspot_x;
       ptr->cursor.surf->y = y - ptr->cursor.hotspot_y;
-
-      // Schedule repaint so the cursor moves visually
-      vt_comp_damage_entire_surface(ptr->cursor.surf->comp, ptr->cursor.surf);
     }
   }
+    if (seat->comp->root_cursor) {
+      // Schedule repaint so the cursor moves visually
+      vt_comp_damage_entire_surface(seat->comp, seat->comp->root_cursor); 
+      seat->comp->root_cursor->x = x; 
+      seat->comp->root_cursor->y = y; 
+
+    }
+  seat->pointer_x = x;
+  seat->pointer_y = y;
+  if (!surf || !seat->ptr_focus.res)
+    return;
 
   wl_pointer_send_motion(
     seat->ptr_focus.res, time,
     wl_fixed_from_double(x - surf->x),
     wl_fixed_from_double(y - surf->y));
+  wl_pointer_send_frame(seat->ptr_focus.res);
 }
 
 
@@ -451,6 +459,7 @@ void vt_seat_handle_pointer_button(
     time, button,
     pressed ? WL_POINTER_BUTTON_STATE_PRESSED
     : WL_POINTER_BUTTON_STATE_RELEASED);
+  wl_pointer_send_frame(seat->ptr_focus.res);
 }
 
 struct vt_keybind_t*
@@ -477,7 +486,7 @@ void vt_seat_send_keyboard_leave(struct vt_seat_t* seat) {
     if (wl_resource_get_client(seat->kb_focus.res) ==
       wl_resource_get_client(seat->kb_focus.surf->surf_res)) {
       wl_keyboard_send_leave(seat->kb_focus.res,
-                             seat->serial++,
+                            wl_display_next_serial(seat->comp->wl.dsp), 
                              seat->kb_focus.surf->surf_res);
     }
   }
@@ -488,18 +497,8 @@ void vt_seat_send_pointer_leave(struct vt_seat_t* seat) {
     if (wl_resource_get_client(seat->ptr_focus.res) ==
       wl_resource_get_client(seat->ptr_focus.surf->surf_res)) {
       wl_pointer_send_leave(seat->ptr_focus.res,
-                            seat->serial++,
+                            wl_display_next_serial(seat->comp->wl.dsp), 
                             seat->ptr_focus.surf->surf_res);
-
-      struct wl_client* client = wl_resource_get_client(seat->ptr_focus.surf->surf_res);
-      struct vt_pointer_t* ptr;
-      wl_list_for_each(ptr, &seat->pointers, link) {
-        if(!ptr->res || !ptr->cursor.surf) continue;
-        if (wl_resource_get_client(ptr->res) == client) {
-          ptr->cursor.surf->mapped = false;
-          vt_comp_damage_entire_surface(ptr->cursor.surf->comp, ptr->cursor.surf);  
-        }
-      }
     }
   }
 }
@@ -548,14 +547,14 @@ vt_seat_set_keyboard_focus(struct vt_seat_t *seat,
 
   struct wl_array keys;
   wl_array_init(&keys);
-  wl_keyboard_send_enter(seat->kb_focus.res, seat->serial++,
+  wl_keyboard_send_enter(seat->kb_focus.res, wl_display_next_serial(seat->comp->wl.dsp), 
                          surf->surf_res, &keys);
   wl_array_release(&keys);
 
   struct vt_kb_modifier_states_t mods =
     _wl_kb_get_mod_states(seat->comp->input_backend->kb_state);
 
-  wl_keyboard_send_modifiers(seat->kb_focus.res, seat->serial++,
+  wl_keyboard_send_modifiers(seat->kb_focus.res,  wl_display_next_serial(seat->comp->wl.dsp), 
                              mods.depressed, mods.latched,
                              mods.locked, mods.group);
 }

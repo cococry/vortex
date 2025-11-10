@@ -70,7 +70,7 @@ struct egl_backend_state_t {
 }; 
 
 struct egl_output_state_t {
-  GLint fbo_id, fbo_tex_id; 
+  GLint fbo_id, fbo_tex_id, rbo_tex_depth; 
   EGLSyncKHR end_sync;
 };
 
@@ -505,6 +505,9 @@ _egl_gl_create_output_fbo(struct vt_output_t *output) {
 
   if (egl_output->fbo_tex_id) glDeleteTextures(1, &egl_output->fbo_tex_id);
   if (egl_output->fbo_id) glDeleteFramebuffers(1, &egl_output->fbo_id);
+  if (egl_output->rbo_tex_depth) glDeleteRenderbuffers(1, &egl_output->rbo_tex_depth);
+
+  printf("Recreated fbo.\n");
 
   glGenFramebuffers(1, &egl_output->fbo_id);
   glBindFramebuffer(GL_FRAMEBUFFER, egl_output->fbo_id);
@@ -521,6 +524,10 @@ _egl_gl_create_output_fbo(struct vt_output_t *output) {
 
   glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, egl_output->fbo_tex_id, 0);
 
+  glGenRenderbuffers(1, &egl_output->rbo_tex_depth);
+  glBindRenderbuffer(GL_RENDERBUFFER, egl_output->rbo_tex_depth);
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, output->width, output->height);
+  glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, egl_output->rbo_tex_depth);
 
   if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
     VT_ERROR(output->backend->comp->log, "FBO creation for output %p (%u%u) failed.\n", output, output->width, output->height);
@@ -940,7 +947,6 @@ renderer_setup_renderable_output_egl(struct vt_renderer_t *r, struct vt_output_t
   
   // Create EGL FBOs for output
   if(!_egl_gl_create_output_fbo(output)) return false;
-  glEnable(GL_STENCIL_TEST);
 
   vt_comp_schedule_repaint(r->comp, output);
 
@@ -1064,8 +1070,6 @@ renderer_set_vsync_egl(struct vt_renderer_t* r, bool vsync) {
 
 void 
 renderer_set_clear_color_egl(struct vt_renderer_t* r, struct vt_output_t* output, uint32_t col) {
-  struct egl_backend_state_t* egl = BACKEND_DATA(r, struct egl_backend_state_t);
-  rn_rect_render(egl->render, (vec2s){0, 0}, (vec2s){output->width, output->height}, RN_WHITE);
 }
 
 void 
@@ -1075,6 +1079,7 @@ renderer_stencil_damage_pass_egl(struct vt_renderer_t* r, struct vt_output_t* ou
   struct egl_output_state_t* egl_output = (struct egl_output_state_t*)output->user_data_render; 
 
 
+  glEnable(GL_STENCIL_TEST);
   glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
   glDepthMask(GL_FALSE);
   glClear(GL_STENCIL_BUFFER_BIT);
@@ -1091,6 +1096,7 @@ renderer_composite_pass_egl(struct vt_renderer_t* r, struct vt_output_t* output)
   glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
   glStencilFunc(GL_EQUAL, 1, 0xFF);
   glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+
 }
 
 void 
@@ -1131,7 +1137,7 @@ renderer_begin_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output) {
              err, _egl_err_str(err));
     return;
   }
-    surface = last_surface;
+    last_surface = surface;
   }
 
   // Resize the render display if the output size changed
@@ -1142,6 +1148,7 @@ renderer_begin_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output) {
   egl->need_fence = false;
 
   glBindFramebuffer(GL_FRAMEBUFFER, egl_output->fbo_id);
+  printf("Bound framebuffer: %i\n", egl_output->fbo_id);
 }
 
 
@@ -1160,6 +1167,8 @@ renderer_draw_surface_egl(struct vt_renderer_t* r, struct vt_output_t* output, s
   rn_image_render(egl->render, (vec2s){x,y}, RN_WHITE, surface->tex);
   
   surface->_mask_outputs_presented_on |= (1u << output->id);
+
+  surface->damaged = false;
 
   VT_TRACE(r->comp->log, "Presented surface %p (%.2f,%.2f).", surface, x, y);
 
@@ -1207,12 +1216,14 @@ renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,  con
 
   if(!egl || !egl_output) return;
 
+
   glBindFramebuffer(GL_READ_FRAMEBUFFER, egl_output->fbo_id);
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
   glBlitFramebuffer(0, 0, output->width, output->height,
                     0, 0, output->width, output->height, 
                     GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
+  glBindFramebuffer(GL_FRAMEBUFFER, 0); 
 
   if(r->backend->comp->have_proto_dmabuf_explicit_sync && egl->has_explicit_sync_support) {
     egl_output->end_sync = eglCreateSyncKHR_ptr(
