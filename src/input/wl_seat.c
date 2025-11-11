@@ -426,10 +426,10 @@ vt_seat_handle_pointer_motion(struct vt_seat_t* seat, double x, double y, uint32
     }
   }
     if (seat->comp->root_cursor) {
-      // Schedule repaint so the cursor moves visually
-      vt_comp_damage_entire_surface(seat->comp, seat->comp->root_cursor); 
       seat->comp->root_cursor->x = x; 
       seat->comp->root_cursor->y = y; 
+      // Schedule repaint so the cursor moves visually
+      vt_comp_damage_entire_surface(seat->comp, seat->comp->root_cursor); 
 
     }
   seat->pointer_x = x;

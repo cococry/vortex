@@ -73,7 +73,7 @@ struct vt_output_t {
   float refresh_rate;
   uint32_t format, id;
 
-  bool needs_repaint, repaint_pending;
+  bool needs_repaint, repaint_pending, resize_pending;
 
   void* user_data, *user_data_render;
 

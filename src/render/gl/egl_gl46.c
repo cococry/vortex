@@ -131,7 +131,8 @@ _egl_gl_import_buffer_shm(struct vt_renderer_t* r, struct vt_surface_t *surf,
   wl_shm_buffer_begin_access(shm_buf);
   void *data = wl_shm_buffer_get_data(shm_buf);
 
-  if (surf->tex.width != width || surf->tex.height != height || !surf->tex.id) {
+  bool need_regen = surf->tex.width != width || surf->tex.height != height || !surf->tex.id;
+  if (need_regen) {
     if (!surf->tex.id)
       glGenTextures(1, &surf->tex.id);
 
@@ -157,8 +158,10 @@ _egl_gl_import_buffer_shm(struct vt_renderer_t* r, struct vt_surface_t *surf,
   glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
   glPixelStorei(GL_UNPACK_ROW_LENGTH, stride / 4);
 
-  pixman_box32_t ext = *pixman_region32_extents(&surf->current_damage);
-  glTexSubImage2D(GL_TEXTURE_2D, 0, ext.x1, ext.y1, ext.x2 - ext.x1, ext.y2 - ext.y1, format, type, data + ext.y1 * stride + ext.x1 * 4);
+  if(!need_regen) {
+    pixman_box32_t ext = *pixman_region32_extents(&surf->current_damage);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, ext.x1, ext.y1, ext.x2 - ext.x1, ext.y2 - ext.y1, format, type, data + ext.y1 * stride + ext.x1 * 4);
+  }
 
   glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
 
@@ -507,7 +510,6 @@ _egl_gl_create_output_fbo(struct vt_output_t *output) {
   if (egl_output->fbo_id) glDeleteFramebuffers(1, &egl_output->fbo_id);
   if (egl_output->rbo_tex_depth) glDeleteRenderbuffers(1, &egl_output->rbo_tex_depth);
 
-  printf("Recreated fbo.\n");
 
   glGenFramebuffers(1, &egl_output->fbo_id);
   glBindFramebuffer(GL_FRAMEBUFFER, egl_output->fbo_id);
@@ -535,6 +537,7 @@ _egl_gl_create_output_fbo(struct vt_output_t *output) {
     return false;
   }
 
+  printf("recreated.\n");
   // clean up
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
@@ -962,6 +965,7 @@ renderer_resize_renderable_output_egl(struct vt_renderer_t* r, struct vt_output_
   struct wl_egl_window* egl_win = (struct wl_egl_window*)output->native_window; 
   if(!egl_win) return false;
 
+  printf("called here.\n");
   if(!_egl_gl_create_output_fbo(output)) return false;
   
   wl_egl_window_resize(egl_win, w, h, 0, 0);
@@ -1147,8 +1151,7 @@ renderer_begin_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output) {
  
   egl->need_fence = false;
 
-  //glBindFramebuffer(GL_FRAMEBUFFER, egl_output->fbo_id);
-  printf("Bound framebuffer: %i\n", egl_output->fbo_id);
+  glBindFramebuffer(GL_FRAMEBUFFER, egl_output->fbo_id);
 }
 
 
@@ -1233,8 +1236,13 @@ renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,  con
       &(EGLint){EGL_NONE});
   }
 
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, egl_output->fbo_id);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+  glBlitFramebuffer(0, 0, output->width, output->height,
+                    0, 0, output->width, output->height, 
+                    GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
-  if (n_damaged > 0 && eglSwapBuffersWithDamageEXT_ptr) {
+  if (n_damaged) {
     EGLint egl_rects[n_damaged * 4];
     for (int i = 0; i < n_damaged; i++) {
       egl_rects[i * 4 + 0] = damaged[i].x1;
@@ -1242,19 +1250,12 @@ renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,  con
       egl_rects[i * 4 + 2] = damaged[i].x2 - damaged[i].x1;
       egl_rects[i * 4 + 3] = damaged[i].y2 - damaged[i].y1;
     }
-
-    eglSwapBuffersWithDamageEXT_ptr(
-      egl->egl_dsp, output->render_surface, egl_rects, n_damaged);
-  } else if (n_damaged > 0 && eglSwapBuffersWithDamageKHR_ptr) {
-    EGLint egl_rects[n_damaged * 4];
-    for (int i = 0; i < n_damaged; i++) {
-      egl_rects[i * 4 + 0] = damaged[i].x1;
-      egl_rects[i * 4 + 1] = output->height - damaged[i].y2;
-      egl_rects[i * 4 + 2] = damaged[i].x2 - damaged[i].x1;
-      egl_rects[i * 4 + 3] = damaged[i].y2 - damaged[i].y1;
-    }
-    eglSwapBuffersWithDamageKHR_ptr(
-      egl->egl_dsp, output->render_surface, egl_rects, n_damaged);
+    if(eglSwapBuffersWithDamageKHR_ptr)
+      eglSwapBuffersWithDamageKHR_ptr(
+        egl->egl_dsp, output->render_surface, egl_rects, n_damaged);
+    else if (eglSwapBuffersWithDamageEXT_ptr) 
+      eglSwapBuffersWithDamageEXT_ptr(
+        egl->egl_dsp, output->render_surface, egl_rects, n_damaged);
   } else {
     eglSwapBuffers(egl->egl_dsp, output->render_surface);
   }
@@ -1262,8 +1263,6 @@ renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,  con
   if(!_egl_send_surface_release_fences(r, output)) {
     VT_ERROR(r->comp->log, "Cannot release surface fences after render for output %p.", output);
   }
-  printf("=====================\n"); 
-  printf("Drawcalls: %i\n", egl->render->drawcalls);
   egl->render->drawcalls = 0;
 }
 

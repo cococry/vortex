@@ -427,6 +427,7 @@ void _vt_comp_associate_surface_with_output(struct vt_compositor_t* c, struct vt
   }
 }
 
+
 void 
 _vt_comp_wl_surface_create(
   struct wl_client *client,
@@ -439,7 +440,8 @@ _vt_comp_wl_surface_create(
   // Allocate the struct to store protocol information about the surface
   struct vt_surface_t* surf = calloc(1, sizeof(*surf));
   surf->comp = c;
-  surf->x = 20;
+  surf->x = 20; 
+  printf("Creating surface with X %i\n", surf->x);
   surf->y = 20;
   surf->type = VT_SURFACE_TYPE_NORMAL;
   wl_list_init(&surf->link_focus);
@@ -565,16 +567,22 @@ static void _wl_region_handle_destroy(struct wl_resource* resource) {
 
 uint32_t vt_comp_merge_damaged_regions(pixman_box32_t *merged,
                                     pixman_region32_t *region) {
-  if (pixman_region32_empty(region)) return 0;
+  pixman_box32_t extents = *pixman_region32_extents(region);
+  if (
+    (extents.x2 - extents.x1 <= 0 ||
+    extents.y2 - extents.y1 <= 0) &&
+    pixman_region32_empty(region)) {
+    return 0;
+  }
 
   uint32_t n_rects = 0;
-  pixman_box32_t *rects = pixman_region32_rectangles(region, &n_rects);
-  if(!n_rects) return 0;
-
-  if (n_rects > VT_MAX_DAMAGE_RECTS) {
-    merged[0] = *pixman_region32_extents(region);
-    return 1; 
+  pixman_box32_t* rects = pixman_region32_rectangles(region, &n_rects);
+  if(!n_rects) {
+    pixman_box32_t extents = *pixman_region32_extents(region);
+    merged[0] = (pixman_box32_t){extents.x1, extents.y1, extents.x2, extents.y2};
+    return 1;
   }
+
 
   memcpy(merged, rects, sizeof(pixman_box32_t) * n_rects);
 
@@ -749,7 +757,7 @@ vt_comp_init(struct vt_compositor_t* c, int argc, char** argv) {
   pixman_region32_init(&c->root_cursor->opaque_region);
   pixman_region32_init(&c->root_cursor->input_region);
 
-  wl_list_insert(&c->surfaces, &c->root_cursor->link);
+  //wl_list_insert(&c->surfaces, &c->root_cursor->link);
 
   return true;
 }
@@ -840,60 +848,111 @@ struct vt_surface_t *vt_seat_get_focused_cursor_surface(struct vt_seat_t *seat) 
     return NULL;
 }
 
-static uint32_t fbo_tex_id = 0, fbo_id = 0, rbo_tex_depth = 0;
-bool
-_create_fbo(uint32_t w, uint32_t h) {
+bool box_intersect_box(
+  float x1, float y1, float w1, float h1,
+  float x2, float y2, float w2, float h2) {
+  return 
+    x1 + w1 >= x2 && x1 <= x2 + w2 && 
+    y1 + h1 >= y2 && y1 <= y2 + h2; 
+}
 
-  if (fbo_tex_id) glDeleteTextures(1, &fbo_tex_id);
-  if (fbo_id) glDeleteFramebuffers(1, &fbo_id);
-  if (rbo_tex_depth) glDeleteRenderbuffers(1, &rbo_tex_depth);
+bool surface_intersects_damage(struct vt_surface_t* surf, const pixman_box32_t* boxes, uint32_t n_boxes) {
+  for(uint32_t i = 0; i < n_boxes; i++) {
+    pixman_box32_t box = boxes[i];
+    if (box_intersect_box(
+      surf->x, surf->y, surf->width, surf->height, 
+      box.x1, box.y1, box.x2 - box.x1, box.y2 - box.y1 
+    )) {
+      return true;
+    } 
+  }
+  return false;
+}
 
+static void _composite_pass(struct vt_compositor_t *c, struct vt_output_t *output, bool care_for_damage) {
+  struct vt_renderer_t* r = c->renderer;
+  r->impl.begin_scene(r, output);
 
-  glGenFramebuffers(1, &fbo_id);
-  glBindFramebuffer(GL_FRAMEBUFFER, fbo_id);
-
-  glGenTextures(1, &fbo_tex_id);
-  glBindTexture(GL_TEXTURE_2D, fbo_tex_id);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-
-  // For crisp image during resize
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-
-glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, fbo_tex_id, 0);
-
-  glGenRenderbuffers(1, &rbo_tex_depth);
-  glBindRenderbuffer(GL_RENDERBUFFER, rbo_tex_depth);
-glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, w, h);
-glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_RENDERBUFFER, rbo_tex_depth);
-
-  if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
-    glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    return false;
+  if(care_for_damage) {
+  r->impl.draw_rect(r, 0, 0, output->width, output->height, 0xffffff); 
+  } else {
+    glClearColor(1.0f, 1.0f, 1.0f, 1.0f); 
+    glClear(GL_COLOR_BUFFER_BIT);
   }
 
-  return true;
+  struct vt_surface_t* surf;
+  wl_list_for_each_reverse(surf, &c->surfaces, link) {
+    if(surf->type != VT_SURFACE_TYPE_NORMAL) continue;
+      if(care_for_damage && !surface_intersects_damage(surf, output->cached_damage, output->n_damage_boxes)) {
+      continue;
+    }
+    r->impl.draw_surface(r, output, surf, surf->x, surf->y);
+  }
+
+  struct vt_surface_t* cursor_surf = vt_seat_get_focused_cursor_surface(c->seat);
+
+  bool cursor_damaged = !care_for_damage ||
+    surface_intersects_damage(cursor_surf, output->cached_damage, output->n_damage_boxes);
+  if(cursor_surf && cursor_damaged) {
+    r->impl.draw_surface(r, output, cursor_surf, cursor_surf->x, cursor_surf->y);
+  }
+
+  r->impl.end_scene(r, output);
+
 }
-      
-static uint32_t first_time = true; 
+
+static void _damage_pass(struct vt_compositor_t *c, struct vt_output_t *output) {
+  struct vt_renderer_t* r = c->renderer;
+  output->n_damage_boxes = vt_comp_merge_damaged_regions(output->cached_damage, &output->damage);
+  output->needs_damage_rebuild = false;
+
+  r->impl.stencil_damage_pass(r, output);
+
+  // 1. drawcall 
+  r->impl.begin_scene(r, output);
+
+  if(output->resize_pending) {
+    r->impl.draw_rect(r, 0, 0, output->width, output->height, 0xffffff); 
+    output->resize_pending = false;
+  }
+  for(uint32_t i = 0; i < output->n_damage_boxes; i++) {
+    pixman_box32_t box = output->cached_damage[i];
+    r->impl.draw_rect(r, box.x1, box.y1, box.x2 - box.x1, box.y2 - box.y1, 0xffffff); 
+  }
+
+  r->impl.end_scene(r, output);
+
+}
+
 void vt_comp_repaint_scene(struct vt_compositor_t *c, struct vt_output_t *output) {
   if (!c || !output || !c->backend || !c->renderer) return;
 
   struct vt_renderer_t* r = c->renderer;
   r->impl.begin_frame(r, output);
 
-  r->impl.begin_scene(r, output);
-    r->impl.draw_rect(r, 200, 200, 50, 50, 0x00ff00);
+  if(output->repaint_pending) {
+    output->repaint_pending = false;
+
+    _composite_pass(c, output, false);
+  } else {
+
+    if(output->needs_damage_rebuild) {
+      _damage_pass(c, output);
+    } 
+
+    // 2. drawcall 
+    r->impl.composite_pass(r, output);
+
+    _composite_pass(c, output, true);
+  }
+
   r->impl.end_scene(r, output);
 
+  r->impl.end_frame(r, output, output->cached_damage, output->n_damage_boxes);
 
-  r->impl.begin_scene(r, output);
+  pixman_region32_clear(&output->damage);
+  output->needs_repaint = false;
 
-  r->impl.draw_rect(r, 80, 80, 80, 80, 0xffffff);
-
-  r->impl.end_scene(r, output);
-
-  r->impl.end_frame(r, output, NULL, 0);
 }
 
 void vt_comp_invalidate_all_surfaces(struct vt_compositor_t *comp) {
@@ -941,7 +1000,6 @@ vt_comp_pick_surface(struct vt_compositor_t *comp, double x, double y) {
     if(surf->type != VT_SURFACE_TYPE_NORMAL) continue;
     if (x >= surf->x && y >= surf->y &&
       x < surf->x + surf->width && y < surf->y + surf->height) {
-      //printf("Picked surface: %s\n", surf->xdg_surf->toplevel->title);
       return surf;
     }
   }
@@ -950,20 +1008,17 @@ vt_comp_pick_surface(struct vt_compositor_t *comp, double x, double y) {
 
 void 
 vt_comp_damage_entire_surface(struct vt_compositor_t *comp, struct vt_surface_t* surf) {
-
   surf->damaged = true;
   struct vt_output_t* output;
   wl_list_for_each(output, &comp->outputs, link_global) {
     if(surf != comp->root_cursor && !(surf->_mask_outputs_visible_on & (1u << output->id))) continue;
+
     pixman_region32_union_rect(
       &output->damage, &output->damage,
-      surf->x - 2, surf->y - 2, surf->width + 2, surf->height + 2);
-    if(first_time) {
-      pixman_region32_union_rect(
-        &output->damage, &output->damage,
-       200,200,200,200);
-    }
+      surf->x, surf->y, surf->width, surf->height);
+
     output->needs_damage_rebuild = true;
+
     vt_comp_schedule_repaint(comp, output);
   }
 

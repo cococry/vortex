@@ -129,6 +129,18 @@ _wl_parent_xdg_wm_base_ping(void *data, struct xdg_wm_base *wm, uint32_t serial)
   xdg_wm_base_pong(wm, serial);
 }
 
+static void _output_handle_render_resize(struct vt_output_t* output, int32_t w, int32_t h) {
+   struct vt_renderer_t* r = output->backend->comp->renderer;
+    if (r && r->impl.resize_renderable_output && output->native_window) {
+
+    output->width = w;
+    output->height = h;
+      r->impl.resize_renderable_output(r, output, w, h);
+      output->resize_pending = true;
+    }
+    vt_comp_schedule_repaint(r->comp, output);
+
+}
 
 void 
 _wl_parent_xdg_toplevel_configure(void *data,
@@ -138,16 +150,10 @@ _wl_parent_xdg_toplevel_configure(void *data,
   wayland_output_state_t* wl_output = BACKEND_DATA(output, wayland_output_state_t);
   if(!wl_output) return;
   
+  // Handle resize output in renderer
   if(w != output->width || h != output->height) {
-    struct vt_renderer_t* r = output->backend->comp->renderer;
-    if (r && r->impl.resize_renderable_output && output->native_window)
-      r->impl.resize_renderable_output(r, output, w, h);
-
-    output->width = w;
-    output->height = h;
-    vt_comp_schedule_repaint(r->comp, output);
-  }
-
+    _output_handle_render_resize(output, w, h);
+   }
 }
 
 void 
@@ -162,12 +168,9 @@ _wl_parent_xdg_surface_configure(void *data,
   int h = output->height > 0 ? output->height : _WL_DEFAULT_OUTPUT_HEIGHT;
   
   // Handle resize output in renderer
-  struct vt_renderer_t* r = output->backend->comp->renderer;
-  if (r && r->impl.resize_renderable_output && output->native_window)
-    r->impl.resize_renderable_output(r, output, w, h);
-  output->width = w;
-  output->height = h;
-  vt_comp_schedule_repaint(r->comp, output);
+  if(w != output->width || h != output->height) {
+    _output_handle_render_resize(output, w, h);
+   }
 }
 
 void 

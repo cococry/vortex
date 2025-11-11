@@ -119,6 +119,29 @@ _wl_surface_attach(
 
 }
 
+
+static void print_region32(const pixman_region32_t *region) {
+  int n_rects;
+  const pixman_box32_t *rects;
+
+  rects = pixman_region32_rectangles(region, &n_rects);
+
+  printf("Region contains %d rectangle(s):\n", n_rects);
+  for (int i = 0; i < n_rects; ++i) {
+    printf("  Rect %d: x1=%d, y1=%d, x2=%d, y2=%d\n",
+           i,
+           rects[i].x1, rects[i].y1,
+           rects[i].x2, rects[i].y2);
+  }
+
+  // Optionally, you can also print the bounding box
+  pixman_box32_t extents = *pixman_region32_extents(region);
+  printf("Bounding box: x1=%d, y1=%d, x2=%d, y2=%d\n",
+         extents.x1, extents.y1, extents.x2, extents.y2); 
+}
+
+
+
 void 
 _wl_surface_commit(
   struct wl_client* client,
