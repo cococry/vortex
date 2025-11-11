@@ -480,7 +480,6 @@ bool _egl_send_surface_release_fences(struct vt_renderer_t* renderer, struct vt_
     struct vt_surface_t* surf;
 
     wl_list_for_each_reverse(surf, &comp->surfaces, link) {
-      if (!surf->damaged) continue;
       if (!(surf->_mask_outputs_presented_on & (1u << output->id))) continue;
       if (!surf->buf_res) continue;
       if (!surf->sync.res_release) continue;
@@ -969,7 +968,6 @@ renderer_resize_renderable_output_egl(struct vt_renderer_t* r, struct vt_output_
   if(!_egl_gl_create_output_fbo(output)) return false;
   
   wl_egl_window_resize(egl_win, w, h, 0, 0);
-
 
   pixman_region32_union_rect(
     &output->damage, &output->damage,
