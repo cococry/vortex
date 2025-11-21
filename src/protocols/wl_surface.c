@@ -183,9 +183,25 @@ _wl_surface_commit(
     wl_buffer_send_release(surf->buf_res);
   }
 
-  /* 3. Update internal surface width and height */
+  bool is_valid_xdg_surf =  surf->xdg_surf &&
+    ((surf->xdg_surf->toplevel && surf->xdg_surf->toplevel->xdg_toplevel_res) ||
+    (surf->xdg_surf->popup && surf->xdg_surf->popup->xdg_popup_res));
+    
   surf->width = surf->tex.width;
   surf->height = surf->tex.height;
+
+  /* 3. Update internal surface width and height */
+  if(!is_valid_xdg_surf) {
+    surf->x = 0;
+    surf->y = 0;
+  } else {
+    surf->x =  surf->xdg_surf->pending_geom.x; 
+    surf->y =  surf->xdg_surf->pending_geom.y; 
+    surf->geom_width =  surf->xdg_surf->pending_geom.w;
+    surf->geom_height =  surf->xdg_surf->pending_geom.h;
+    if(surf->xdg_surf->popup)
+    printf("commiti: %i, %i.\n", surf->x, surf->y);
+  }
 
   /* 4. Calculate current damage region  */
   if(!surf->_mask_outputs_visible_on) {
@@ -205,9 +221,7 @@ _wl_surface_commit(
 
   /* 5. If the surface has not yet been mapped and has a 
    * valid XDG Surface and XDG Surface role, trigger a map request. */
-  if (!surf->mapped && surf->has_buffer && surf->xdg_surf &&
-    ((surf->xdg_surf->toplevel && surf->xdg_surf->toplevel->xdg_toplevel_res) ||
-    (surf->xdg_surf->popup && surf->xdg_surf->popup->xdg_popup_res))) {
+  if (!surf->mapped && surf->has_buffer && is_valid_xdg_surf)  {
     surf->mapped = true;
     vt_surface_mapped(surf);
   }

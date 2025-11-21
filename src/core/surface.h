@@ -41,6 +41,8 @@ struct vt_surface_t {
 
   uint32_t width, height;
   int32_t x, y;
+  
+  uint32_t geom_width, geom_height;
 
   bool needs_frame_done;
 
