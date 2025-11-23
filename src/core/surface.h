@@ -2,6 +2,7 @@
 
 #include "../protocols/linux_dmabuf.h"
 #include "../protocols/xdg_shell.h"
+#include "src/core/scene.h"
 #define VT_MAX_FRAME_CBS 8 
 
 #include <stdint.h>
@@ -71,6 +72,7 @@ struct vt_surface_t {
 
   enum vt_surface_type_t type;
 
+  struct vt_scene_node_t* scene_node;
 };
 
 void vt_surface_mapped(struct vt_surface_t* surf);

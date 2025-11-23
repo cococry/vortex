@@ -199,8 +199,6 @@ _wl_surface_commit(
     surf->y =  surf->xdg_surf->pending_geom.y; 
     surf->geom_width =  surf->xdg_surf->pending_geom.w;
     surf->geom_height =  surf->xdg_surf->pending_geom.h;
-    if(surf->xdg_surf->popup)
-    printf("commiti: %i, %i.\n", surf->x, surf->y);
   }
 
   /* 4. Calculate current damage region  */

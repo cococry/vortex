@@ -1072,6 +1072,9 @@ renderer_set_vsync_egl(struct vt_renderer_t* r, bool vsync) {
 
 void 
 renderer_set_clear_color_egl(struct vt_renderer_t* r, struct vt_output_t* output, uint32_t col) {
+  vec4s zto = rn_color_to_zto(rn_color_from_hex(col));
+  glClearColor(zto.r, zto.g, zto.b, zto.a);
+  glClear(GL_COLOR_BUFFER_BIT);
 }
 
 void 
