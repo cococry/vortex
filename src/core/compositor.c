@@ -753,8 +753,8 @@ vt_comp_init(struct vt_compositor_t* c, int argc, char** argv) {
   // Allocate the struct to store protocol information about the surface
   c->root_cursor = calloc(1, sizeof(*c->root_cursor));
   c->root_cursor->comp = c;
-  c->root_cursor->x = 20;
-  c->root_cursor->y = 20;
+  c->root_cursor->x = 0;
+  c->root_cursor->y = 0;
   c->root_cursor->type = VT_SURFACE_TYPE_CURSOR;
   c->root_cursor->width = 20;
   c->root_cursor->height = 20;
@@ -902,20 +902,30 @@ vt_comp_pick_surface(struct vt_compositor_t *comp, double x, double y) {
 }
 
 void 
-vt_comp_damage_entire_surface(struct vt_compositor_t *comp, struct vt_surface_t* surf) {
+vt_comp_damage_entire_surface(struct vt_compositor_t *comp, struct vt_surface_t* surf, int32_t x, int32_t y) {
+  if(!surf) return;
   surf->damaged = true;
   struct vt_output_t* output;
   wl_list_for_each(output, &comp->outputs, link_global) {
     if(surf != comp->root_cursor && !(surf->_mask_outputs_visible_on & (1u << output->id))) continue;
 
+    if(x == surf->x && y == surf->y) {
     pixman_region32_union_rect(
       &output->damage, &output->damage,
-      surf->x, surf->y, surf->width, surf->height);
+   0, 0, output->width, output->height);
+    } else {
+      pixman_region32_union_rect(
+        &output->damage, &output->damage,
+        surf->x, surf->y, surf->width, surf->height);
+      pixman_region32_union_rect(
+        &output->damage, &output->damage,
+        x, y, surf->width, surf->height);
+      surf->x = x; 
+      surf->y = y;
+    }
 
     output->needs_damage_rebuild = true;
 
     vt_comp_schedule_repaint(comp, output);
   }
-
-
 }

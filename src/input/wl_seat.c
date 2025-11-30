@@ -136,6 +136,15 @@ _wl_handle_keybind_term(struct vt_compositor_t* comp, void* user_data) {
   VT_TRACE(comp->log, "Doing: '%s'", buf);
   system(buf);
 }
+void 
+_wl_handle_keybind_nogger(struct vt_compositor_t* comp, void* user_data) {
+  comp->nogger = !comp->nogger;
+  struct vt_output_t* output;
+  wl_list_for_each(output, &comp->outputs, link_global) {
+  vt_comp_schedule_repaint(comp, output);
+    printf("repainted.\n");
+  }
+}
 
 void 
 _wl_seat_get_pointer(struct wl_client* client, struct wl_resource* seat_res, uint32_t id) {
@@ -192,12 +201,13 @@ _wl_seat_pointer_set_cursor(
   int32_t hotspot_y) {
   if(!resource) return;
   struct vt_surface_t* surf = NULL; 
+    printf("set cursor.\n");
   if(surface) {
     surf = wl_resource_get_user_data(surface);
-    surf->mapped = true;
     surf->type = VT_SURFACE_TYPE_CURSOR;
-    surf->x = surf->comp->seat->pointer_x - hotspot_x;
+    surf->x =  surf->comp->seat->pointer_x - hotspot_x;
     surf->y = surf->comp->seat->pointer_y - hotspot_y;
+    surf->mapped = true;
   } 
 
   struct vt_pointer_t* ptr = wl_resource_get_user_data(resource);
@@ -415,25 +425,20 @@ vt_seat_handle_pointer_motion(struct vt_seat_t* seat, double x, double y, uint32
     }
   }
 
+  seat->pointer_x = x;
+  seat->pointer_y = y;
 
+  if(!seat->ptr_focus.surf) {
+    vt_comp_damage_entire_surface(
+      seat->comp, seat->comp->root_cursor, x, y); 
+  }
   struct vt_pointer_t *ptr;
   wl_list_for_each(ptr, &seat->pointers, link) {
     if (ptr->cursor.surf) {
-      // Schedule repaint so the cursor moves visually
-      vt_comp_damage_entire_surface(seat->comp, ptr->cursor.surf);
-      ptr->cursor.surf->x = x - ptr->cursor.hotspot_x;
-      ptr->cursor.surf->y = y - ptr->cursor.hotspot_y;
+      vt_comp_damage_entire_surface(
+        seat->comp, ptr->cursor.surf,  x - ptr->cursor.hotspot_x, y - ptr->cursor.hotspot_y); 
     }
   }
-    if (seat->comp->root_cursor) {
-      seat->comp->root_cursor->x = x; 
-      seat->comp->root_cursor->y = y; 
-      // Schedule repaint so the cursor moves visually
-      vt_comp_damage_entire_surface(seat->comp, seat->comp->root_cursor); 
-
-    }
-  seat->pointer_x = x;
-  seat->pointer_y = y;
   if (!surf || !seat->ptr_focus.res)
     return;
 
@@ -591,7 +596,6 @@ vt_seat_set_pointer_focus(struct vt_seat_t *seat,
   // Reset focus
   seat->ptr_focus.surf = surf;
   seat->ptr_focus.res  = NULL;
-
   // If no new surface, done
   if (!surf)
     return;
@@ -604,13 +608,14 @@ vt_seat_set_pointer_focus(struct vt_seat_t *seat,
       if (wl_resource_get_client(ptr->res) == client) {
         seat->ptr_focus.res = ptr->res;
         if(ptr->cursor.surf) {
-          ptr->cursor.surf->x = sx - ptr->cursor.hotspot_x;
-          ptr->cursor.surf->y = sy - ptr->cursor.hotspot_y;
+          ptr->cursor.surf->x =  sx - ptr->cursor.hotspot_x; 
+          ptr->cursor.surf->y =  sy - ptr->cursor.hotspot_y;
         }
         break;
       }
     }
   }
+
 
   if (!seat->ptr_focus.res)
     return;
@@ -623,7 +628,6 @@ vt_seat_set_pointer_focus(struct vt_seat_t *seat,
       surf->surf_res,
       wl_fixed_from_double(sx),
       wl_fixed_from_double(sy));
-
   }
 
 }
@@ -634,6 +638,7 @@ vt_seat_bind_global_keybinds(struct vt_seat_t* seat) {
   struct vt_kb_modifiers_t mods = seat->comp->input_backend->mods; 
   vt_seat_add_global_keybind(seat, XKB_KEY_Escape, mods.alt, _wl_handle_keybind_exit, NULL);
   vt_seat_add_global_keybind(seat, XKB_KEY_e, mods.alt, _wl_handle_keybind_term, NULL);
+  vt_seat_add_global_keybind(seat, XKB_KEY_n, mods.alt, _wl_handle_keybind_nogger, NULL);
 }
 
 bool

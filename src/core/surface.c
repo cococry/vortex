@@ -28,11 +28,9 @@ vt_surface_mapped(struct vt_surface_t* surf) {
   if(under_cursor) {
     if(under_cursor != seat->ptr_focus.surf) {
       vt_seat_send_pointer_leave(seat);
-      printf("Sent leave.\n");
     }
     vt_seat_set_pointer_focus(seat, under_cursor, seat->pointer_x, seat->pointer_y);
   } 
-  
   wl_list_insert(&seat->focus_stack, &surf->link_focus);
 
 }
@@ -59,7 +57,6 @@ vt_surface_unmapped(struct vt_surface_t* surf) {
   
   surf->mapped = false;
 
-
   struct vt_surface_t* new_focus  = NULL;
   // If surface had parent, revert to parent 
   if(surf->xdg_surf && surf->xdg_surf->toplevel && surf->xdg_surf->toplevel->parent) {
@@ -71,7 +68,6 @@ vt_surface_unmapped(struct vt_surface_t* surf) {
     
     new_focus = parent_surface->xdg_surf->surf;
   } else if((new_focus = focus_previous(surf->comp))) {
-
   }
   else {
     // Revert focus to surface that is under the cursor
@@ -86,6 +82,5 @@ vt_surface_unmapped(struct vt_surface_t* surf) {
 
   vt_seat_set_pointer_focus(seat, new_focus, seat->pointer_x, seat->pointer_y);
   vt_seat_set_keyboard_focus(seat, new_focus);
-
 
 }

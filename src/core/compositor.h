@@ -23,4 +23,4 @@ void vt_comp_invalidate_all_surfaces(struct vt_compositor_t *comp);
 
 struct vt_surface_t* vt_comp_pick_surface(struct vt_compositor_t *comp, double x, double y);
 
-void vt_comp_damage_entire_surface(struct vt_compositor_t *comp, struct vt_surface_t* surf); 
+void vt_comp_damage_entire_surface(struct vt_compositor_t *comp, struct vt_surface_t* surf, int32_t x, int32_t y); 

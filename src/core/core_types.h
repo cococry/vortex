@@ -13,7 +13,7 @@
 
 
 #define BACKEND_DATA(b, type) ((type *)((b)->user_data))
-#define VT_MAX_DAMAGE_RECTS 4
+#define VT_MAX_DAMAGE_RECTS 64
 
 #define VT_ALLOC(c, size) vt_util_alloc(&(c)->arena, (size))
 #define VT_ALLOC_FRAME(c, size) vt_util_alloc(&(c)->frame_arena, (size))
@@ -114,6 +114,8 @@ struct vt_compositor_t {
   struct vt_surface_t* root_cursor;
 
   struct vt_scene_node_t* root_node;
+
+  bool nogger;
 };
 
 typedef bool (*backend_implement_func_t)(struct vt_compositor_t* comp);

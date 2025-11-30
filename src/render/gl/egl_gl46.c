@@ -1083,7 +1083,11 @@ renderer_stencil_damage_pass_egl(struct vt_renderer_t* r, struct vt_output_t* ou
 
   struct egl_output_state_t* egl_output = (struct egl_output_state_t*)output->user_data_render; 
 
-  glEnable(GL_STENCIL_TEST);
+  
+    glEnable(GL_STENCIL_TEST);
+
+    glStencilMask(0xFF);     
+    glClearStencil(0);      
   glClear(GL_STENCIL_BUFFER_BIT);
 
   glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
@@ -1217,7 +1221,7 @@ renderer_end_scene_egl(struct vt_renderer_t *r, struct vt_output_t *output) {
 
 void
 renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,  const pixman_box32_t* damaged, int32_t n_damaged) {
-  if (!r || !r->impl.end_frame || !r->user_data) {
+   if (!r || !r->impl.end_frame || !r->user_data) {
     VT_ERROR(r->comp->log, "Renderer backend not initialized before ending frame.");
     return;
   }

@@ -3,6 +3,7 @@
 #include "src/core/util.h"
 #include "src/input/wl_seat.h"
 #include "src/render/renderer.h"
+#include <stdbool.h>
 #include <wayland-server-core.h>
 #include <wayland-server-protocol.h>
 
@@ -192,11 +193,7 @@ _wl_surface_commit(
 
   /* 3. Update internal surface width and height */
   if(!is_valid_xdg_surf) {
-    surf->x = 0;
-    surf->y = 0;
   } else {
-    surf->x =  surf->xdg_surf->pending_geom.x; 
-    surf->y =  surf->xdg_surf->pending_geom.y; 
     surf->geom_width =  surf->xdg_surf->pending_geom.w;
     surf->geom_height =  surf->xdg_surf->pending_geom.h;
   }
@@ -222,7 +219,7 @@ _wl_surface_commit(
   if (!surf->mapped && surf->has_buffer && is_valid_xdg_surf)  {
     surf->mapped = true;
     vt_surface_mapped(surf);
-  }
+  } 
 
   /* 6. Set damage regions and schedule a repaint for 
    * all outputs that the surface intersects with */

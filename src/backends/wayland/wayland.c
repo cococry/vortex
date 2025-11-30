@@ -294,6 +294,7 @@ _wl_backend_create_output(struct vt_backend_t* backend, struct vt_output_t* outp
   output->y = 0;
   output->width = _WL_DEFAULT_OUTPUT_WIDTH;  
   output->height = _WL_DEFAULT_OUTPUT_HEIGHT; 
+  output->resize_pending = true;
 
 
   wl_list_insert(&backend->comp->outputs, &output->link_global);
