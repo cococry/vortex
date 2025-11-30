@@ -1083,14 +1083,13 @@ renderer_stencil_damage_pass_egl(struct vt_renderer_t* r, struct vt_output_t* ou
 
   struct egl_output_state_t* egl_output = (struct egl_output_state_t*)output->user_data_render; 
 
-
   glEnable(GL_STENCIL_TEST);
-  glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-  glDepthMask(GL_FALSE);
   glClear(GL_STENCIL_BUFFER_BIT);
 
-  glStencilOp(GL_REPLACE, GL_REPLACE, GL_REPLACE);
+  glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+  glStencilMask(0xFF);
   glStencilFunc(GL_ALWAYS, 1, 0xFF);
+  glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
 }
 
 void 
@@ -1098,9 +1097,12 @@ renderer_composite_pass_egl(struct vt_renderer_t* r, struct vt_output_t* output)
   if(!r || !output || !output->user_data_render) return;
 
   struct egl_output_state_t* egl_output = (struct egl_output_state_t*)output->user_data_render; 
-  glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-  glStencilFunc(GL_EQUAL, 1, 0xFF);
-  glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+
+    // ========== PASS 2: SCENE ==========
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glStencilMask(0x00);
+    glStencilFunc(GL_EQUAL, 1, 0xFF);
+    glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
 
 }
 

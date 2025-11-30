@@ -22,7 +22,11 @@ vt_scene_node_create(struct vt_compositor_t* c, float x, float y, float w, float
   n->w = x; n->h = h;
   n->surf = surf;
   n->type = type;
-  surf->scene_node = n;
+
+  if(surf)
+    surf->scene_node = n;
+
+  n->color = 0xffffff;
 
   return n;
 }
@@ -44,6 +48,8 @@ vt_scene_node_add_child(struct vt_compositor_t* c, struct vt_scene_node_t* node,
   child->parent = node;
   child->x += node->x;
   child->y += node->y;
+
+  printf("Added child on pos: %f, %f,\n", child->x, child->y);
 
   return true;
 }
@@ -84,6 +90,7 @@ vt_scene_node_render(
   if(!skip) {
     if(!node->surf) {
       renderer->impl.draw_rect(renderer, node->x, node->y, node->w, node->h, node->color);
+      printf("Drawing node on position: %i, %i\n", node->x, node->y);
     } else {
       renderer->impl.draw_surface(renderer, output, node->surf, node->x, node->y);
     }
@@ -134,8 +141,7 @@ static void _composite_pass(struct vt_renderer_t* renderer, struct vt_output_t *
   r->impl.end_scene(r, output);
 }
 
-static void _damage_pass(struct vt_compositor_t *c, struct vt_output_t *output) {
-  struct vt_renderer_t* r = c->renderer;
+static void _damage_pass(struct vt_renderer_t* r, struct vt_output_t *output) {
   output->n_damage_boxes = vt_comp_merge_damaged_regions(output->cached_damage, &output->damage);
   output->needs_damage_rebuild = false;
 
@@ -162,22 +168,16 @@ void vt_scene_render(struct vt_renderer_t* renderer, struct vt_output_t *output,
 
   renderer->impl.begin_frame(renderer, output);
 
-  if(output->repaint_pending) {
-    output->repaint_pending = false;
+  renderer->impl.stencil_damage_pass(renderer, output);
 
-    _composite_pass(renderer, output, root, false);
-  } else {
+  renderer->impl.begin_scene(renderer, output);
+  renderer->impl.draw_rect(renderer, 50, 50, 100, 100, 0xff0000);
+  renderer->impl.end_scene(renderer, output);
 
-    if(output->needs_damage_rebuild) {
-      _damage_pass(renderer, output);
-    } 
+  renderer->impl.composite_pass(renderer, output);
 
-    // 2. drawcall 
-    renderer->impl.composite_pass(renderer, output);
-
-    _composite_pass(renderer, output, root, true);
-  }
-
+  renderer->impl.begin_scene(renderer, output);
+  renderer->impl.draw_rect(renderer, 50, 50, 200, 200, 0xff0000);
   renderer->impl.end_scene(renderer, output);
 
   renderer->impl.end_frame(renderer, output, output->cached_damage, output->n_damage_boxes);

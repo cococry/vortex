@@ -2,7 +2,7 @@
 
 #include "../protocols/linux_dmabuf.h"
 #include "../protocols/xdg_shell.h"
-#include "src/core/scene.h"
+#include "scene.h"
 #define VT_MAX_FRAME_CBS 8 
 
 #include <stdint.h>

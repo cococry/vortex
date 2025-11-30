@@ -1,11 +1,11 @@
 #pragma once
 
 #include "core_types.h"
-#include "src/render/renderer.h"
 
 enum vt_scene_node_type_t {
   VT_SCENE_NODE_ROOT = 0,
-  VT_SCENE_NODE_SURFACE = 0
+  VT_SCENE_NODE_SURFACE = 0,
+  VT_SCENE_NODE_RECT
 };
 
 
@@ -33,6 +33,8 @@ struct vt_scene_node_t* vt_scene_node_create(struct vt_compositor_t* c, float x,
 
 bool vt_scene_node_add_child(struct vt_compositor_t* c, struct vt_scene_node_t* node, struct vt_scene_node_t* child);
 
+struct vt_renderer_t;
+struct vt_output_t;
 void vt_scene_node_render(struct vt_renderer_t* renderer,  struct vt_output_t* output, struct vt_scene_node_t* node, bool care_for_damage, vt_scene_node_filter_func_t filter); 
 
 void vt_scene_render(struct vt_renderer_t* renderer,  struct vt_output_t* output, struct vt_scene_node_t* root); 

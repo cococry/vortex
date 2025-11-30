@@ -729,16 +729,26 @@ vt_comp_init(struct vt_compositor_t* c, int argc, char** argv) {
   vt_seat_init(c->seat);
     
   VT_TRACE(c->log, "Initialized wayland seat.");
-  
+ 
+  uint32_t root_w = 0, root_h = 0;
   struct vt_output_t* output;
   wl_list_for_each(output, &c->outputs, link_global) {
     output->repaint_pending = false;
     vt_comp_schedule_repaint(c, output);
+    root_w += output->width;
+    root_h += output->height;
   }
 
-  struct vt_scene_node_t* root = vt_scene_node_create(c, 0, 0, output->width, output->height);
- 
-  vt_scene_node_add_child(c, root, vt_scene_node_create(c, 20, 20, 20, 20));
+  
+  c->root_node = vt_scene_node_create(
+    c, 0, 0, root_w, root_h, VT_SCENE_NODE_ROOT,
+    NULL);
+  
+  struct vt_scene_node_t* n = vt_scene_node_create(c, 50, 50, 50, 50, VT_SCENE_NODE_RECT, NULL);
+  n->color = 0xff0000;
+  vt_scene_node_add_child(c, c->root_node, n); 
+
+  c->root_node->color = 0xffffff;
 
   // Allocate the struct to store protocol information about the surface
   c->root_cursor = calloc(1, sizeof(*c->root_cursor));
@@ -834,124 +844,10 @@ vt_comp_schedule_repaint(struct vt_compositor_t *c, struct vt_output_t* output) 
 
 }
 
-struct vt_surface_t *vt_seat_get_focused_cursor_surface(struct vt_seat_t *seat) {
-    if (!seat->ptr_focus.res)
-        return NULL;
-
-    struct wl_client *focused_client = wl_resource_get_client(seat->ptr_focus.res);
-    struct vt_pointer_t *ptr;
-    wl_list_for_each(ptr, &seat->pointers, link) {
-        if (wl_resource_get_client(ptr->res) == focused_client)
-            return ptr->cursor.surf;
-    }
-    return NULL;
-}
-
-bool box_intersect_box(
-  float x1, float y1, float w1, float h1,
-  float x2, float y2, float w2, float h2) {
-  return 
-    x1 + w1 >= x2 && x1 <= x2 + w2 && 
-    y1 + h1 >= y2 && y1 <= y2 + h2; 
-}
-
-bool surface_intersects_damage(struct vt_surface_t* surf, const pixman_box32_t* boxes, uint32_t n_boxes) {
-  for(uint32_t i = 0; i < n_boxes; i++) {
-    pixman_box32_t box = boxes[i];
-    if (box_intersect_box(
-      surf->x, surf->y, surf->width, surf->height, 
-      box.x1, box.y1, box.x2 - box.x1, box.y2 - box.y1 
-    )) {
-      return true;
-    } 
-  }
-  return false;
-}
-
-static void _composite_pass(struct vt_compositor_t *c, struct vt_output_t *output, bool care_for_damage) {
-  struct vt_renderer_t* r = c->renderer;
-  r->impl.begin_scene(r, output);
-
-  if(care_for_damage) {
-  r->impl.draw_rect(r, 0, 0, output->width, output->height, 0xffffff); 
-  } else {
-    glClearColor(1.0f, 1.0f, 1.0f, 1.0f); 
-    glClear(GL_COLOR_BUFFER_BIT);
-  }
-
-  struct vt_surface_t* surf;
-  wl_list_for_each_reverse(surf, &c->surfaces, link) {
-    if(surf->type != VT_SURFACE_TYPE_NORMAL) continue;
-      if(care_for_damage && !surface_intersects_damage(surf, output->cached_damage, output->n_damage_boxes)) {
-      continue;
-    }
-    r->impl.draw_surface(r, output, surf, surf->x, surf->y);
-  }
-
-  struct vt_surface_t* cursor_surf = vt_seat_get_focused_cursor_surface(c->seat);
-
-  bool cursor_damaged = !care_for_damage ||
-    surface_intersects_damage(cursor_surf, output->cached_damage, output->n_damage_boxes);
-  if(cursor_surf && cursor_damaged) {
-    r->impl.draw_surface(r, output, cursor_surf, cursor_surf->x, cursor_surf->y);
-  }
-
-  r->impl.end_scene(r, output);
-
-}
-
-static void _damage_pass(struct vt_compositor_t *c, struct vt_output_t *output) {
-  struct vt_renderer_t* r = c->renderer;
-  output->n_damage_boxes = vt_comp_merge_damaged_regions(output->cached_damage, &output->damage);
-  output->needs_damage_rebuild = false;
-
-  r->impl.stencil_damage_pass(r, output);
-
-  // 1. drawcall 
-  r->impl.begin_scene(r, output);
-
-  if(output->resize_pending) {
-    r->impl.draw_rect(r, 0, 0, output->width, output->height, 0xffffff); 
-    output->resize_pending = false;
-  }
-  for(uint32_t i = 0; i < output->n_damage_boxes; i++) {
-    pixman_box32_t box = output->cached_damage[i];
-    r->impl.draw_rect(r, box.x1, box.y1, box.x2 - box.x1, box.y2 - box.y1, 0xffffff); 
-  }
-
-  r->impl.end_scene(r, output);
-
-}
-
 void vt_comp_repaint_scene(struct vt_compositor_t *c, struct vt_output_t *output) {
   if (!c || !output || !c->backend || !c->renderer) return;
 
-  struct vt_renderer_t* r = c->renderer;
-  r->impl.begin_frame(r, output);
-
-  if(output->repaint_pending) {
-    output->repaint_pending = false;
-
-    _composite_pass(c, output, false);
-  } else {
-
-    if(output->needs_damage_rebuild) {
-      _damage_pass(c, output);
-    } 
-
-    // 2. drawcall 
-    r->impl.composite_pass(r, output);
-
-    _composite_pass(c, output, true);
-  }
-
-  r->impl.end_scene(r, output);
-
-  r->impl.end_frame(r, output, output->cached_damage, output->n_damage_boxes);
-
-  pixman_region32_clear(&output->damage);
-  output->needs_repaint = false;
-
+  vt_scene_render(c->renderer, output, c->root_node);
 }
 
 void vt_comp_invalidate_all_surfaces(struct vt_compositor_t *comp) {
