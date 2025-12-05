@@ -117,6 +117,9 @@ _wl_surface_attach(
   VT_TRACE(surf->comp->log, "Got compositor.surface_attach.")
 
   surf->buf_res = buffer;
+  surf->dx = x;
+  surf->dy = y;
+  printf("attach: %i, %i\n", surf->dx, surf->dy);
 
 }
 
@@ -192,12 +195,12 @@ _wl_surface_commit(
   surf->height = surf->tex.height;
 
   /* 3. Update internal surface width and height */
-  if(!is_valid_xdg_surf) {
-  } else {
+  if(is_valid_xdg_surf) {
     surf->geom_width =  surf->xdg_surf->pending_geom.w;
     surf->geom_height =  surf->xdg_surf->pending_geom.h;
+    surf->geom_x =  surf->xdg_surf->pending_geom.x;
+    surf->geom_y =  surf->xdg_surf->pending_geom.y;
   }
-
   /* 4. Calculate current damage region  */
   if(!surf->_mask_outputs_visible_on) {
     /* Re-populate the output bitfield of the surface */
@@ -439,6 +442,7 @@ _wl_surface_set_buffer_scale(struct wl_client* client,
   surf->buffer_scale = scale;
 
   VT_TRACE(surf->comp->log, "surface_set_buffer_scale: scale=%d for surface %p", scale, surf);
+  exit(1);
 }
 
 void
@@ -453,6 +457,7 @@ _wl_surface_offset(struct wl_client* client,
   surf->x = x;
   surf->y = y;
 
+  exit(1);
   // Force re-evaluation on next commit
   surf->_mask_outputs_visible_on = 0; 
 

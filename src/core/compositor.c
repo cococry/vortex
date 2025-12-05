@@ -893,8 +893,8 @@ vt_comp_pick_surface(struct vt_compositor_t *comp, double x, double y) {
   wl_list_for_each(surf, &comp->surfaces, link) {
     if(!surf->mapped) continue;
     if(surf->type != VT_SURFACE_TYPE_NORMAL) continue;
-    if (x >= surf->x && y >= surf->y &&
-      x < surf->x + surf->width && y < surf->y + surf->height) {
+    if (x >= surf->geom_x && y >= surf->geom_y &&
+      x < surf->geom_x + surf->geom_width && y < surf->geom_y + surf->geom_height) {
       return surf;
     }
   }
@@ -926,6 +926,17 @@ vt_comp_damage_entire_surface(struct vt_compositor_t *comp, struct vt_surface_t*
 
     output->needs_damage_rebuild = true;
 
+    vt_comp_schedule_repaint(comp, output);
+  }
+}
+
+void 
+vt_comp_surf_mark_damaged(struct vt_compositor_t *comp, struct vt_surface_t* surf) {
+  surf->damaged = true;
+  struct vt_output_t* output;
+  wl_list_for_each(output, &comp->outputs, link_global) {
+    if(surf != comp->root_cursor && !(surf->_mask_outputs_visible_on & (1u << output->id))) continue;
+    output->needs_damage_rebuild = true;
     vt_comp_schedule_repaint(comp, output);
   }
 }

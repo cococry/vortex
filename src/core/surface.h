@@ -41,9 +41,10 @@ struct vt_surface_t {
   struct vt_compositor_t* comp;
 
   uint32_t width, height;
-  int32_t x, y;
+  int32_t x, y, dx, dy;
   
   uint32_t geom_width, geom_height;
+  int32_t geom_x, geom_y;
 
   bool needs_frame_done;
 

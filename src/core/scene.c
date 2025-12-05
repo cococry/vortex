@@ -139,6 +139,26 @@ static bool _composite_scene_node_filter(struct vt_scene_node_t* node) {
   return true;
 }
 
+static void _get_cursor_hotspot(struct vt_surface_t* surf, int32_t* hx, int32_t* hy) {
+  struct vt_seat_t* seat = surf->comp->seat;
+  struct wl_client* client = wl_resource_get_client(surf->surf_res);
+  struct vt_pointer_t* ptr;
+  wl_list_for_each(ptr, &seat->pointers, link) {
+    if(!ptr) continue;
+    if (wl_resource_get_client(ptr->res) == client) {
+      seat->ptr_focus.res = ptr->res;
+      if(ptr->cursor.surf) {
+        *hx = ptr->cursor.hotspot_x - ptr->cursor.surf->dx;
+        *hy = ptr->cursor.hotspot_y - ptr->cursor.surf->dy;
+        return;
+      }
+    }
+  }
+  *hx = 0;
+  *hy = 0;
+}
+
+static float prev_cur_x = 0, prev_cur_y = 0, prev_cur_w = 0, prev_cur_h = 0;
 static void _composite_pass(struct vt_renderer_t* renderer, struct vt_output_t *output, struct vt_scene_node_t* root, bool care_for_damage) {
   struct vt_renderer_t* r = renderer;
   
@@ -161,20 +181,26 @@ static void _composite_pass(struct vt_renderer_t* renderer, struct vt_output_t *
     renderer->impl.draw_surface(renderer, output, surf, surf->x, surf->y); 
   }
 
-  struct vt_surface_t* cursor_focus = _get_focused_cursor_surface(renderer->comp->seat);
-  if(!cursor_focus) {
-    if(_surf_intersects_damage(renderer->comp->root_cursor, output->cached_damage, output->n_damage_boxes)) {
+  if(!renderer->comp->seat->ptr_focus.surf) {
+    if(!renderer->comp->seat->ptr_focus.surf &&  _surf_intersects_damage(renderer->comp->root_cursor, output->cached_damage, output->n_damage_boxes)) {
     renderer->impl.draw_rect(
       renderer, renderer->comp->root_cursor->x,
       renderer->comp->root_cursor->y, renderer->comp->root_cursor->width, renderer->comp->root_cursor->height, 0xff0000);
     }
   } else {
-    if(cursor_focus->mapped && _surf_intersects_damage(cursor_focus, output->cached_damage, output->n_damage_boxes)) {
-    renderer->impl.draw_surface(
-      renderer, output, cursor_focus, 
-      cursor_focus->x, cursor_focus->y
-    );
-      printf("drawing on %i, %i\n", cursor_focus->x, cursor_focus->y);
+  struct vt_surface_t* cursor_focus = _get_focused_cursor_surface(renderer->comp->seat);
+    if(cursor_focus->mapped && cursor_focus->comp->seat->ptr_focus.surf) {
+      struct vt_seat_t* seat = cursor_focus->comp->seat;
+      struct vt_surface_t* under_cursor = cursor_focus->comp->seat->ptr_focus.surf;
+      int32_t hx, hy;
+      _get_cursor_hotspot(cursor_focus, &hx, &hy);
+      renderer->impl.draw_surface(
+        renderer, output, cursor_focus,
+        seat->pointer_x - hx, seat->pointer_y - hy);
+      prev_cur_x = seat->pointer_x - hx; 
+      prev_cur_y = seat->pointer_y - hy;
+      prev_cur_w = cursor_focus->width; 
+      prev_cur_h = cursor_focus->height; 
     }
   }
   
@@ -184,6 +210,27 @@ static void _composite_pass(struct vt_renderer_t* renderer, struct vt_output_t *
 }
 
 static void _damage_pass(struct vt_renderer_t* r, struct vt_output_t *output) {
+
+  struct vt_surface_t* surf;
+  wl_list_for_each(surf, &r->comp->surfaces, link) {
+    if(surf && surf->damaged && surf->type == VT_SURFACE_TYPE_CURSOR) {
+      struct vt_seat_t* seat = surf->comp->seat;
+      if(prev_cur_w != 0) {
+        pixman_region32_union_rect(
+        &output->damage, &output->damage,
+        prev_cur_x, prev_cur_y, prev_cur_w, prev_cur_h);
+      }
+      struct vt_surface_t* under_cursor = r->comp->seat->ptr_focus.surf;
+      if(under_cursor) {
+        int32_t hx, hy;
+        _get_cursor_hotspot(under_cursor, &hx, &hy);
+        pixman_region32_union_rect(
+          &output->damage, &output->damage,
+          seat->pointer_x - hx, seat->pointer_y - hy, surf->width, surf->height); 
+        surf->damaged = false;
+      }
+    }
+  }
 
   pixman_box32_t* boxes = pixman_region32_rectangles(&output->damage, &output->n_damage_boxes);
   if(output->n_damage_boxes) {
@@ -221,6 +268,7 @@ void vt_scene_render(struct vt_renderer_t* renderer, struct vt_output_t *output,
   _composite_pass(renderer, output, root, true);
 
   renderer->impl.end_frame(renderer, output, output->cached_damage, output->n_damage_boxes); 
+
 
   pixman_region32_clear(&output->damage);
   output->needs_repaint = false;

@@ -199,15 +199,14 @@ _wl_seat_pointer_set_cursor(
   struct wl_resource *surface,
   int32_t hotspot_x,
   int32_t hotspot_y) {
+  printf("set cursor\n"); 
   if(!resource) return;
   struct vt_surface_t* surf = NULL; 
-    printf("set cursor.\n");
   if(surface) {
     surf = wl_resource_get_user_data(surface);
     surf->type = VT_SURFACE_TYPE_CURSOR;
-    surf->x =  surf->comp->seat->pointer_x - hotspot_x;
-    surf->y = surf->comp->seat->pointer_y - hotspot_y;
     surf->mapped = true;
+    vt_comp_surf_mark_damaged(surf->comp, surf); 
   } 
 
   struct vt_pointer_t* ptr = wl_resource_get_user_data(resource);
@@ -414,7 +413,9 @@ vt_seat_handle_pointer_motion(struct vt_seat_t* seat, double x, double y, uint32
         vt_seat_send_keyboard_leave(seat);
 
       vt_seat_set_pointer_focus(seat, surf, x - surf->x, y - surf->y);
-      vt_seat_set_keyboard_focus(seat, surf); 
+      vt_seat_set_keyboard_focus(seat, surf);
+
+
     } else {
       if(surf != seat->ptr_focus.surf)
         vt_seat_send_keyboard_leave(seat);
@@ -424,7 +425,6 @@ vt_seat_handle_pointer_motion(struct vt_seat_t* seat, double x, double y, uint32
       vt_seat_set_keyboard_focus(seat, NULL); 
     }
   }
-
   seat->pointer_x = x;
   seat->pointer_y = y;
 
@@ -435,8 +435,7 @@ vt_seat_handle_pointer_motion(struct vt_seat_t* seat, double x, double y, uint32
   struct vt_pointer_t *ptr;
   wl_list_for_each(ptr, &seat->pointers, link) {
     if (ptr->cursor.surf) {
-      vt_comp_damage_entire_surface(
-        seat->comp, ptr->cursor.surf,  x - ptr->cursor.hotspot_x, y - ptr->cursor.hotspot_y); 
+      vt_comp_surf_mark_damaged(seat->comp, ptr->cursor.surf);  
     }
   }
   if (!surf || !seat->ptr_focus.res)
@@ -444,8 +443,8 @@ vt_seat_handle_pointer_motion(struct vt_seat_t* seat, double x, double y, uint32
 
   wl_pointer_send_motion(
     seat->ptr_focus.res, time,
-    wl_fixed_from_double(x - surf->x),
-    wl_fixed_from_double(y - surf->y));
+    wl_fixed_from_double(x),
+    wl_fixed_from_double(y));
   wl_pointer_send_frame(seat->ptr_focus.res);
 }
 
@@ -608,8 +607,7 @@ vt_seat_set_pointer_focus(struct vt_seat_t *seat,
       if (wl_resource_get_client(ptr->res) == client) {
         seat->ptr_focus.res = ptr->res;
         if(ptr->cursor.surf) {
-          ptr->cursor.surf->x =  sx - ptr->cursor.hotspot_x; 
-          ptr->cursor.surf->y =  sy - ptr->cursor.hotspot_y;
+          vt_comp_surf_mark_damaged(seat->comp, ptr->cursor.surf); 
         }
         break;
       }
