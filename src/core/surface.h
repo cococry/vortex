@@ -41,7 +41,7 @@ struct vt_surface_t {
   struct vt_compositor_t* comp;
 
   uint32_t width, height;
-  int32_t x, y, dx, dy;
+  int32_t x, y, dx, dy, hotspot_x, hotspot_y;
   
   uint32_t geom_width, geom_height;
   int32_t geom_x, geom_y;
@@ -61,7 +61,7 @@ struct vt_surface_t {
   pixman_region32_t input_region;
 
   int32_t buffer_transform;
-  int32_t buffer_scale;
+  float buffer_scale;
 
   bool damaged;
 

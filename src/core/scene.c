@@ -52,7 +52,6 @@ vt_scene_node_add_child(struct vt_compositor_t* c, struct vt_scene_node_t* node,
   child->x += node->x;
   child->y += node->y;
 
-  printf("Added child on pos: %f, %f,\n", child->x, child->y);
 
   return true;
 }
@@ -110,7 +109,6 @@ vt_scene_node_render(
       renderer->impl.draw_rect(renderer, node->x, node->y, node->w, node->h, node->color);
     } else {
       renderer->impl.draw_surface(renderer, output, node->surf, node->x, node->y);
-      printf("Drawing node on position: %i, %i\n", node->x, node->y);
     }
   }
 
@@ -139,24 +137,27 @@ static bool _composite_scene_node_filter(struct vt_scene_node_t* node) {
   return true;
 }
 
-static void _get_cursor_hotspot(struct vt_surface_t* surf, int32_t* hx, int32_t* hy) {
-  struct vt_seat_t* seat = surf->comp->seat;
-  struct wl_client* client = wl_resource_get_client(surf->surf_res);
-  struct vt_pointer_t* ptr;
-  wl_list_for_each(ptr, &seat->pointers, link) {
-    if(!ptr) continue;
-    if (wl_resource_get_client(ptr->res) == client) {
-      seat->ptr_focus.res = ptr->res;
-      if(ptr->cursor.surf) {
-        *hx = ptr->cursor.hotspot_x - ptr->cursor.surf->dx;
-        *hy = ptr->cursor.hotspot_y - ptr->cursor.surf->dy;
-        return;
-      }
+static void _get_cursor_hotspot(struct vt_surface_t *surf, int32_t *hx, int32_t *hy)
+{
+    struct vt_seat_t *seat = surf->comp->seat;
+
+    struct vt_pointer_t *ptr;
+    wl_list_for_each(ptr, &seat->pointers, link) {
+
+        // Is this the pointer whose cursor surface is `surf`?
+        if (ptr->cursor.surf == surf) {
+            *hx = ptr->cursor.hotspot_x;
+            *hy = ptr->cursor.hotspot_y;
+            return;
+        }
     }
-  }
-  *hx = 0;
-  *hy = 0;
+
+    // No pointer uses this as a cursor surface
+    *hx = 0;
+    *hy = 0;
 }
+
+
 
 static float prev_cur_x = 0, prev_cur_y = 0, prev_cur_w = 0, prev_cur_h = 0;
 static void _composite_pass(struct vt_renderer_t* renderer, struct vt_output_t *output, struct vt_scene_node_t* root, bool care_for_damage) {
@@ -194,13 +195,18 @@ static void _composite_pass(struct vt_renderer_t* renderer, struct vt_output_t *
       struct vt_surface_t* under_cursor = cursor_focus->comp->seat->ptr_focus.surf;
       int32_t hx, hy;
       _get_cursor_hotspot(cursor_focus, &hx, &hy);
+      float x = (seat->pointer_x - hx);
+      float y = (seat->pointer_y - hy);
+      float w = cursor_focus->width; 
+      float h = cursor_focus->height;
+
       renderer->impl.draw_surface(
-        renderer, output, cursor_focus,
-        seat->pointer_x - hx, seat->pointer_y - hy);
-      prev_cur_x = seat->pointer_x - hx; 
-      prev_cur_y = seat->pointer_y - hy;
-      prev_cur_w = cursor_focus->width; 
-      prev_cur_h = cursor_focus->height; 
+        renderer, output, cursor_focus, x, y);
+
+      prev_cur_x = x; 
+      prev_cur_y = y; 
+      prev_cur_w = w; 
+      prev_cur_h = h; 
     }
   }
   

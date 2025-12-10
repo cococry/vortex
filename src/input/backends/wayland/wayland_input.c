@@ -218,9 +218,6 @@ _wl_pointer_motion(
     time);
   // Hide parent cursor when entering the compositor’s surface
   wl_pointer_set_cursor(wl_pointer, wl_display_next_serial(wl->comp->wl.dsp), NULL, 0, 0);
-  printf("sending: %f, %f\n", 
-    wl_fixed_to_double(surface_x),   
-    wl_fixed_to_double(surface_y));
 }
 
 void _wl_pointer_button(

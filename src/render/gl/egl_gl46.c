@@ -1174,7 +1174,8 @@ renderer_draw_surface_egl(struct vt_renderer_t* r, struct vt_output_t* output, s
 
   if(!_egl_surface_is_ready(r, surface)) return;
 
-  rn_image_render(egl->render, (vec2s){x,y}, RN_WHITE, surface->tex);
+  rn_image_render(
+    egl->render, (vec2s){x,y}, RN_WHITE, surface->tex); 
   
   surface->_mask_outputs_presented_on |= (1u << output->id);
 

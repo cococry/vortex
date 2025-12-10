@@ -117,10 +117,9 @@ _wl_surface_attach(
   VT_TRACE(surf->comp->log, "Got compositor.surface_attach.")
 
   surf->buf_res = buffer;
+
   surf->dx = x;
   surf->dy = y;
-  printf("attach: %i, %i\n", surf->dx, surf->dy);
-
 }
 
 void 
@@ -214,8 +213,16 @@ _wl_surface_commit(
     pixman_region32_union_rect(&surf->current_damage,
                                &surf->current_damage, 0, 0, surf->width, surf->height);
     pixman_region32_clear(&surf->pending_damage);
-  } 
-
+  }
+  if (surf->type == VT_SURFACE_TYPE_CURSOR) {
+    struct vt_pointer_t *ptr;
+    wl_list_for_each(ptr, &surf->comp->seat->pointers, link) {
+      if (ptr->cursor.surf == surf) {
+        ptr->cursor.hotspot_x -= surf->dx;
+        ptr->cursor.hotspot_y -= surf->dy;
+      }
+    }
+  }
 
   /* 5. If the surface has not yet been mapped and has a 
    * valid XDG Surface and XDG Surface role, trigger a map request. */

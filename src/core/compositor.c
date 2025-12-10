@@ -441,6 +441,7 @@ _vt_comp_wl_surface_create(
   struct vt_surface_t* surf = calloc(1, sizeof(*surf));
   surf->comp = c;
   surf->x = 0; 
+  surf->buffer_scale = 1.0f;
   surf->y = 0;
   surf->type = VT_SURFACE_TYPE_NORMAL;
   wl_list_init(&surf->link_focus);
