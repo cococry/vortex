@@ -146,8 +146,8 @@ static void _get_cursor_hotspot(struct vt_surface_t *surf, int32_t *hx, int32_t 
 
         // Is this the pointer whose cursor surface is `surf`?
         if (ptr->cursor.surf == surf) {
-            *hx = ptr->cursor.hotspot_x;
-            *hy = ptr->cursor.hotspot_y;
+            *hx = ptr->cursor.hotspot_x / ptr->cursor.surf->buffer_scale;
+            *hy = ptr->cursor.hotspot_y / ptr->cursor.surf->buffer_scale;
             return;
         }
     }
@@ -189,16 +189,16 @@ static void _composite_pass(struct vt_renderer_t* renderer, struct vt_output_t *
       renderer->comp->root_cursor->y, renderer->comp->root_cursor->width, renderer->comp->root_cursor->height, 0xff0000);
     }
   } else {
-  struct vt_surface_t* cursor_focus = _get_focused_cursor_surface(renderer->comp->seat);
-    if(cursor_focus->mapped && cursor_focus->comp->seat->ptr_focus.surf) {
+    struct vt_surface_t* cursor_focus = _get_focused_cursor_surface(renderer->comp->seat);
+    if(cursor_focus && cursor_focus->mapped && cursor_focus->comp->seat->ptr_focus.surf) { 
       struct vt_seat_t* seat = cursor_focus->comp->seat;
-      struct vt_surface_t* under_cursor = cursor_focus->comp->seat->ptr_focus.surf;
+
       int32_t hx, hy;
       _get_cursor_hotspot(cursor_focus, &hx, &hy);
       float x = (seat->pointer_x - hx);
       float y = (seat->pointer_y - hy);
-      float w = cursor_focus->width; 
-      float h = cursor_focus->height;
+      float w = cursor_focus->width * cursor_focus->buffer_scale; 
+      float h = cursor_focus->height * cursor_focus->buffer_scale;
 
       renderer->impl.draw_surface(
         renderer, output, cursor_focus, x, y);
@@ -232,7 +232,7 @@ static void _damage_pass(struct vt_renderer_t* r, struct vt_output_t *output) {
         _get_cursor_hotspot(under_cursor, &hx, &hy);
         pixman_region32_union_rect(
           &output->damage, &output->damage,
-          seat->pointer_x - hx, seat->pointer_y - hy, surf->width, surf->height); 
+          seat->pointer_x - hx, seat->pointer_y - hy, surf->width * surf->buffer_scale, surf->height * surf->buffer_scale); 
         surf->damaged = false;
       }
     }

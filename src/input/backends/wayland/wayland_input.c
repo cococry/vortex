@@ -377,7 +377,7 @@ static const struct wl_pointer_listener pointer_listener = {
   .axis_stop = _wl_pointer_axis_stop,
   .axis_discrete = _wl_pointer_axis_discrete,
   .axis_value120 = _wl_pointer_axis_value120,
-  .axis_relative_direction = _wl_pointer_axis_relative_direction
+  .axis_relative_direction = _wl_pointer_axis_relative_direction,
 };
 
 

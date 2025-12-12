@@ -759,6 +759,7 @@ vt_comp_init(struct vt_compositor_t* c, int argc, char** argv) {
   c->root_cursor->type = VT_SURFACE_TYPE_CURSOR;
   c->root_cursor->width = 20;
   c->root_cursor->height = 20;
+  c->root_cursor->buffer_scale = 1;
   wl_list_init(&c->root_cursor->link_focus);
 
   // Init the damage regions
@@ -895,7 +896,8 @@ vt_comp_pick_surface(struct vt_compositor_t *comp, double x, double y) {
     if(!surf->mapped) continue;
     if(surf->type != VT_SURFACE_TYPE_NORMAL) continue;
     if (x >= surf->geom_x && y >= surf->geom_y &&
-      x < surf->geom_x + surf->geom_width && y < surf->geom_y + surf->geom_height) {
+      x < surf->geom_x + (surf->geom_width ?  surf->geom_width : surf->width) && y 
+      <  surf->geom_y + (surf->geom_height ? surf->geom_height : surf->height)) {
       return surf;
     }
   }
@@ -912,15 +914,15 @@ vt_comp_damage_entire_surface(struct vt_compositor_t *comp, struct vt_surface_t*
 
     if(x == surf->x && y == surf->y) {
     pixman_region32_union_rect(
-      &output->damage, &output->damage,
-   0, 0, output->width, output->height);
+        &output->damage, &output->damage,
+        0, 0, output->width, output->height);
     } else {
       pixman_region32_union_rect(
         &output->damage, &output->damage,
-        surf->x, surf->y, surf->width, surf->height);
+        surf->x, surf->y, surf->width * surf->buffer_scale, surf->height * surf->buffer_scale);
       pixman_region32_union_rect(
         &output->damage, &output->damage,
-        x, y, surf->width, surf->height);
+        x, y, surf->width * surf->buffer_scale, surf->height * surf->buffer_scale);
       surf->x = x; 
       surf->y = y;
     }

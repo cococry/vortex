@@ -194,11 +194,13 @@ _wl_surface_commit(
   surf->height = surf->tex.height;
 
   /* 3. Update internal surface width and height */
-  if(is_valid_xdg_surf) {
+  if(is_valid_xdg_surf && surf->xdg_surf->have_pending_geom) {
     surf->geom_width =  surf->xdg_surf->pending_geom.w;
     surf->geom_height =  surf->xdg_surf->pending_geom.h;
     surf->geom_x =  surf->xdg_surf->pending_geom.x;
     surf->geom_y =  surf->xdg_surf->pending_geom.y;
+    surf->xdg_surf->have_pending_geom = false;
+    printf("assigned geom: %i, %i\n", surf->geom_width, surf->geom_height);
   }
   /* 4. Calculate current damage region  */
   if(!surf->_mask_outputs_visible_on) {
@@ -449,7 +451,7 @@ _wl_surface_set_buffer_scale(struct wl_client* client,
   surf->buffer_scale = scale;
 
   VT_TRACE(surf->comp->log, "surface_set_buffer_scale: scale=%d for surface %p", scale, surf);
-  exit(1);
+  printf("Buffer scale: %i\n", scale);
 }
 
 void

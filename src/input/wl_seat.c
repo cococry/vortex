@@ -56,7 +56,7 @@ static const struct wl_keyboard_interface keyboard_impl = {
 
 static const struct wl_pointer_interface pointer_impl = {
   .release = _wl_seat_release_pointer,
-  .set_cursor = _wl_seat_pointer_set_cursor 
+  .set_cursor = _wl_seat_pointer_set_cursor,
 };
 
 void 
@@ -142,7 +142,6 @@ _wl_handle_keybind_nogger(struct vt_compositor_t* comp, void* user_data) {
   struct vt_output_t* output;
   wl_list_for_each(output, &comp->outputs, link_global) {
   vt_comp_schedule_repaint(comp, output);
-    printf("repainted.\n");
   }
 }
 
@@ -157,7 +156,6 @@ _wl_seat_get_pointer(struct wl_client* client, struct wl_resource* seat_res, uin
     wl_client_post_no_memory(client);
     return;
   }
-  wl_resource_set_implementation(res, NULL, NULL, NULL);
 
   struct vt_pointer_t* pointer = calloc(1, sizeof(*pointer));
   if(!pointer) {
@@ -199,7 +197,6 @@ _wl_seat_pointer_set_cursor(
   struct wl_resource *surface,
   int32_t hotspot_x,
   int32_t hotspot_y) {
-  printf("set cursor\n"); 
   if(!resource) return;
   struct vt_surface_t* surf = NULL; 
   if(surface) {
@@ -290,7 +287,6 @@ _wl_pointer_handle_resource_destroy(struct wl_resource *res) {
 
   // when a client destroys it's pointer, we need to update our list to 
   // reflect that 
-  printf("Destroyed pointer.\n");
   wl_list_remove(&ptr->link);
   free(ptr);
   wl_resource_set_user_data(res, NULL);
@@ -414,8 +410,6 @@ vt_seat_handle_pointer_motion(struct vt_seat_t* seat, double x, double y, uint32
 
       vt_seat_set_pointer_focus(seat, surf, x - surf->x, y - surf->y);
       vt_seat_set_keyboard_focus(seat, surf);
-
-
     } else {
       if(surf != seat->ptr_focus.surf)
         vt_seat_send_keyboard_leave(seat);
@@ -486,6 +480,7 @@ vt_seat_add_global_keybind(
 }
 
 void vt_seat_send_keyboard_leave(struct vt_seat_t* seat) {
+  if(!seat) return;
   if (seat->kb_focus.surf && seat->kb_focus.res) {
     if (wl_resource_get_client(seat->kb_focus.res) ==
       wl_resource_get_client(seat->kb_focus.surf->surf_res)) {

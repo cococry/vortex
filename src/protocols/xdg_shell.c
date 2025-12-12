@@ -874,6 +874,7 @@ _xdg_surface_set_window_geometry(struct wl_client* client,
   }
 
   /* 3. Send window geometry to requested geometry */
+  xdg_surf->have_pending_geom = true;
   xdg_surf->pending_geom.x = x;
   xdg_surf->pending_geom.y = y;
   xdg_surf->pending_geom.w = (uint32_t)width;

@@ -58,6 +58,7 @@ struct vt_xdg_surface_t {
   struct vt_xdg_toplevel_t* toplevel;
   struct vt_xdg_popup_t* popup;
 
+  bool have_pending_geom;
   struct vt_xdg_window_geom_t pending_geom; 
 };
 

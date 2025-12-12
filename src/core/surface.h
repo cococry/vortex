@@ -61,7 +61,7 @@ struct vt_surface_t {
   pixman_region32_t input_region;
 
   int32_t buffer_transform;
-  float buffer_scale;
+  int32_t buffer_scale;
 
   bool damaged;
 
