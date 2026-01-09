@@ -15,7 +15,7 @@ while components like the desktop shell are intentionally abstracted away from i
 ## Beta?
 
 Given that Vortex is only about a month old, it’s still far too 
-early to consider it a Beta release. The project yet remains in its pre-alpha stage of development.
+early to consider it a Beta release. The project currently remains in its alpha stage of development.
 
 **The first beta release is planned for around January 2026.**
 
