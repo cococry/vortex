@@ -1067,8 +1067,11 @@ _linux_dmabuf_pack_feedback(
   VT_TRACE(feedback->comp->log,
            "Building packed feedback for %i tranche(s)...", feedback->tranches.size / sizeof(struct vt_dmabuf_tranche_t));
 
-  struct vt_linux_dmabuf_v1_packed_feedback_t* packed = calloc(
-    1, sizeof(*packed) + feedback->tranches.size);
+  size_t n_tranches = feedback->tranches.size / sizeof(struct vt_dmabuf_tranche_t);
+
+  struct vt_linux_dmabuf_v1_packed_feedback_t* packed =
+    calloc(1, sizeof(*packed) +
+           n_tranches * sizeof(struct vt_linux_dmabuf_v1_packed_feedback_tranche_t));
   if(!packed) {
     VT_ERROR(feedback->comp->log, "Out of memory."); 
     close(ro_fd);

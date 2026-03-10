@@ -821,10 +821,11 @@ _xdg_surface_get_popup(
     uint32_t w = pos->width;
     uint32_t h = pos->height;
 
-    popup_xdg_surf->pending_geom.x = x;
-    popup_xdg_surf->pending_geom.y = y;
-    popup_xdg_surf->pending_geom.w = w;
-    popup_xdg_surf->pending_geom.h = h;
+    popup_xdg_surf->popup->pending_geom.x = x;
+    popup_xdg_surf->popup->pending_geom.y = y;
+    popup_xdg_surf->popup->pending_geom.w = w;
+    popup_xdg_surf->popup->pending_geom.h = h;
+    popup_xdg_surf->popup->have_pending_geom = true;
     printf("SETTING ON POPUP: %i, %i, %i, %i\n", x, y, w, h);
     xdg_popup_send_configure(res, x, y, w, h);
   }
@@ -1092,6 +1093,8 @@ _xdg_popup_reposition(
     popup->pending_geom.y = x;
     popup->pending_geom.w = w;
     popup->pending_geom.h = h;
+    popup->have_pending_geom = true;
+
     printf("SETTING ON REPOS: %i, %i, %i, %i\n", x, y, w, h);
 
     xdg_popup_send_configure(resource, x, y, w, h);

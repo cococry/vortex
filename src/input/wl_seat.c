@@ -434,11 +434,14 @@ vt_seat_handle_pointer_motion(struct vt_seat_t* seat, double x, double y, uint32
   }
   if (!surf || !seat->ptr_focus.res)
     return;
+  double sx = x - (surf->xdg_surf->popup ? surf->geom_x : 0);
+  double sy = y - (surf->xdg_surf->popup ? surf->geom_y : 0);
 
   wl_pointer_send_motion(
-    seat->ptr_focus.res, time,
-    wl_fixed_from_double(x),
-    wl_fixed_from_double(y));
+    seat->ptr_focus.res,
+    time,
+    wl_fixed_from_double(sx),
+    wl_fixed_from_double(sy));
   wl_pointer_send_frame(seat->ptr_focus.res);
 }
 

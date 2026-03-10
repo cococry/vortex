@@ -463,6 +463,8 @@ _vt_comp_wl_surface_create(
     return;
   }
   vt_proto_linux_dmabuf_v1_set_surface_feedback(surf);
+  
+  vt_scene_node_add_child(c, c->root_node, vt_scene_node_create(c, surf->x, surf->y, surf->width, surf->height, VT_SCENE_NODE_SURFACE, surf)); 
 
 }
 
@@ -745,10 +747,6 @@ vt_comp_init(struct vt_compositor_t* c, int argc, char** argv) {
     c, 0, 0, root_w, root_h, VT_SCENE_NODE_ROOT,
     NULL);
   
-  struct vt_scene_node_t* n = vt_scene_node_create(c, 50, 50, 50, 50, VT_SCENE_NODE_RECT, NULL);
-  n->color = 0xff0000;
-  vt_scene_node_add_child(c, c->root_node, n); 
-
   c->root_node->color = 0xffffff;
 
   // Allocate the struct to store protocol information about the surface

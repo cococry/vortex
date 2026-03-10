@@ -146,8 +146,8 @@ static void _get_cursor_hotspot(struct vt_surface_t *surf, int32_t *hx, int32_t 
 
         // Is this the pointer whose cursor surface is `surf`?
         if (ptr->cursor.surf == surf) {
-            *hx = ptr->cursor.hotspot_x / ptr->cursor.surf->buffer_scale;
-            *hy = ptr->cursor.hotspot_y / ptr->cursor.surf->buffer_scale;
+            *hx = (float)ptr->cursor.hotspot_x / ptr->cursor.surf->buffer_scale;
+            *hy = (float)ptr->cursor.hotspot_y / ptr->cursor.surf->buffer_scale;
             return;
         }
     }
@@ -179,7 +179,7 @@ static void _composite_pass(struct vt_renderer_t* renderer, struct vt_output_t *
     if(!surf->mapped || !_surf_intersects_damage(surf, output->cached_damage, output->n_damage_boxes) || surf->type == VT_SURFACE_TYPE_CURSOR) {
       continue;
     }
-    renderer->impl.draw_surface(renderer, output, surf, surf->x, surf->y); 
+    renderer->impl.draw_surface(renderer, output, surf, surf->x + surf->xdg_surf->popup ? surf->geom_x : 0, surf->y + surf->xdg_surf->popup ? surf->geom_y : 0); 
   }
 
   if(!renderer->comp->seat->ptr_focus.surf) {
@@ -238,6 +238,9 @@ static void _damage_pass(struct vt_renderer_t* r, struct vt_output_t *output) {
     }
   }
 
+  pixman_region32_union_rect(
+    &output->damage, &output->damage,
+    output->x, output->y, output->width, output->height); 
   pixman_box32_t* boxes = pixman_region32_rectangles(&output->damage, &output->n_damage_boxes);
   if(output->n_damage_boxes) {
     memset(output->cached_damage, 0, sizeof(pixman_box32_t) * VT_MAX_DAMAGE_RECTS);

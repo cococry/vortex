@@ -36,6 +36,7 @@ struct vt_xdg_popup_t {
 
   struct vt_xdg_window_geom_t geom;
   struct vt_xdg_window_geom_t pending_geom;
+  bool have_pending_geom;
 
   uint32_t last_configure_serial;
 
