@@ -12,13 +12,6 @@ The project's goal is to create a self-contained, independent platform dedicated
 In other words, the compositor is responsible only for compositing and its related aspects (such as window animations and IPC), 
 while components like the desktop shell are intentionally abstracted away from it.
 
-## Beta?
-
-Given that Vortex is only about a month old, it’s still far too 
-early to consider it a Beta release. The project currently remains in its alpha stage of development.
-
-**The first beta release is planned for around January 2026.**
-
 ## Build & Run
 
 Make sure you have the required dependencies installed (debian packages shown):
