@@ -1,5 +1,6 @@
 #include "wl_surface.h"
 #include "src/core/compositor.h"
+#include "src/core/scene.h"
 #include "src/core/util.h"
 #include "src/input/wl_seat.h"
 #include "src/render/renderer.h"
@@ -203,8 +204,10 @@ _wl_surface_commit(
       surf->xdg_surf->have_pending_geom = false;
       printf("assigned geom non-popup: %i\n", 60); 
     } else if (surf->xdg_surf->popup && surf->xdg_surf->popup->have_pending_geom) {
-      surf->geom_width =  surf->xdg_surf->popup->pending_geom.w;
-      surf->geom_height =  surf->xdg_surf->popup->pending_geom.h;
+      surf->width =  surf->xdg_surf->popup->pending_geom.w;
+      surf->height =  surf->xdg_surf->popup->pending_geom.h;
+      surf->x =  surf->xdg_surf->popup->pending_geom.x + surf->xdg_surf->popup->parent_xdg_surf->surf->geom_x;
+      surf->y =  surf->xdg_surf->popup->pending_geom.y + surf->xdg_surf->popup->parent_xdg_surf->surf->geom_y;
       surf->geom_x =  surf->xdg_surf->popup->pending_geom.x + surf->xdg_surf->popup->parent_xdg_surf->surf->geom_x;
       surf->geom_y =  surf->xdg_surf->popup->pending_geom.y + surf->xdg_surf->popup->parent_xdg_surf->surf->geom_y;
       surf->xdg_surf->popup->have_pending_geom = false;
@@ -522,6 +525,8 @@ _wl_surface_handle_resource_destroy(struct wl_resource* resource) {
 
   /* destroy dmabuf resources of the surface */
   vt_proto_linux_dmabuf_v1_surface_destroy(surf);
+
+  if(surf->scene_node) vt_scene_node_destroy(surf->comp, surf->scene_node);
 
   wl_list_for_each(output, &surf->comp->outputs, link_global) {
     if(!(surf->_mask_outputs_visible_on & (1u << output->id))) continue;

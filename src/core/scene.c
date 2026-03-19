@@ -1,6 +1,5 @@
 #include "scene.h"
 #include "pixman.h"
-#include "src/core/compositor.h"
 #include "src/core/core_types.h"
 #include "src/core/surface.h"
 #include "src/core/util.h"
@@ -12,26 +11,72 @@
 #define _SUBSYS_NAME "SCENE"
 
 struct vt_scene_node_t*
-vt_scene_node_create(struct vt_compositor_t* c, float x, float y, float w, float h,
-                     enum vt_scene_node_type_t type, struct vt_surface_t* surf
-                     ) {
+vt_scene_node_create(struct vt_compositor_t* c, struct vt_surface_t* surf) {
   struct vt_scene_node_t* n = VT_ALLOC(c, sizeof(*n));
   if(!n) {
     VT_ERROR(c->log, "Failed to allocate scene node.");
     return NULL;
   }
 
-  n->x = x; n->y = y;
-  n->w = x; n->h = h;
   n->surf = surf;
-  n->type = type;
+  n->type = VT_SCENE_NODE_SURFACE;
 
   if(surf)
     surf->scene_node = n;
 
-  n->color = 0xffffff;
+  return n;
+}
+
+struct vt_scene_node_t* vt_scene_node_destroy(struct vt_compositor_t* c, struct vt_scene_node_t* node) {
+  if(node->parent && node->parent->child_count != 0) {
+    size_t idx = 0;
+    bool found = false;
+    while (true) {
+      if(node->parent->childs[idx] == node) {
+        found = true;
+        break;
+      }
+      else if(idx < node->parent->child_count) {
+        idx++;
+      } else {
+        found = false;
+        break;
+      }
+    }
+
+    if(found) {
+      for(size_t i = idx; i < node->parent->child_count - 1; i++) {
+        node->parent->childs[i] = node->parent->childs[i + 1];
+      }
+
+      node->parent->child_count--;
+      if(node->parent->child_count == 0) {
+        free(node->parent->childs);
+        node->parent->_child_cap = 0;
+        node->parent->childs = NULL;
+      }
+    }
+  }
+}
+struct vt_scene_node_t* vt_scene_node_create_rect(struct vt_compositor_t* c, float x, float y, float w, float h,
+    uint32_t color) {
+  struct vt_scene_node_t* n = VT_ALLOC(c, sizeof(*n));
+  if(!n) {
+    VT_ERROR(c->log, "Failed to allocate scene node.");
+    return NULL;
+  }
+
+  n->surf         = NULL;
+  n->type         = VT_SCENE_NODE_RECT;
+
+  n->rect.x       = x;
+  n->rect.y       = y;
+  n->rect.width   = w;
+  n->rect.height  = h;
+  n->rect.color   = color;
 
   return n;
+
 }
 
 bool 
@@ -49,9 +94,6 @@ vt_scene_node_add_child(struct vt_compositor_t* c, struct vt_scene_node_t* node,
 
   node->childs[node->child_count++] = child;
   child->parent = node;
-  child->x += node->x;
-  child->y += node->y;
-
 
   return true;
 }
@@ -63,12 +105,16 @@ static bool _box_intersect_box(
     x1 + w1 >= x2 && x1 <= x2 + w2 && 
     y1 + h1 >= y2 && y1 <= y2 + h2; 
 }
-
 static bool _node_intersects_damage(struct vt_scene_node_t* node, const pixman_box32_t* boxes, uint32_t n_boxes) {
+  float x1 = node->surf ? node->surf->x : node->rect.x;
+  float y1 = node->surf ? node->surf->y : node->rect.y;
+  float w1 = node->surf ? node->surf->width : node->rect.width;
+  float h1 = node->surf ? node->surf->height : node->rect.height;
+
   for(uint32_t i = 0; i < n_boxes; i++) {
     pixman_box32_t box = boxes[i];
     if (_box_intersect_box(
-      node->x, node->y, node->w, node->h, 
+      x1, y1, w1, h1,
       box.x1, box.y1, box.x2 - box.x1, box.y2 - box.y1 
     )) {
       return true;
@@ -77,20 +123,52 @@ static bool _node_intersects_damage(struct vt_scene_node_t* node, const pixman_b
   return false;
 }
 
-static bool _surf_intersects_damage(struct vt_surface_t* surf, const pixman_box32_t* boxes, uint32_t n_boxes) {
-  for(uint32_t i = 0; i < n_boxes; i++) {
-    pixman_box32_t box = boxes[i];
-    if (_box_intersect_box(
-      surf->x, surf->y, surf->width, surf->height, 
-      box.x1, box.y1, box.x2 - box.x1, box.y2 - box.y1 
-    )) {
-      return true;
-    } 
-  }
-  return false;
+
+
+static void sceneprintindent(int indent) {
+  for (int i = 0; i < indent; i++)
+    printf("  ");
+  for (int i = 0; i < indent; i++)
+    printf("━");
 }
 
+void sceneprint(struct vt_scene_node_t* node, int indent) {
+  if (!node) return;
 
+  sceneprintindent(indent);
+
+  switch (node->type) {
+    case VT_SCENE_NODE_ROOT: {
+      printf("Root: [%f, %f, %f, %f]\n",
+             node->rect.x,
+             node->rect.y,
+             node->rect.width,
+             node->rect.height);
+      break;
+    }
+    case VT_SCENE_NODE_SURFACE: {
+      printf("━> Surface: [%i, %i, %i, %i]\n",
+             node->surf->x,
+             node->surf->y,
+             node->surf->width,
+             node->surf->height);
+      break;
+    } 
+    case VT_SCENE_NODE_RECT: {
+      printf("━> Rect: [%f, %f, %f, %f]\n",
+             node->rect.x,
+             node->rect.y,
+             node->rect.width,
+             node->rect.height);
+      break;
+    }
+
+  }
+
+  for (size_t i = 0; i < node->child_count; i++) {
+    sceneprint(node->childs[i], indent + 1);
+  }
+}
 
 void 
 vt_scene_node_render(
@@ -100,15 +178,17 @@ vt_scene_node_render(
  
   bool skip = filter ? !filter(node) : false;
   
-  if(care_for_damage && !_node_intersects_damage(node, output->cached_damage, output->n_damage_boxes)) {
-    skip = true;
-  }
+
 
   if(!skip) {
-    if(!node->surf) {
-      renderer->impl.draw_rect(renderer, node->x, node->y, node->w, node->h, node->color);
+    if(node->surf) {
+      renderer->impl.draw_surface(renderer, output, node->surf, node->surf->x, node->surf->y);
     } else {
-      renderer->impl.draw_surface(renderer, output, node->surf, node->x, node->y);
+      renderer->impl.draw_rect(
+        renderer, 
+        node->rect.x, node->rect.y, 
+        node->rect.width, node->rect.height,
+        node->rect.color);
     }
   }
 
@@ -132,8 +212,8 @@ struct vt_surface_t *_get_focused_cursor_surface(struct vt_seat_t *seat) {
 }
 
 static bool _composite_scene_node_filter(struct vt_scene_node_t* node) {
-  if(!node->surf) return false;
-  if(node->surf->type != VT_SURFACE_TYPE_NORMAL) return false;
+  if(node->surf && !node->surf->mapped) return false;
+  if(node->surf && node->surf->type != VT_SURFACE_TYPE_NORMAL) return false;
   return true;
 }
 
@@ -173,21 +253,15 @@ static void _composite_pass(struct vt_renderer_t* renderer, struct vt_output_t *
     r->impl.set_clear_color(r, output, 0xffffff);
   }
 
-  struct vt_surface_t* surf;
-  wl_list_for_each_reverse(surf, &renderer->comp->surfaces, link) {
-    if(!surf) continue;
-    if(!surf->mapped || !_surf_intersects_damage(surf, output->cached_damage, output->n_damage_boxes) || surf->type == VT_SURFACE_TYPE_CURSOR) {
-      continue;
-    }
-    renderer->impl.draw_surface(renderer, output, surf, surf->x + surf->xdg_surf->popup ? surf->geom_x : 0, surf->y + surf->xdg_surf->popup ? surf->geom_y : 0); 
-  }
+  sceneprint(root, 0);
+  vt_scene_node_render(renderer, output, root, true, _composite_scene_node_filter);
 
   if(!renderer->comp->seat->ptr_focus.surf) {
-    if(!renderer->comp->seat->ptr_focus.surf &&  _surf_intersects_damage(renderer->comp->root_cursor, output->cached_damage, output->n_damage_boxes)) {
+    /*if(!renderer->comp->seat->ptr_focus.surf &&  _node_intersects_damage(renderer->comp->root_cursor, output->cached_damage, output->n_damage_boxes)) {
     renderer->impl.draw_rect(
       renderer, renderer->comp->root_cursor->x,
       renderer->comp->root_cursor->y, renderer->comp->root_cursor->width, renderer->comp->root_cursor->height, 0xff0000);
-    }
+    }*/
   } else {
     struct vt_surface_t* cursor_focus = _get_focused_cursor_surface(renderer->comp->seat);
     if(cursor_focus && cursor_focus->mapped && cursor_focus->comp->seat->ptr_focus.surf) { 
@@ -256,6 +330,7 @@ static void _damage_pass(struct vt_renderer_t* r, struct vt_output_t *output) {
   if(output->resize_pending) {
     r->impl.draw_rect(r, 0, 0, output->width, output->height, 0xffffff); 
     output->resize_pending = false;
+    printf("Resizing.\n");
   }
   for(uint32_t i = 0; i < output->n_damage_boxes; i++) {
     pixman_box32_t box = output->cached_damage[i];
@@ -276,6 +351,14 @@ void vt_scene_render(struct vt_renderer_t* renderer, struct vt_output_t *output,
     _damage_pass(renderer, output);
   _composite_pass(renderer, output, root, true);
 
+  for(size_t i = 0; i < output->n_damage_boxes; i++) {
+    VT_TRACE(renderer->comp->log, "  => REDRAWING SECTION: %i, %i, %i, %i\n",
+             output->cached_damage[i].x1,
+             output->cached_damage[i].x2,
+             output->cached_damage[i].y1,
+             output->cached_damage[i].y2
+             );
+  }
   renderer->impl.end_frame(renderer, output, output->cached_damage, output->n_damage_boxes); 
 
 

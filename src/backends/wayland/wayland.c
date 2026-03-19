@@ -137,6 +137,7 @@ static void _output_handle_render_resize(struct vt_output_t* output, int32_t w, 
     output->height = h;
       r->impl.resize_renderable_output(r, output, w, h);
       output->resize_pending = true;
+    output->needs_damage_rebuild = true;
     }
     vt_comp_schedule_repaint(r->comp, output);
 

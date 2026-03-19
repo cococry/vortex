@@ -74,11 +74,6 @@ vt_surface_unmapped(struct vt_surface_t* surf) {
     new_focus = vt_comp_pick_surface(surf->comp, seat->pointer_x, seat->pointer_y);
   }
 
-  if(new_focus != seat->kb_focus.surf)
-    vt_seat_send_keyboard_leave(seat);
-  
-  if(new_focus != seat->ptr_focus.surf)
-    vt_seat_send_pointer_leave(seat);
 
   vt_seat_set_pointer_focus(seat, new_focus, seat->pointer_x, seat->pointer_y);
   vt_seat_set_keyboard_focus(seat, new_focus);

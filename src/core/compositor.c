@@ -464,7 +464,7 @@ _vt_comp_wl_surface_create(
   }
   vt_proto_linux_dmabuf_v1_set_surface_feedback(surf);
   
-  vt_scene_node_add_child(c, c->root_node, vt_scene_node_create(c, surf->x, surf->y, surf->width, surf->height, VT_SCENE_NODE_SURFACE, surf)); 
+  vt_scene_node_add_child(c, c->root_node, vt_scene_node_create(c, surf)); 
 
 }
 
@@ -728,7 +728,6 @@ vt_comp_init(struct vt_compositor_t* c, int argc, char** argv) {
                                 c->session->native_handle);
   }
 
-
   vt_seat_init(c->seat);
     
   VT_TRACE(c->log, "Initialized wayland seat.");
@@ -741,13 +740,11 @@ vt_comp_init(struct vt_compositor_t* c, int argc, char** argv) {
     root_w += output->width;
     root_h += output->height;
   }
+  
+  c->root_node = vt_scene_node_create_rect(
+    c, 0, 0, root_w, root_h, 0xff0000);
 
-  
-  c->root_node = vt_scene_node_create(
-    c, 0, 0, root_w, root_h, VT_SCENE_NODE_ROOT,
-    NULL);
-  
-  c->root_node->color = 0xffffff;
+  c->root_node->type = VT_SCENE_NODE_ROOT;
 
   // Allocate the struct to store protocol information about the surface
   c->root_cursor = calloc(1, sizeof(*c->root_cursor));

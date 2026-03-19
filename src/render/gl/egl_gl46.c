@@ -964,7 +964,6 @@ renderer_resize_renderable_output_egl(struct vt_renderer_t* r, struct vt_output_
   struct wl_egl_window* egl_win = (struct wl_egl_window*)output->native_window; 
   if(!egl_win) return false;
 
-  printf("called here.\n");
   if(!_egl_gl_create_output_fbo(output)) return false;
   
   wl_egl_window_resize(egl_win, w, h, 0, 0);
@@ -972,6 +971,8 @@ renderer_resize_renderable_output_egl(struct vt_renderer_t* r, struct vt_output_
   pixman_region32_union_rect(
     &output->damage, &output->damage,
     0, 0, w, h);
+    
+  output->needs_damage_rebuild = true;
 
   return true;
 }
