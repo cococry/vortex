@@ -624,8 +624,8 @@ renderer_init_egl(struct vt_backend_t* backend, struct vt_renderer_t *r, void* n
   r->_desired_render_buffer_format = egl->egl_native_vis;
 
   EGLint ctx_attr[] = {
-    EGL_CONTEXT_MAJOR_VERSION, 4,
-    EGL_CONTEXT_MINOR_VERSION, 5,
+    EGL_CONTEXT_MAJOR_VERSION, 3,
+    EGL_CONTEXT_MINOR_VERSION, 3,
     EGL_CONTEXT_OPENGL_PROFILE_MASK, EGL_CONTEXT_OPENGL_CORE_PROFILE_BIT,
     EGL_NONE
   };
