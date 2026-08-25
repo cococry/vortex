@@ -1356,7 +1356,10 @@ void renderer_end_scene_egl(struct vt_renderer_t *r,
 
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
 
+
+    printf("[DEBUG] BEGIN END SCENE .\n");
   rn_end(egl->render);
+    printf("[DEBUG] END SCENE SUCCESS.\n");
 }
 
 void renderer_end_frame_egl(struct vt_renderer_t *r,
@@ -1413,6 +1416,8 @@ void renderer_end_frame_egl(struct vt_renderer_t *r,
                  eglGetError());
         return;
     }
+
+    printf("[DEBUG] SWAP HAPPENED .\n");
 
     egl->render->drawcalls = 0;
 }

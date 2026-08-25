@@ -431,7 +431,8 @@ renderer_flush(RnState* state) {
 
   // Bind used texture slots
   for(uint32_t i = 0; i < state->render.tex_count; i++) {
-    glBindTextureUnit(i, state->render.textures[i].id);
+    glActiveTexture(GL_TEXTURE0 + i);
+    glBindTexture(GL_TEXTURE_2D, state->render.textures[i].id);
   }
 
 
