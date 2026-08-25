@@ -1,23 +1,23 @@
-#pragma once 
+#pragma once
 
 #include "../protocols/linux_dmabuf.h"
 #include "../protocols/xdg_shell.h"
 #include "scene.h"
-#define VT_MAX_FRAME_CBS 8 
+#define VT_MAX_FRAME_CBS 8
 
-#include <stdint.h>
-#include <runara/runara.h>
 #include "core_types.h"
+#include <runara/runara.h>
+#include <stdint.h>
 
 struct vt_frame_cb_pool {
-  struct wl_resource* cbs[VT_MAX_FRAME_CBS];
-  uint32_t n_cbs;
+  struct wl_resource *cbs[VT_MAX_FRAME_CBS];
+  uint32_t            n_cbs;
 };
 
 struct vt_surface_sync_state_t {
-  int32_t acquire_fence_fd, release_fence_fd;
-  struct wl_resource* res_release;
-  struct wl_resource* res;
+  int32_t             acquire_fence_fd, release_fence_fd;
+  struct wl_resource *res_release;
+  struct wl_resource *res;
 };
 
 enum vt_surface_type_t {
@@ -28,23 +28,24 @@ enum vt_surface_type_t {
 struct vt_linux_dmabuf_v1_surface_t;
 
 struct vt_surface_t {
-  struct wl_resource* surf_res;
-  struct wl_resource* buf_res;
+  struct wl_resource *surf_res;
+  struct wl_resource *buf_res, *buf_res_pending;
+  bool                pending_buffer_set;
 
-  struct vt_xdg_surface_t* xdg_surf;
+  struct vt_xdg_surface_t *xdg_surf;
 
-  RnTexture tex; 
-  void* render_tex_handle;
+  RnTexture tex;
+  void     *render_tex_handle;
 
   struct wl_list link, link_focus;
-  
-  struct vt_compositor_t* comp;
+
+  struct vt_compositor_t *comp;
 
   uint32_t width, height;
-  int32_t x, y, dx, dy, hotspot_x, hotspot_y;
-  
+  int32_t  x, y, dx, dy, hotspot_x, hotspot_y;
+
   uint32_t geom_width, geom_height;
-  int32_t geom_x, geom_y;
+  int32_t  geom_x, geom_y;
 
   bool needs_frame_done;
 
@@ -53,7 +54,7 @@ struct vt_surface_t {
   uint32_t _mask_outputs_visible_on;
   uint32_t _mask_outputs_presented_on;
 
-  void* user_data;
+  void *user_data;
 
   pixman_region32_t current_damage;
   pixman_region32_t pending_damage;
@@ -69,13 +70,13 @@ struct vt_surface_t {
 
   struct vt_surface_sync_state_t sync;
 
-  struct vt_linux_dmabuf_v1_surface_t* dmabuf_surf;
+  struct vt_linux_dmabuf_v1_surface_t *dmabuf_surf;
 
   enum vt_surface_type_t type;
 
-  struct vt_scene_node_t* scene_node;
+  struct vt_scene_node_t *scene_node;
 };
 
-void vt_surface_mapped(struct vt_surface_t* surf);
+void vt_surface_mapped(struct vt_surface_t *surf);
 
-void vt_surface_unmapped(struct vt_surface_t* surf);
+void vt_surface_unmapped(struct vt_surface_t *surf);
