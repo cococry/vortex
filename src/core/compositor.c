@@ -740,7 +740,7 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
     root_h += output->height;
   }
 
-  c->root_node = vt_scene_node_create_rect(c, 0, 0, root_w, root_h, 0x000000);
+  c->root_node = vt_scene_node_create_rect(c, 0, 0, 1280, 720, 0x0000ff);
 
   c->root_node->type = VT_SCENE_NODE_ROOT;
 

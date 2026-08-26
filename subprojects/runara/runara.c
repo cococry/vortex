@@ -41,7 +41,7 @@
 static uint32_t         shader_create(GLenum type, const char* src);
 static RnShader         shader_prg_create(const char* vert_src, const char* frag_src);
 static void             shader_set_mat(RnShader prg, const char* name, mat4 mat); 
-static void             set_projection_matrix(RnState* state);
+static void             set_projection_matrix(RnState* state, float x, float y);
 static void             renderer_init(RnState* state);
 static void             renderer_flush(RnState* state);
 static void             renderer_begin(RnState* state);
@@ -198,10 +198,10 @@ shader_set_mat(RnShader prg, const char* name, mat4 mat) {
  * in which objects are rendered. 
  * */
 void
-set_projection_matrix(RnState* state) {
+set_projection_matrix(RnState* state, float x, float y) {
   mat4 orthoMatrix = GLM_MAT4_IDENTITY_INIT;
-  glm_ortho(0.0f, (float)state->render.render_w,
-            (float)state->render.render_h, 0.0f, 
+  glm_ortho(x, (float)state->render.render_w,
+            (float)state->render.render_h, y, 
             -1.0f, 1.0f,
             orthoMatrix);
 
@@ -417,7 +417,7 @@ renderer_init(RnState* state) {
   // Upload the texture array (sampler2D array) to the shader
   glUseProgram(state->render.shader.id);
   glBindVertexArray(state->render.vao);
-  set_projection_matrix(state);
+  set_projection_matrix(state, 0.0f, 0.0f);
   glUniform1iv(glGetUniformLocation(state->render.shader.id, "u_textures"), RN_MAX_TEX_COUNT_BATCH, tex_slots);
 }
 
@@ -1018,7 +1018,17 @@ rn_resize_display(RnState* state, uint32_t render_w, uint32_t render_h) {
 
   // Send the dimension chnage to OpenGL 
   glViewport(0, 0, render_w, render_h);
-  set_projection_matrix(state);
+  set_projection_matrix(state, 0.0f, 0.0f);
+}
+
+void rn_resize_display_ex(RnState* state, float render_w, float render_h, float x, float y) {
+  // Set render dimensions
+  state->render.render_w = render_w;
+  state->render.render_h = render_h;
+
+  // Send the dimension chnage to OpenGL 
+  glViewport(0, 0, render_w, render_h);
+  set_projection_matrix(state, x, y); 
 }
 
 RnTexture 

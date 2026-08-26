@@ -443,7 +443,11 @@ void vt_seat_handle_pointer_motion(struct vt_seat_t *seat, double x, double y,
 
   wl_pointer_send_motion(seat->ptr_focus.res, time, wl_fixed_from_double(sx),
                          wl_fixed_from_double(sy));
-  wl_pointer_send_frame(seat->ptr_focus.res);
+
+  if (wl_resource_get_version(seat->ptr_focus.res) >=
+      WL_POINTER_FRAME_SINCE_VERSION) {
+    wl_pointer_send_frame(seat->ptr_focus.res);
+  }
 }
 
 void vt_seat_handle_pointer_button(struct vt_seat_t *seat, uint32_t button,
@@ -458,7 +462,11 @@ void vt_seat_handle_pointer_button(struct vt_seat_t *seat, uint32_t button,
                          button,
                          pressed ? WL_POINTER_BUTTON_STATE_PRESSED
                                  : WL_POINTER_BUTTON_STATE_RELEASED);
-  wl_pointer_send_frame(seat->ptr_focus.res);
+
+  if (wl_resource_get_version(seat->ptr_focus.res) >=
+      WL_POINTER_FRAME_SINCE_VERSION) {
+    wl_pointer_send_frame(seat->ptr_focus.res);
+  }
 }
 
 struct vt_keybind_t *vt_seat_add_global_keybind(

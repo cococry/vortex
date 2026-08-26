@@ -1283,11 +1283,8 @@ void renderer_begin_frame_egl(struct vt_renderer_t *r,
     last_surface = surface;
   }
 
-  // Resize the render display if the output size changed
-  if (egl->render->render.render_w != output->width ||
-      egl->render->render.render_h != output->height) {
-    rn_resize_display(egl->render, output->width, output->height);
-  }
+  rn_resize_display_ex(egl->render, output->width, output->height, output->x,
+                       output->y);
 
   egl->need_fence = false;
 
@@ -1357,9 +1354,7 @@ void renderer_end_scene_egl(struct vt_renderer_t *r,
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
 
 
-    printf("[DEBUG] BEGIN END SCENE .\n");
   rn_end(egl->render);
-    printf("[DEBUG] END SCENE SUCCESS.\n");
 }
 
 void renderer_end_frame_egl(struct vt_renderer_t *r,
@@ -1416,8 +1411,6 @@ void renderer_end_frame_egl(struct vt_renderer_t *r,
                  eglGetError());
         return;
     }
-
-    printf("[DEBUG] SWAP HAPPENED .\n");
 
     egl->render->drawcalls = 0;
 }

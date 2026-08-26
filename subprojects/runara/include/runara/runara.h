@@ -769,6 +769,8 @@ void rn_terminate(RnState* state);
  */
 void rn_resize_display(RnState* state, uint32_t render_w, uint32_t render_h);
 
+void rn_resize_display_ex(RnState* state, float render_w, float render_h, float x, float y);
+
 /**
  * @brief Loads a image on a given filepath into a OpenGL 
  * texture object and returns a Runara Texture handle.

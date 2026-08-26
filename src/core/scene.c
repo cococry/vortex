@@ -211,47 +211,34 @@ static void  _composite_pass(struct vt_renderer_t   *renderer,
   r->impl.begin_scene(r, output);
 
   if (care_for_damage) {
-    r->impl.draw_rect(r, 0, 0, output->width, output->height, 0xffffff);
+    r->impl.draw_rect(r, output->x, output->y, output->width, output->height, 0xffffff);
   } else {
-    r->impl.set_clear_color(r, output, 0xffffff);
+    r->impl.set_clear_color(r, output, 0x000000);
   }
 
   vt_scene_node_render(renderer, output, root, true,
-                        _composite_scene_node_filter);
+                       _composite_scene_node_filter);
 
-  if (!renderer->comp->seat->ptr_focus.surf) {
-    /*if(!renderer->comp->seat->ptr_focus.surf &&
-    _node_intersects_damage(renderer->comp->root_cursor, output->cached_damage,
-    output->n_damage_boxes)) { renderer->impl.draw_rect( renderer,
-    renderer->comp->root_cursor->x, renderer->comp->root_cursor->y,
-    renderer->comp->root_cursor->width, renderer->comp->root_cursor->height,
-    0xff0000);
-    }*/
-  } else {
-    struct vt_surface_t *cursor_focus =
-        _get_focused_cursor_surface(renderer->comp->seat);
-    if (cursor_focus && cursor_focus->mapped &&
-        cursor_focus->comp->seat->ptr_focus.surf) {
-      struct vt_seat_t *seat = cursor_focus->comp->seat;
+  struct vt_surface_t *cursor_focus =
+      _get_focused_cursor_surface(renderer->comp->seat);
+  if (cursor_focus && cursor_focus->mapped &&
+      cursor_focus->comp->seat->ptr_focus.surf) {
+    struct vt_seat_t *seat = cursor_focus->comp->seat;
 
-      int32_t hx, hy;
-      _get_cursor_hotspot(cursor_focus, &hx, &hy);
-      float x = (seat->pointer_x - hx);
-      float y = (seat->pointer_y - hy);
-      float w = cursor_focus->width * cursor_focus->buffer_scale;
-      float h = cursor_focus->height * cursor_focus->buffer_scale;
+    int32_t hx, hy;
+    _get_cursor_hotspot(cursor_focus, &hx, &hy);
+    float x = (seat->pointer_x - hx);
+    float y = (seat->pointer_y - hy);
+    float w = cursor_focus->width * cursor_focus->buffer_scale;
+    float h = cursor_focus->height * cursor_focus->buffer_scale;
 
-      renderer->impl.draw_surface(renderer, output, cursor_focus, x, y);
+    renderer->impl.draw_surface(renderer, output, cursor_focus, x, y);
 
-      prev_cur_x = x;
-      prev_cur_y = y;
-      prev_cur_w = w;
-      prev_cur_h = h;
-    }
+    prev_cur_x = x;
+    prev_cur_y = y;
+    prev_cur_w = w;
+    prev_cur_h = h;
   }
-
-  // renderer->impl.draw_rect(renderer, renderer->comp->root_cursor->x,
-  // renderer->comp->root_cursor->y, 50, 50, 0xff00000);
 
   r->impl.end_scene(r, output);
 }
@@ -317,15 +304,9 @@ void vt_scene_render(struct vt_renderer_t *renderer, struct vt_output_t *output,
 
   renderer->impl.begin_frame(renderer, output);
 
-  if (output->needs_damage_rebuild)
-    _damage_pass(renderer, output);
-  _composite_pass(renderer, output, root, true);
+  //_damage_pass(renderer, output);
+  _composite_pass(renderer, output, root, false);
 
-  for (size_t i = 0; i < output->n_damage_boxes; i++) {
-    VT_TRACE(renderer->comp->log, "  => REDRAWING SECTION: %i, %i, %i, %i\n",
-             output->cached_damage[i].x1, output->cached_damage[i].x2,
-             output->cached_damage[i].y1, output->cached_damage[i].y2);
-  }
   renderer->impl.end_frame(renderer, output, output->cached_damage,
                            output->n_damage_boxes);
 
