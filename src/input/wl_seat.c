@@ -150,13 +150,6 @@ void _wl_handle_keybind_term(struct vt_compositor_t *comp, void *user_data) {
   VT_TRACE(comp->log, "Doing: '%s'", buf);
   system(buf);
 }
-void _wl_handle_keybind_nogger(struct vt_compositor_t *comp, void *user_data) {
-  comp->nogger = !comp->nogger;
-  struct vt_output_t *output;
-  wl_list_for_each(output, &comp->outputs, link_global) {
-    vt_comp_schedule_repaint(comp, output);
-  }
-}
 
 void _wl_seat_get_pointer(struct wl_client   *client,
                           struct wl_resource *seat_res, uint32_t id) {
@@ -647,8 +640,6 @@ void vt_seat_bind_global_keybinds(struct vt_seat_t *seat) {
                              _wl_handle_keybind_exit, NULL);
   vt_seat_add_global_keybind(seat, XKB_KEY_e, mods.alt, _wl_handle_keybind_term,
                              NULL);
-  vt_seat_add_global_keybind(seat, XKB_KEY_n, mods.alt,
-                             _wl_handle_keybind_nogger, NULL);
 }
 
 bool vt_seat_terminate(struct vt_seat_t *seat) {

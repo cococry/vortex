@@ -4,8 +4,6 @@
 #include "src/core/core_types.h"
 #include "src/core/surface.h"
 #include "src/core/util.h"
-#include "src/render/dmabuf.h"
-#include "src/render/renderer.h"
 #include <sys/stat.h>
 
 #include <assert.h>
@@ -65,9 +63,11 @@ static struct vt_proto_linux_explicit_sync_v1_t _proto;
 void _linux_explicit_sync_v1_get_synchronization(
     struct wl_client *client, struct wl_resource *resource, uint32_t id,
     struct wl_resource *surface_resource) {
+
   /* 1. Retrieve internal surface handle */
   struct vt_surface_t *surf =
       surface_resource ? wl_resource_get_user_data(surface_resource) : NULL;
+
   if (!surf) {
     VT_PARAM_CHECK_FAIL(_proto.comp);
     return;
@@ -83,7 +83,7 @@ void _linux_explicit_sync_v1_get_synchronization(
     return;
   }
 
-  /* 3. Allocate resource for synchronization interface */
+  /* 3. Allocate resource for synchronization object */
   struct wl_resource *res = wl_resource_create(
       client, &zwp_linux_surface_synchronization_v1_interface,
       wl_resource_get_version(resource), id);
@@ -95,8 +95,6 @@ void _linux_explicit_sync_v1_get_synchronization(
 
   /* 4. Initialize synchronization state */
   surf->sync.res = res;
-  surf->sync.acquire_fence_fd = -1;
-  surf->sync.release_fence_fd = -1;
 
   /* 5. Set handler functions via the implementation */
   wl_resource_set_implementation(res, &_linux_surface_sync_v1_impl, surf,
@@ -155,7 +153,7 @@ void _linux_surface_sync_v1_set_acquire_fence(struct wl_client   *client,
   }
 
   /* 2. Check for duplicate fence */
-  if (surf->sync.acquire_fence_fd != -1) {
+  if (surf->pending.acquire_fence_fd != -1) {
     wl_resource_post_error(
         resource, ZWP_LINUX_SURFACE_SYNCHRONIZATION_V1_ERROR_DUPLICATE_FENCE,
         "already have a fence fd");
@@ -163,12 +161,7 @@ void _linux_surface_sync_v1_set_acquire_fence(struct wl_client   *client,
     return;
   }
 
-  /* 3. Store the fence file descriptor */
-  if (surf->sync.acquire_fence_fd != fd) {
-    if (surf->sync.acquire_fence_fd >= 0)
-      close(surf->sync.acquire_fence_fd);
-    surf->sync.acquire_fence_fd = fd;
-  }
+  surf->pending.acquire_fence_fd = fd;
 
   VT_TRACE(surf->comp->log,
            "linux_surface_sync.set_acquire_fence: set acquire fence FD=%i for "
@@ -190,8 +183,8 @@ void _linux_surface_sync_v1_get_release(struct wl_client   *client,
     return;
   }
 
-  /* 2. Check for existing release object */
-  if (surf->sync.res_release) {
+  /* 2. Check for existing pending release object */
+  if (surf->pending.release) {
     wl_resource_post_error(
         resource, ZWP_LINUX_SURFACE_SYNCHRONIZATION_V1_ERROR_DUPLICATE_RELEASE,
         "already has a buffer release");
@@ -208,12 +201,15 @@ void _linux_surface_sync_v1_get_release(struct wl_client   *client,
     return;
   }
 
-  /* 4. Initialize sync release state */
-  surf->sync.release_fence_fd = -1;
-  surf->sync.res_release = res_release;
+  struct vt_surface_release_t* pending_release = VT_ALLOC(surf->comp, sizeof(struct vt_surface_release_t));
+
+  pending_release->pending_surface = surf;
+  pending_release->res = res_release;
+
+  surf->pending.release = pending_release;
 
   /* 5. Set destruction handler */
-  wl_resource_set_implementation(res_release, NULL, surf,
+  wl_resource_set_implementation(res_release, NULL, pending_release,
                                  _linux_surface_res_release_handle_destroy);
 
   VT_TRACE(
@@ -226,8 +222,8 @@ void _linux_surface_sync_handle_destroy(struct wl_resource *resource) {
   /* 1. Retrieve internal surface handle */
   struct vt_surface_t *surf =
       resource ? wl_resource_get_user_data(resource) : NULL;
+
   if (!surf) {
-    VT_PARAM_CHECK_FAIL(_proto.comp);
     return;
   }
 
@@ -239,31 +235,31 @@ void _linux_surface_sync_handle_destroy(struct wl_resource *resource) {
   surf->sync.res = NULL;
 
   /* 3. Close acquire fence fd if valid */
-  if (surf->sync.acquire_fence_fd >= 0)
-    close(surf->sync.acquire_fence_fd);
+  if (surf->pending.acquire_fence_fd >= 0)
+    close(surf->pending.acquire_fence_fd);
 
-  surf->sync.acquire_fence_fd = -1;
+  surf->pending.acquire_fence_fd = -1;
 }
 
 void _linux_surface_res_release_handle_destroy(struct wl_resource *resource) {
   /* 1. Retrieve internal surface handle */
-  struct vt_surface_t *surf =
+  struct vt_surface_release_t* release =
       resource ? wl_resource_get_user_data(resource) : NULL;
-  if (!surf) {
-    VT_PARAM_CHECK_FAIL(_proto.comp);
+
+  if (!release) {
     return;
   }
 
-  VT_TRACE(
-      surf->comp->log,
-      "linux_surface_release.resource_destroy: destroying release resource %p.",
-      resource);
+  if(release->pending_surface && release->pending_surface->pending.release == release) 
+    release->pending_surface->pending.release = NULL;
 
-  /* 2. Clear release handle and close FD if valid */
-  surf->sync.res_release = NULL;
-  if (surf->sync.release_fence_fd >= 0)
-    close(surf->sync.release_fence_fd);
-  surf->sync.release_fence_fd = -1;
+  if(release->pending_surface) {
+    VT_TRACE(
+        release->pending_surface->comp->log,
+        "linux_surface_release.resource_destroy: destroyed release resource %p.",
+        resource);
+  }
+
 }
 
 /* ===================================================

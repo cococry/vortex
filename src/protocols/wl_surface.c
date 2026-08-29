@@ -1,10 +1,12 @@
 #include "wl_surface.h"
 #include "src/core/compositor.h"
 #include "src/core/scene.h"
+#include "src/core/surface.h"
 #include "src/core/util.h"
 #include "src/input/wl_seat.h"
 #include "src/render/renderer.h"
 #include <stdbool.h>
+#include <unistd.h>
 #include <wayland-server-core.h>
 #include <wayland-server-protocol.h>
 
@@ -91,8 +93,7 @@ void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
 
   VT_TRACE(surf->comp->log, "Got compositor.surface_attach.")
 
-  surf->buf_res_pending = buffer;
-  surf->pending_buffer_set = true;
+  surf->pending.buf_res = buffer;
 
   surf->dx = x;
   surf->dy = y;
@@ -121,7 +122,7 @@ void _wl_surface_commit(struct wl_client   *client,
 
   bool has_damage = !pixman_region32_empty(&surf->pending_damage);
 
-  bool has_new_buffer = surf->pending_buffer_set;
+  bool has_new_buffer = surf->pending.buf_res != NULL;
 
   /* 1. If the size of the surface changed, we need to
    * recalculate the outputs that the surface is visible on */
@@ -133,10 +134,9 @@ void _wl_surface_commit(struct wl_client   *client,
   struct vt_renderer_t *r = surf->comp->renderer;
 
   if (has_new_buffer) {
-    struct wl_resource *new_buffer = surf->buf_res_pending;
+    struct wl_resource *new_buffer = surf->pending.buf_res;
 
-    surf->buf_res_pending = NULL;
-    surf->pending_buffer_set = false;
+    surf->pending.buf_res = NULL;
 
     surf->buf_res = new_buffer;
 
@@ -261,6 +261,17 @@ void _wl_surface_commit(struct wl_client   *client,
     }
     pixman_region32_fini(&global_damage);
   }
+
+  struct vt_surface_release_t* release = surf->pending.release;
+  surf->pending.release = NULL;
+  if(release) {
+    release->pending_surface = NULL;
+  }
+  
+  surf->sync.release = release;
+
+  surf->sync.acquire_fence_fd = surf->pending.acquire_fence_fd;
+  surf->pending.acquire_fence_fd = -1;
 
   VT_TRACE(surf->comp->log, "surface.commit Finsihed commit.");
 }
@@ -498,6 +509,27 @@ void _wl_surface_destroy(struct wl_client   *client,
   wl_resource_destroy(resource);
 }
 
+static void
+_explicit_sync_surface_destroy(struct vt_surface_t *surf)
+{
+  if (surf->pending.acquire_fence_fd >= 0) {
+    close(surf->pending.acquire_fence_fd);
+    surf->pending.acquire_fence_fd = -1;
+  }
+
+  if (surf->pending.release) {
+    surf->pending.release->pending_surface = NULL;
+    surf->pending.release = NULL;
+  }
+
+  surf->sync.release = NULL;
+
+  if (surf->sync.res) {
+    wl_resource_set_user_data(surf->sync.res, NULL);
+    surf->sync.res = NULL;
+  }
+}
+
 void _wl_surface_handle_resource_destroy(struct wl_resource *resource) {
   struct vt_surface_t *surf = wl_resource_get_user_data(resource);
 
@@ -543,10 +575,11 @@ void _wl_surface_handle_resource_destroy(struct wl_resource *resource) {
     output->needs_damage_rebuild = true;
   }
 
-  /* Free intenral handle */
+  _explicit_sync_surface_destroy(surf);
+
+  /* Free surface handle */
   wl_resource_set_user_data(resource, NULL);
   free(surf);
-  surf = NULL;
 }
 
 void _wl_surface_associate_with_output(struct vt_compositor_t *c,

@@ -3,6 +3,7 @@
 #include "../protocols/linux_dmabuf.h"
 #include "../protocols/xdg_shell.h"
 #include "scene.h"
+#include <wayland-server.h>
 #define VT_MAX_FRAME_CBS 8
 
 #include "core_types.h"
@@ -14,10 +15,16 @@ struct vt_frame_cb_pool {
   uint32_t            n_cbs;
 };
 
-struct vt_surface_sync_state_t {
-  int32_t             acquire_fence_fd, release_fence_fd;
-  struct wl_resource *res_release;
-  struct wl_resource *res;
+struct vt_surface_release_t {
+  struct wl_resource* res;
+  struct vt_surface_t* pending_surface;
+}; 
+
+struct vt_surface_pending_state_t {
+  int32_t             acquire_fence_fd; 
+  struct vt_surface_release_t* release;
+
+  struct wl_resource* buf_res;
 };
 
 enum vt_surface_type_t {
@@ -29,8 +36,7 @@ struct vt_linux_dmabuf_v1_surface_t;
 
 struct vt_surface_t {
   struct wl_resource *surf_res;
-  struct wl_resource *buf_res, *buf_res_pending;
-  bool                pending_buffer_set;
+  struct wl_resource *buf_res; 
 
   struct vt_xdg_surface_t *xdg_surf;
 
@@ -68,7 +74,13 @@ struct vt_surface_t {
 
   struct vt_frame_cb_pool cb_pool;
 
-  struct vt_surface_sync_state_t sync;
+  struct vt_surface_pending_state_t pending;
+  
+  struct {
+    struct wl_resource *res;
+    int acquire_fence_fd;
+  struct vt_surface_release_t* release;
+  } sync;
 
   struct vt_linux_dmabuf_v1_surface_t *dmabuf_surf;
 

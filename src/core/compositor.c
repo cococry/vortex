@@ -628,12 +628,11 @@ bool _vt_comp_wl_init(struct vt_compositor_t *c) {
 
 static struct vt_compositor_t *vt_global_compositor;
 
-static void vt_sig_handler(int sig) {
+static void _sig_handler(int sig) {
   void  *trace[32];
   size_t n = backtrace(trace, 32);
   fprintf(stderr, "\n[vortex] Caught signal %d (%s)\n", sig, strsignal(sig));
 
-  // Also log to compositor log file if open
   FILE *f = vt_global_compositor && vt_global_compositor->log.stream
                 ? vt_global_compositor->log.stream
                 : stderr;
@@ -642,20 +641,35 @@ static void vt_sig_handler(int sig) {
   backtrace_symbols_fd(trace, n, fileno(f));
   fflush(f);
 
-  // Re-raise so you still get a core dump if desired
   signal(sig, SIG_DFL);
   raise(sig);
 }
+
+static void _handle_output_changed_backend(struct vt_backend_t* backend, struct vt_output_t* output) {
+  (void)backend;
+  (void)output;
+  if(backend->comp->root_node) {
+    uint32_t            root_w = 0, root_h = 0;
+    struct vt_output_t *output;
+    wl_list_for_each(output, &backend->comp->outputs, link_global) {
+      root_w += output->width;
+      root_h += output->height;
+    }
+    backend->comp->root_node->rect.width = root_w; 
+    backend->comp->root_node->rect.height = root_h; 
+  }
+} 
+
 bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
   vt_util_arena_init(&c->arena, 1024 * 1024 * 2);
   vt_util_arena_init(&c->frame_arena, 1024 * 1024 * 2);
 
   vt_global_compositor = c;
-  signal(SIGSEGV, vt_sig_handler);
-  signal(SIGABRT, vt_sig_handler);
-  signal(SIGFPE, vt_sig_handler);
-  signal(SIGILL, vt_sig_handler);
-  signal(SIGBUS, vt_sig_handler);
+  signal(SIGSEGV, _sig_handler);
+  signal(SIGABRT, _sig_handler);
+  signal(SIGFPE, _sig_handler);
+  signal(SIGILL, _sig_handler);
+  signal(SIGBUS, _sig_handler);
 
   wl_list_init(&c->outputs);
 
@@ -694,6 +708,8 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
     c->n_virtual_outputs = 1;
 
   _vt_comp_load_backend(c, backend_str, c->_cmd_line_backend_path);
+  
+  c->backend->on_output_change = _handle_output_changed_backend; 
 
   if (!_vt_comp_wl_init(c)) {
     VT_ERROR(c->log, "Failed to initialize wayland state.");
@@ -706,11 +722,13 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
       c->session->impl.init(c->session);
   }
 
+
   // Initialize backend
   if (!c->backend->impl.init(c->backend)) {
     VT_ERROR(c->log, "Failed to initialize compositor backend.");
     return false;
   }
+
 
   enum vt_input_backend_platform_t input_backend = VT_INPUT_UNKNOWN;
   switch (c->backend->platform) {
@@ -740,7 +758,7 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
     root_h += output->height;
   }
 
-  c->root_node = vt_scene_node_create_rect(c, 0, 0, 1280, 720, 0x0000ff);
+  c->root_node = vt_scene_node_create_rect(c, 0, 0, root_w, root_h, 0x0000ff);
 
   c->root_node->type = VT_SCENE_NODE_ROOT;
 

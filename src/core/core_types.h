@@ -58,6 +58,7 @@ struct vt_backend_interface_t {
 };
 
 struct vt_backend_t {
+  void (*on_output_change)(struct vt_backend_t *backend, struct vt_output_t* changed);
   void                         *user_data;
   struct vt_backend_interface_t impl;
 
@@ -117,8 +118,6 @@ struct vt_compositor_t {
   struct vt_surface_t *root_cursor;
 
   struct vt_scene_node_t *root_node;
-
-  bool nogger;
 };
 
 typedef bool (*backend_implement_func_t)(struct vt_compositor_t *comp);
