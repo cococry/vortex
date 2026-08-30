@@ -557,7 +557,8 @@ void _wl_surface_handle_resource_destroy(struct wl_resource *resource) {
   }
 
   /* destroy dmabuf resources of the surface */
-  vt_proto_linux_dmabuf_v1_surface_destroy(surf);
+  if(surf->comp->have_proto_dmabuf)
+    vt_proto_linux_dmabuf_v1_surface_destroy(surf);
 
   if (surf->scene_node)
     vt_scene_node_destroy(surf->comp, surf->scene_node);

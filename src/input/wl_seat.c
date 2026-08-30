@@ -322,6 +322,7 @@ bool vt_seat_init(struct vt_seat_t *seat) {
   wl_list_init(&seat->keybinds);
 
   wl_list_init(&seat->focus_stack);
+  wl_list_init(&seat->drag_resources);
 
   seat->serial = 1;
 

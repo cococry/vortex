@@ -102,8 +102,8 @@ vortex_src = files('src/vortex.c',
 'src/protocols/linux_explicit_sync.h', 
 'src/protocols/wl_surface.h', 
 'src/protocols/wl_surface.c', 
-'src/protocols/wl_output.c'; 
-'src/protocols/wl_data_device.c'; 
+'src/protocols/wl_output.c',
+'src/protocols/wl_data_device.c',
 'src/protocols/wl_shm.h', 
 'src/protocols/wl_shm.c', 
 'src/input/input.c', 

@@ -1,4 +1,3 @@
-#include "src/protocols/wl_data_device.h"
 #define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
@@ -7,6 +6,7 @@
 #include "src/protocols/linux_dmabuf.h"
 #include "src/protocols/wl_surface.h"
 #include "src/protocols/xdg_shell.h"
+#include "src/protocols/wl_data_device.h"
 #include "src/render/renderer.h"
 
 #include <dirent.h>
@@ -477,7 +477,8 @@ void _vt_comp_wl_surface_create(struct wl_client   *client,
     VT_ERROR(c->log, "compositor.surface_create: Failed to create surface.");
     return;
   }
-  vt_proto_linux_dmabuf_v1_set_surface_feedback(surf);
+  if(c->have_proto_dmabuf)
+    vt_proto_linux_dmabuf_v1_set_surface_feedback(surf);
 
 
   vt_scene_node_add_child(c, c->root_node, vt_scene_node_create(c, surf));

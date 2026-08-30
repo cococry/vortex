@@ -28,6 +28,7 @@ struct vt_seat_t {
   struct wl_list    keyboards;
   struct wl_list    pointers;
   struct wl_list    focus_stack;
+  struct wl_list    drag_resources;
 
   struct vt_seat_focus_t kb_focus, ptr_focus;
 

@@ -17,8 +17,8 @@
 #include "../../core/compositor.h"
 #include "../../protocols/linux_dmabuf.h"
 #include "../../protocols/linux_explicit_sync.h"
-#include "../../protocols/wl_shm.h"
 #include "../../protocols/wl_output.h"
+#include "../../protocols/wl_shm.h"
 #include "../../render/renderer.h"
 #include "xdg-shell-client-protocol.h"
 
@@ -44,8 +44,8 @@ typedef struct {
 } wayland_output_state_t;
 
 typedef struct {
-  wayland_backend_state_t        *backend;
-  struct wl_list                  link;
+  wayland_backend_state_t *backend;
+  struct wl_list           link;
 
   struct wl_output *global;
   uint32_t          id;
@@ -59,7 +59,7 @@ typedef struct {
     struct wl_list modes;
   } physical;
 
-  struct wl_callback* sync_cb;
+  struct wl_callback *sync_cb;
 
   int32_t  x, y;
   uint32_t transform;
@@ -105,6 +105,32 @@ static bool _wl_init_fake_dmabuf_feedback(struct vt_compositor_t      *comp,
 static bool _wl_backend_create_output(struct vt_backend_t *backend,
                                       struct vt_output_t *output, void *data);
 
+static bool _wl_set_fake_output_mode(struct vt_output_t *output, int32_t width,
+                                     int32_t height, int32_t refresh);
+
+static struct vt_output_mode_t *_wl_find_output_mode(struct wl_list *list,
+                                                     int32_t         width,
+                                                     int32_t         height,
+                                                     uint32_t        refresh);
+
+static bool _wl_set_fake_output_mode(struct vt_output_t *output, int32_t width,
+                                     int32_t height, int32_t refresh) {
+  struct vt_output_mode_t *mode =
+      _wl_find_output_mode(&output->physical.modes, width, height, refresh);
+
+  if (!mode)
+    return false;
+
+  struct vt_output_mode_t *m;
+  wl_list_for_each(m, &output->physical.modes, link) {
+    m->flags &= ~(WL_OUTPUT_MODE_CURRENT | WL_OUTPUT_MODE_PREFERRED);
+  }
+
+  mode->flags = WL_OUTPUT_MODE_CURRENT | WL_OUTPUT_MODE_PREFERRED;
+
+  return true;
+}
+
 static bool _wl_backend_init_active_outputs(struct vt_backend_t *backend);
 
 static void _wl_parent_output_geometry(
@@ -141,10 +167,8 @@ static const struct xdg_toplevel_listener parent_toplevel_listener = {
 static const struct wl_output_listener output_listener = {
     _wl_parent_output_geometry, _wl_parent_output_mode};
 
-
-static void
-output_sync_callback(void *data, struct wl_callback *callback, uint32_t unused)
-{
+static void output_sync_callback(void *data, struct wl_callback *callback,
+                                 uint32_t unused) {
   parent_physical_output_t *output = data;
 
   assert(output->sync_cb == callback);
@@ -153,12 +177,10 @@ output_sync_callback(void *data, struct wl_callback *callback, uint32_t unused)
 }
 
 static const struct wl_callback_listener output_sync_listener = {
-	output_sync_callback
-};
+    output_sync_callback};
 
-
-static void _wl_register_output(struct wl_registry* reg, wayland_backend_state_t* backend, uint32_t id)
-{
+static void _wl_register_output(struct wl_registry      *reg,
+                                wayland_backend_state_t *backend, uint32_t id) {
   parent_physical_output_t *output =
       VT_ALLOC(backend->comp, sizeof(parent_physical_output_t));
 
@@ -191,8 +213,7 @@ void _wl_parent_registry_add(void *data, struct wl_registry *reg, uint32_t id,
   } else if (strcmp(iface, xdg_wm_base_interface.name) == 0) {
     wl->parent_xdg_wm_base =
         wl_registry_bind(reg, id, &xdg_wm_base_interface, 1);
-  }  
-  else if (strcmp(iface, wl_output_interface.name) == 0) {
+  } else if (strcmp(iface, wl_output_interface.name) == 0) {
     _wl_register_output(reg, wl, id);
   } else if (strcmp(iface, wl_seat_interface.name) == 0) {
     wl->parent_seat = wl_registry_bind(reg, id, &wl_seat_interface, 7);
@@ -228,6 +249,9 @@ static void _output_handle_render_resize(struct vt_output_t *output, int32_t w,
   }
   if (output->backend->on_output_change)
     output->backend->on_output_change(output->backend, output);
+
+  // TODO: resize output mode
+  //_wl_set_fake_output_mode(output, w, h, 60000);
 
   vt_comp_schedule_repaint(r->comp, output);
 }
@@ -347,18 +371,26 @@ bool _wl_backend_init_active_outputs(struct vt_backend_t *backend) {
   return true;
 }
 
-static const char *wl_output_transform_name(int32_t transform)
-{
+static const char *wl_output_transform_name(int32_t transform) {
   switch (transform) {
-  case WL_OUTPUT_TRANSFORM_NORMAL:      return "normal";
-  case WL_OUTPUT_TRANSFORM_90:          return "90";
-  case WL_OUTPUT_TRANSFORM_180:         return "180";
-  case WL_OUTPUT_TRANSFORM_270:         return "270";
-  case WL_OUTPUT_TRANSFORM_FLIPPED:     return "flipped";
-  case WL_OUTPUT_TRANSFORM_FLIPPED_90:  return "flipped-90";
-  case WL_OUTPUT_TRANSFORM_FLIPPED_180: return "flipped-180";
-  case WL_OUTPUT_TRANSFORM_FLIPPED_270: return "flipped-270";
-  default:                              return "unknown";
+  case WL_OUTPUT_TRANSFORM_NORMAL:
+    return "normal";
+  case WL_OUTPUT_TRANSFORM_90:
+    return "90";
+  case WL_OUTPUT_TRANSFORM_180:
+    return "180";
+  case WL_OUTPUT_TRANSFORM_270:
+    return "270";
+  case WL_OUTPUT_TRANSFORM_FLIPPED:
+    return "flipped";
+  case WL_OUTPUT_TRANSFORM_FLIPPED_90:
+    return "flipped-90";
+  case WL_OUTPUT_TRANSFORM_FLIPPED_180:
+    return "flipped-180";
+  case WL_OUTPUT_TRANSFORM_FLIPPED_270:
+    return "flipped-270";
+  default:
+    return "unknown";
   }
 }
 
@@ -381,27 +413,22 @@ static void _wl_parent_output_geometry(
 
   output->transform = transform;
 
-  VT_TRACE(
-    output->backend->comp->log,
-    "Parent wl_output geometry: "
-    "output=%p proxy=%p "
-    "pos=(%d,%d), physical=%dx%d mm, "
-    "subpixel=%d, make=\"%s\", model=\"%s\", "
-    "transform=%s (%d)",
-    (void *)output,
-    (void *)output_proxy,
-    x, y,
-    physical_width, physical_height,
-    subpixel,
-    make ? make : "(null)",
-    model ? model : "(null)",
-    wl_output_transform_name(transform),
-    transform);
+  VT_TRACE(output->backend->comp->log,
+           "Parent wl_output geometry: "
+           "output=%p proxy=%p "
+           "pos=(%d,%d), physical=%dx%d mm, "
+           "subpixel=%d, make=\"%s\", model=\"%s\", "
+           "transform=%s (%d)",
+           (void *)output, (void *)output_proxy, x, y, physical_width,
+           physical_height, subpixel, make ? make : "(null)",
+           model ? model : "(null)", wl_output_transform_name(transform),
+           transform);
 }
 
-static struct vt_output_mode_t *find_output_mode(struct wl_list *list,
-                                                 int32_t width, int32_t height,
-                                                 uint32_t refresh) {
+static struct vt_output_mode_t *_wl_find_output_mode(struct wl_list *list,
+                                                     int32_t         width,
+                                                     int32_t         height,
+                                                     uint32_t        refresh) {
   struct vt_output_mode_t *mode;
 
   wl_list_for_each(mode, list, link) {
@@ -429,8 +456,8 @@ static void _wl_parent_output_mode(void             *data,
                                    int32_t height, int32_t refresh) {
   parent_physical_output_t *output = data;
 
-  struct vt_output_mode_t *mode = find_output_mode(
-      &output->physical.modes, width, height, refresh);
+  struct vt_output_mode_t *mode =
+      _wl_find_output_mode(&output->physical.modes, width, height, refresh);
   if (!mode)
     return;
 
@@ -453,6 +480,9 @@ bool _wl_backend_create_output(struct vt_backend_t *backend,
   output->backend = backend;
   wl_list_init(&output->physical.modes);
   wl_list_init(&output->proto.resources);
+
+  _wl_set_fake_output_mode(output, _WL_DEFAULT_OUTPUT_WIDTH,
+                           _WL_DEFAULT_OUTPUT_HEIGHT, 60000);
 
   wayland_backend_state_t *wl = BACKEND_DATA(backend, wayland_backend_state_t);
   wayland_output_state_t  *wl_output =
@@ -485,15 +515,10 @@ bool _wl_backend_create_output(struct vt_backend_t *backend,
 
   vt_comp_schedule_repaint(backend->comp, output);
 
-  VT_TRACE(backend->comp->log, "GOT HERE")
-
   // Trigger initial configure
   wl_surface_commit(wl_output->parent_surface);
-  VT_TRACE(backend->comp->log, "GOT HERE, wl: %p, parent_display: %p",
-      wl, wl->parent_display);
   // Get the initial configure immidiately
   wl_display_roundtrip(wl->parent_display);
-  VT_TRACE(backend->comp->log, "GOT HERE 2")
 
   output->native_window = wl_output->parent_surface;
 
@@ -635,17 +660,6 @@ bool _wl_init_fake_dmabuf_feedback(struct vt_compositor_t      *comp,
   fmt2->mods[1].mod = _VT_DRM_FORMAT_MOD_INVALID;
   fmt2->mods[1]._egl_ext_only = false;
 
-  uint32_t *shm_formats = calloc(2, sizeof(uint32_t));
-  shm_formats[0] = _VT_DRM_FORMAT_XRGB8888;
-  shm_formats[1] = _VT_DRM_FORMAT_ARGB8888;
-
-  if (!vt_proto_wl_shm_init(comp, shm_formats, 2)) {
-    VT_ERROR(comp->log, "Failed to initialize WL SHM protcol.\n");
-    return false;
-  }
-
-  free(shm_formats);
-
   return true;
 }
 
@@ -690,6 +704,17 @@ bool backend_init_wl(struct vt_backend_t *backend) {
 
   backend->comp->renderer->impl.init(c->backend, backend->comp->renderer,
                                      wl->parent_display);
+    
+  uint32_t *shm_formats = calloc(2, sizeof(uint32_t));
+    shm_formats[0] = _VT_DRM_FORMAT_XRGB8888;
+    shm_formats[1] = _VT_DRM_FORMAT_ARGB8888;
+
+    if (!vt_proto_wl_shm_init(backend->comp, shm_formats, 2)) {
+      VT_ERROR(backend->comp->log, "Failed to initialize WL SHM protcol.\n");
+      return false;
+    }
+
+    free(shm_formats);
 
   const uint8_t dmabuf_ver = 4, dmabuf_explicit_sync_ver = 2;
 
