@@ -1,3 +1,4 @@
+#include "src/protocols/wl_data_device.h"
 #define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
@@ -478,6 +479,7 @@ void _vt_comp_wl_surface_create(struct wl_client   *client,
   }
   vt_proto_linux_dmabuf_v1_set_surface_feedback(surf);
 
+
   vt_scene_node_add_child(c, c->root_node, vt_scene_node_create(c, surf));
 }
 
@@ -610,6 +612,11 @@ bool _vt_comp_wl_init(struct vt_compositor_t *c) {
 
   if (!vt_proto_xdg_shell_init(c, 1)) {
     VT_ERROR(c->log, "Cannot initialize XDG shell protocol.");
+    return false;
+  }
+
+  if (!vt_proto_wl_data_device_init(c)) {
+    VT_ERROR(c->log, "Cannot initialize Wayland data device protocol.");
     return false;
   }
 
