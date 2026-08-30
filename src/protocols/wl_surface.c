@@ -262,12 +262,12 @@ void _wl_surface_commit(struct wl_client   *client,
     pixman_region32_fini(&global_damage);
   }
 
-  struct vt_surface_release_t* release = surf->pending.release;
+  struct vt_surface_release_t *release = surf->pending.release;
   surf->pending.release = NULL;
-  if(release) {
+  if (release) {
     release->pending_surface = NULL;
   }
-  
+
   surf->sync.release = release;
 
   surf->sync.acquire_fence_fd = surf->pending.acquire_fence_fd;
@@ -509,9 +509,7 @@ void _wl_surface_destroy(struct wl_client   *client,
   wl_resource_destroy(resource);
 }
 
-static void
-_explicit_sync_surface_destroy(struct vt_surface_t *surf)
-{
+static void _explicit_sync_surface_destroy(struct vt_surface_t *surf) {
   if (surf->pending.acquire_fence_fd >= 0) {
     close(surf->pending.acquire_fence_fd);
     surf->pending.acquire_fence_fd = -1;

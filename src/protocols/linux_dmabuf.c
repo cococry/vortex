@@ -910,7 +910,7 @@ bool _linux_dmabuf_set_default_feedback(
 }
 
 static size_t find_absolute_format_index(const struct wl_array *all_formats,
-                                        uint32_t format, uint64_t modifier) {
+                                         uint32_t format, uint64_t modifier) {
   size_t idx = 0;
 
   struct vt_dmabuf_drm_format_t *fmt;

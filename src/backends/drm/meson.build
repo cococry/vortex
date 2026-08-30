@@ -9,7 +9,7 @@ vortex_inc = include_directories('../../', '/usr/include/pixman-1/')
 
 shared_module(
   'drm-backend',
-  ['drm.c', 'session_drm.c'],
+  ['drm_backend.c', 'session_drm.c'],
   dependencies: [dep_gbm, dep_drm, dep_wayland_server, dep_seat, dep_udev, dep_libinput],
   install: true,
   include_directories: vortex_inc, 

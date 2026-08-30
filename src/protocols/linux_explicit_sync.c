@@ -201,7 +201,8 @@ void _linux_surface_sync_v1_get_release(struct wl_client   *client,
     return;
   }
 
-  struct vt_surface_release_t* pending_release = VT_ALLOC(surf->comp, sizeof(struct vt_surface_release_t));
+  struct vt_surface_release_t *pending_release =
+      VT_ALLOC(surf->comp, sizeof(struct vt_surface_release_t));
 
   pending_release->pending_surface = surf;
   pending_release->res = res_release;
@@ -243,23 +244,23 @@ void _linux_surface_sync_handle_destroy(struct wl_resource *resource) {
 
 void _linux_surface_res_release_handle_destroy(struct wl_resource *resource) {
   /* 1. Retrieve internal surface handle */
-  struct vt_surface_release_t* release =
+  struct vt_surface_release_t *release =
       resource ? wl_resource_get_user_data(resource) : NULL;
 
   if (!release) {
     return;
   }
 
-  if(release->pending_surface && release->pending_surface->pending.release == release) 
+  if (release->pending_surface &&
+      release->pending_surface->pending.release == release)
     release->pending_surface->pending.release = NULL;
 
-  if(release->pending_surface) {
-    VT_TRACE(
-        release->pending_surface->comp->log,
-        "linux_surface_release.resource_destroy: destroyed release resource %p.",
-        resource);
+  if (release->pending_surface) {
+    VT_TRACE(release->pending_surface->comp->log,
+             "linux_surface_release.resource_destroy: destroyed release "
+             "resource %p.",
+             resource);
   }
-
 }
 
 /* ===================================================

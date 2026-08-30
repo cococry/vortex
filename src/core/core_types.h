@@ -58,13 +58,32 @@ struct vt_backend_interface_t {
 };
 
 struct vt_backend_t {
-  void (*on_output_change)(struct vt_backend_t *backend, struct vt_output_t* changed);
+  void (*on_output_change)(struct vt_backend_t *backend,
+                           struct vt_output_t  *changed);
   void                         *user_data;
   struct vt_backend_interface_t impl;
 
   struct vt_compositor_t *comp;
 
   enum vt_backend_platform_t platform;
+};
+
+enum vt_output_mode_aspect_ratio_t {
+  WESTON_MODE_PIC_AR_NONE = 0,    /* DRM_MODE_PICTURE_ASPECT_NONE */
+  WESTON_MODE_PIC_AR_4_3 = 1,     /* DRM_MODE_PICTURE_ASPECT_4_3 */
+  WESTON_MODE_PIC_AR_16_9 = 2,    /* DRM_MODE_PICTURE_ASPECT_16_9 */
+  WESTON_MODE_PIC_AR_64_27 = 3,   /* DRM_MODE_PICTURE_ASPECT_64_27 */
+  WESTON_MODE_PIC_AR_256_135 = 4, /* DRM_MODE_PICTURE_ASPECT_256_135*/
+};
+
+struct vt_output_mode_t {
+  uint32_t flags;
+  /** Picture aspect ratio.*/
+  enum vt_output_mode_aspect_ratio_t aspect_ratio;
+  int32_t                            width;   /**< Width in pixels. */
+  int32_t                            height;  /**< Height in pixels. */
+  uint32_t                           refresh; /**< Refresh rate in mHz. */
+  struct wl_list                     link; /**< in weston_output::mode_list */
 };
 
 struct vt_output_t {
@@ -89,6 +108,33 @@ struct vt_output_t {
   pixman_box32_t cached_damage[VT_MAX_DAMAGE_RECTS];
   int32_t        n_damage_boxes;
   bool           needs_damage_rebuild;
+
+  struct {
+    struct wl_global *global;
+    struct wl_list resources;
+  } proto;
+
+  uint32_t transform;
+  int32_t  native_scale;
+  int32_t  current_scale;
+  int32_t  original_scale;
+
+  struct {
+    int32_t mm_width;
+    int32_t mm_height;
+
+    // WL_OUTPUT_TRANSFORM 
+    uint32_t transform;
+
+    char    *make;
+    char    *model;
+    char    *name;
+
+    char    *serial_number; 
+    uint32_t subpixel;
+
+    struct wl_list modes;
+  } physical;
 };
 
 struct vt_compositor_t {

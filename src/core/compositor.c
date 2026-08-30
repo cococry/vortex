@@ -645,20 +645,21 @@ static void _sig_handler(int sig) {
   raise(sig);
 }
 
-static void _handle_output_changed_backend(struct vt_backend_t* backend, struct vt_output_t* output) {
+static void _handle_output_changed_backend(struct vt_backend_t *backend,
+                                           struct vt_output_t  *output) {
   (void)backend;
   (void)output;
-  if(backend->comp->root_node) {
+  if (backend->comp->root_node) {
     uint32_t            root_w = 0, root_h = 0;
     struct vt_output_t *output;
     wl_list_for_each(output, &backend->comp->outputs, link_global) {
       root_w += output->width;
       root_h += output->height;
     }
-    backend->comp->root_node->rect.width = root_w; 
-    backend->comp->root_node->rect.height = root_h; 
+    backend->comp->root_node->rect.width = root_w;
+    backend->comp->root_node->rect.height = root_h;
   }
-} 
+}
 
 bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
   vt_util_arena_init(&c->arena, 1024 * 1024 * 2);
@@ -708,8 +709,8 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
     c->n_virtual_outputs = 1;
 
   _vt_comp_load_backend(c, backend_str, c->_cmd_line_backend_path);
-  
-  c->backend->on_output_change = _handle_output_changed_backend; 
+
+  c->backend->on_output_change = _handle_output_changed_backend;
 
   if (!_vt_comp_wl_init(c)) {
     VT_ERROR(c->log, "Failed to initialize wayland state.");
@@ -722,13 +723,11 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
       c->session->impl.init(c->session);
   }
 
-
   // Initialize backend
   if (!c->backend->impl.init(c->backend)) {
     VT_ERROR(c->log, "Failed to initialize compositor backend.");
     return false;
   }
-
 
   enum vt_input_backend_platform_t input_backend = VT_INPUT_UNKNOWN;
   switch (c->backend->platform) {

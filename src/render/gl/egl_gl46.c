@@ -524,17 +524,14 @@ bool _egl_send_surface_release_fences(struct vt_renderer_t *renderer,
       if (!release)
         continue;
 
-
       surf->sync.release = NULL;
 
-      zwp_linux_buffer_release_v1_send_fenced_release(release->res,
-          fence_fd);
+      zwp_linux_buffer_release_v1_send_fenced_release(release->res, fence_fd);
     }
-  
+
     // clean up the dup'ed native fence
     close(fence_fd);
   }
-
 
   return true;
 }
@@ -1355,79 +1352,65 @@ void renderer_end_scene_egl(struct vt_renderer_t *r,
 
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
 
-
   rn_end(egl->render);
 }
 
-void renderer_end_frame_egl(struct vt_renderer_t *r,
-                            struct vt_output_t *output,
-                            const pixman_box32_t *damaged,
-                            int32_t n_damaged)
-{
-    (void)damaged;
-    (void)n_damaged;
+void renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,
+                            const pixman_box32_t *damaged, int32_t n_damaged) {
+  (void)damaged;
+  (void)n_damaged;
 
-    if (!r || !output)
-        return;
+  if (!r || !output)
+    return;
 
-    if (!r->user_data) {
-        VT_ERROR(r->comp->log,
-                 "Renderer backend not initialized before ending frame.");
-        return;
-    }
+  if (!r->user_data) {
+    VT_ERROR(r->comp->log,
+             "Renderer backend not initialized before ending frame.");
+    return;
+  }
 
-    struct egl_backend_state_t *egl =
-        BACKEND_DATA(r, struct egl_backend_state_t);
+  struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
 
-    struct egl_output_state_t *egl_output =
-        (struct egl_output_state_t *)output->user_data_render;
+  struct egl_output_state_t *egl_output =
+      (struct egl_output_state_t *)output->user_data_render;
 
-    if (!egl || !egl_output || !output->render_surface)
-        return;
+  if (!egl || !egl_output || !output->render_surface)
+    return;
 
-    if(r->backend->comp->have_proto_dmabuf_explicit_sync && egl->has_explicit_sync_support) {
-      egl_output->end_sync = eglCreateSyncKHR_ptr(
-          egl->egl_dsp, 
-          EGL_SYNC_NATIVE_FENCE_ANDROID,
-          &(EGLint){EGL_NONE});
-    }
+  if (r->backend->comp->have_proto_dmabuf_explicit_sync &&
+      egl->has_explicit_sync_support) {
+    egl_output->end_sync = eglCreateSyncKHR_ptr(
+        egl->egl_dsp, EGL_SYNC_NATIVE_FENCE_ANDROID, &(EGLint){EGL_NONE});
+  }
 
+  glBindFramebuffer(GL_READ_FRAMEBUFFER, egl_output->fbo_id);
+  glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 
-    glBindFramebuffer(GL_READ_FRAMEBUFFER, egl_output->fbo_id);
-    glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+  glBlitFramebuffer(0, 0, output->width, output->height, 0, 0, output->width,
+                    output->height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
 
-    glBlitFramebuffer(
-        0, 0,
-        output->width, output->height,
-        0, 0,
-        output->width, output->height,
-        GL_COLOR_BUFFER_BIT,
-        GL_NEAREST
-    );
+  GLenum gl_err = glGetError();
+  if (gl_err != GL_NO_ERROR) {
+    VT_ERROR(r->comp->log,
+             "glBlitFramebuffer failed for output %p: GL error 0x%x", output,
+             gl_err);
+    return;
+  }
 
-    GLenum gl_err = glGetError();
-    if (gl_err != GL_NO_ERROR) {
-        VT_ERROR(r->comp->log,
-                 "glBlitFramebuffer failed for output %p: GL error 0x%x",
-                 output,
-                 gl_err);
-        return;
-    }
+  if (!eglSwapBuffers(egl->egl_dsp, output->render_surface)) {
+    VT_ERROR(r->comp->log,
+             "eglSwapBuffers failed for output %p: EGL error 0x%x", output,
+             eglGetError());
+    return;
+  }
 
-    if (!eglSwapBuffers(egl->egl_dsp, output->render_surface)) {
-        VT_ERROR(r->comp->log,
-                 "eglSwapBuffers failed for output %p: EGL error 0x%x",
-                 output,
-                 eglGetError());
-        return;
-    }
+  if (!_egl_send_surface_release_fences(r, output)) {
+    VT_ERROR(r->comp->log,
+             "Cannot release surface fences after render for output %p.",
+             output);
+  }
 
-
-    if(!_egl_send_surface_release_fences(r, output)) {
-      VT_ERROR(r->comp->log, "Cannot release surface fences after render for output %p.", output);
-    }
-
-    egl->render->drawcalls = 0;
+  egl->render->drawcalls = 0;
 }
 
 bool renderer_destroy_egl(struct vt_renderer_t *r) {

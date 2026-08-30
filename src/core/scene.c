@@ -211,13 +211,14 @@ static void  _composite_pass(struct vt_renderer_t   *renderer,
   r->impl.begin_scene(r, output);
 
   if (care_for_damage) {
-    r->impl.draw_rect(r, output->x, output->y, output->width, output->height, 0xffffff);
+    r->impl.draw_rect(r, output->x, output->y, output->width, output->height,
+                       0xffffff);
   } else {
     r->impl.set_clear_color(r, output, 0x000000);
   }
 
   vt_scene_node_render(renderer, output, root, true,
-                       _composite_scene_node_filter);
+                        _composite_scene_node_filter);
 
   struct vt_surface_t *cursor_focus =
       _get_focused_cursor_surface(renderer->comp->seat);

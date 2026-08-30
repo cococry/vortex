@@ -18,6 +18,7 @@
 #include "../../protocols/linux_dmabuf.h"
 #include "../../protocols/linux_explicit_sync.h"
 #include "../../protocols/wl_shm.h"
+#include "../../protocols/wl_output.h"
 #include "../../render/renderer.h"
 #include "xdg-shell-client-protocol.h"
 
@@ -40,8 +41,33 @@ typedef struct {
   struct xdg_surface  *parent_xdg_surface;
   struct xdg_toplevel *parent_xdg_toplevel;
   struct wl_callback  *parent_frame_cb;
-
 } wayland_output_state_t;
+
+typedef struct {
+  wayland_backend_state_t        *backend;
+  struct wl_list                  link;
+
+  struct wl_output *global;
+  uint32_t          id;
+
+  struct {
+    char    *make;
+    char    *model;
+    int32_t  width, height;
+    uint32_t subpixel;
+
+    struct wl_list modes;
+  } physical;
+
+  struct wl_callback* sync_cb;
+
+  int32_t  x, y;
+  uint32_t transform;
+  uint32_t scale;
+
+  struct vt_output_mode_t *preferred_mode;
+  struct vt_output_mode_t *current_mode;
+} parent_physical_output_t;
 
 static void _wl_parent_registry_add(void *data, struct wl_registry *reg,
                                     uint32_t id, const char *iface,
@@ -81,6 +107,16 @@ static bool _wl_backend_create_output(struct vt_backend_t *backend,
 
 static bool _wl_backend_init_active_outputs(struct vt_backend_t *backend);
 
+static void _wl_parent_output_geometry(
+    void *data, struct wl_output *output_proxy, int32_t x, int32_t y,
+    int32_t physical_width, int32_t physical_height, int32_t subpixel,
+    const char *make, const char *model, int32_t transform);
+
+static void _wl_parent_output_mode(void             *data,
+                                   struct wl_output *wl_output_proxy,
+                                   uint32_t flags, int32_t width,
+                                   int32_t height, int32_t refresh);
+
 static struct wl_callback_listener parent_surface_frame_listener = {
     .done = _wl_parent_frame_done};
 
@@ -102,6 +138,50 @@ static const struct xdg_toplevel_listener parent_toplevel_listener = {
     .close = _wl_parent_xdg_toplevel_close,
 };
 
+static const struct wl_output_listener output_listener = {
+    _wl_parent_output_geometry, _wl_parent_output_mode};
+
+
+static void
+output_sync_callback(void *data, struct wl_callback *callback, uint32_t unused)
+{
+  parent_physical_output_t *output = data;
+
+  assert(output->sync_cb == callback);
+  wl_callback_destroy(callback);
+  output->sync_cb = NULL;
+}
+
+static const struct wl_callback_listener output_sync_listener = {
+	output_sync_callback
+};
+
+
+static void _wl_register_output(struct wl_registry* reg, wayland_backend_state_t* backend, uint32_t id)
+{
+  parent_physical_output_t *output =
+      VT_ALLOC(backend->comp, sizeof(parent_physical_output_t));
+
+  output->backend = backend;
+
+  output->id = id;
+  output->global = wl_registry_bind(reg, id, &wl_output_interface, 1);
+  if (!output->global) {
+    return;
+  }
+
+  wl_output_add_listener(output->global, &output_listener, output);
+
+  output->scale = 0;
+  output->transform = WL_OUTPUT_TRANSFORM_NORMAL;
+  output->physical.subpixel = WL_OUTPUT_SUBPIXEL_UNKNOWN;
+
+  wl_list_init(&output->physical.modes);
+
+  output->sync_cb = wl_display_sync(backend->parent_display);
+  wl_callback_add_listener(output->sync_cb, &output_sync_listener, output);
+}
+
 void _wl_parent_registry_add(void *data, struct wl_registry *reg, uint32_t id,
                              const char *iface, uint32_t ver) {
   wayland_backend_state_t *wl = data;
@@ -111,6 +191,9 @@ void _wl_parent_registry_add(void *data, struct wl_registry *reg, uint32_t id,
   } else if (strcmp(iface, xdg_wm_base_interface.name) == 0) {
     wl->parent_xdg_wm_base =
         wl_registry_bind(reg, id, &xdg_wm_base_interface, 1);
+  }  
+  else if (strcmp(iface, wl_output_interface.name) == 0) {
+    _wl_register_output(reg, wl, id);
   } else if (strcmp(iface, wl_seat_interface.name) == 0) {
     wl->parent_seat = wl_registry_bind(reg, id, &wl_seat_interface, 7);
     wl->comp->session->native_handle = wl->parent_seat;
@@ -143,7 +226,7 @@ static void _output_handle_render_resize(struct vt_output_t *output, int32_t w,
     output->resize_pending = true;
     output->needs_damage_rebuild = true;
   }
-  if(output->backend->on_output_change)
+  if (output->backend->on_output_change)
     output->backend->on_output_change(output->backend, output);
 
   vt_comp_schedule_repaint(r->comp, output);
@@ -236,13 +319,11 @@ bool _wl_backend_init_active_outputs(struct vt_backend_t *backend) {
   for (uint32_t i = 0; i < backend->comp->n_virtual_outputs; i++) {
     struct vt_output_t *output =
         VT_ALLOC(backend->comp, sizeof(struct vt_output_t));
-    output->needs_damage_rebuild = true;
-    pixman_region32_init(&output->damage);
-    output->backend = backend;
     if (!_wl_backend_create_output(backend, output, NULL)) {
       VT_ERROR(backend->comp->log, "Failed to setup internal WL output.");
       continue;
     }
+
     if (!backend->comp->renderer->impl.setup_renderable_output(
             backend->comp->renderer, output)) {
       VT_ERROR(backend->comp->log,
@@ -266,6 +347,96 @@ bool _wl_backend_init_active_outputs(struct vt_backend_t *backend) {
   return true;
 }
 
+static const char *wl_output_transform_name(int32_t transform)
+{
+  switch (transform) {
+  case WL_OUTPUT_TRANSFORM_NORMAL:      return "normal";
+  case WL_OUTPUT_TRANSFORM_90:          return "90";
+  case WL_OUTPUT_TRANSFORM_180:         return "180";
+  case WL_OUTPUT_TRANSFORM_270:         return "270";
+  case WL_OUTPUT_TRANSFORM_FLIPPED:     return "flipped";
+  case WL_OUTPUT_TRANSFORM_FLIPPED_90:  return "flipped-90";
+  case WL_OUTPUT_TRANSFORM_FLIPPED_180: return "flipped-180";
+  case WL_OUTPUT_TRANSFORM_FLIPPED_270: return "flipped-270";
+  default:                              return "unknown";
+  }
+}
+
+static void _wl_parent_output_geometry(
+    void *data, struct wl_output *output_proxy, int32_t x, int32_t y,
+    int32_t physical_width, int32_t physical_height, int32_t subpixel,
+    const char *make, const char *model, int32_t transform) {
+  parent_physical_output_t *output = data;
+
+  output->x = x;
+  output->y = y;
+  output->physical.width = physical_width;
+  output->physical.height = physical_height;
+  output->physical.subpixel = subpixel;
+
+  free(output->physical.make);
+  output->physical.make = strdup(make);
+  free(output->physical.model);
+  output->physical.model = strdup(model);
+
+  output->transform = transform;
+
+  VT_TRACE(
+    output->backend->comp->log,
+    "Parent wl_output geometry: "
+    "output=%p proxy=%p "
+    "pos=(%d,%d), physical=%dx%d mm, "
+    "subpixel=%d, make=\"%s\", model=\"%s\", "
+    "transform=%s (%d)",
+    (void *)output,
+    (void *)output_proxy,
+    x, y,
+    physical_width, physical_height,
+    subpixel,
+    make ? make : "(null)",
+    model ? model : "(null)",
+    wl_output_transform_name(transform),
+    transform);
+}
+
+static struct vt_output_mode_t *find_output_mode(struct wl_list *list,
+                                                 int32_t width, int32_t height,
+                                                 uint32_t refresh) {
+  struct vt_output_mode_t *mode;
+
+  wl_list_for_each(mode, list, link) {
+    if (mode->width == width && mode->height == height &&
+        mode->refresh == refresh)
+      return mode;
+  }
+
+  mode = calloc(1, sizeof(*mode));
+
+  if (!mode)
+    return NULL;
+
+  mode->width = width;
+  mode->height = height;
+  mode->refresh = refresh;
+  wl_list_insert(list, &mode->link);
+
+  return mode;
+}
+
+static void _wl_parent_output_mode(void             *data,
+                                   struct wl_output *wl_output_proxy,
+                                   uint32_t flags, int32_t width,
+                                   int32_t height, int32_t refresh) {
+  parent_physical_output_t *output = data;
+
+  struct vt_output_mode_t *mode = find_output_mode(
+      &output->physical.modes, width, height, refresh);
+  if (!mode)
+    return;
+
+  mode->flags = flags;
+}
+
 bool _wl_backend_create_output(struct vt_backend_t *backend,
                                struct vt_output_t *output, void *data) {
   if (!backend || !output)
@@ -277,20 +448,31 @@ bool _wl_backend_create_output(struct vt_backend_t *backend,
     return false;
   }
 
+  output->needs_damage_rebuild = true;
+  pixman_region32_init(&output->damage);
+  output->backend = backend;
+  wl_list_init(&output->physical.modes);
+  wl_list_init(&output->proto.resources);
+
   wayland_backend_state_t *wl = BACKEND_DATA(backend, wayland_backend_state_t);
   wayland_output_state_t  *wl_output =
       BACKEND_DATA(output, wayland_output_state_t);
+
   wl_output->parent_surface =
       wl_compositor_create_surface(wl->parent_compositor);
+
   wl_output->parent_xdg_surface = xdg_wm_base_get_xdg_surface(
       wl->parent_xdg_wm_base, wl_output->parent_surface);
+
   xdg_surface_add_listener(wl_output->parent_xdg_surface,
                            &parent_xdg_surface_listener, output);
 
   wl_output->parent_xdg_toplevel =
       xdg_surface_get_toplevel(wl_output->parent_xdg_surface);
+
   xdg_toplevel_add_listener(wl_output->parent_xdg_toplevel,
                             &parent_toplevel_listener, output);
+
   char name[64];
   sprintf(name, "Vortex Nested (%i)", wl_list_length(&backend->comp->outputs));
   xdg_toplevel_set_title(wl_output->parent_xdg_toplevel, name);
@@ -303,10 +485,15 @@ bool _wl_backend_create_output(struct vt_backend_t *backend,
 
   vt_comp_schedule_repaint(backend->comp, output);
 
+  VT_TRACE(backend->comp->log, "GOT HERE")
+
   // Trigger initial configure
   wl_surface_commit(wl_output->parent_surface);
+  VT_TRACE(backend->comp->log, "GOT HERE, wl: %p, parent_display: %p",
+      wl, wl->parent_display);
   // Get the initial configure immidiately
   wl_display_roundtrip(wl->parent_display);
+  VT_TRACE(backend->comp->log, "GOT HERE 2")
 
   output->native_window = wl_output->parent_surface;
 
@@ -317,6 +504,23 @@ bool _wl_backend_create_output(struct vt_backend_t *backend,
   output->width = _WL_DEFAULT_OUTPUT_WIDTH;
   output->height = _WL_DEFAULT_OUTPUT_HEIGHT;
   output->resize_pending = true;
+
+  output->physical.make = strdup("Vortex");
+  output->physical.model = strdup("Vortex Nested Output");
+  output->physical.name = strdup("VORTEX-0");
+
+  output->physical.mm_width = 0;
+  output->physical.mm_height = 0;
+  output->physical.subpixel = WL_OUTPUT_SUBPIXEL_UNKNOWN;
+  output->physical.transform = WL_OUTPUT_TRANSFORM_NORMAL;
+
+  output->current_scale = 1;
+
+  if (!vt_proto_wl_output_init(output)) {
+    VT_ERROR(backend->comp->log,
+             "Failed to create wl_output global for output.");
+    return false;
+  }
 
   wl_list_insert(&backend->comp->outputs, &output->link_global);
 
