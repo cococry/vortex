@@ -147,7 +147,7 @@ void _wl_handle_keybind_exit(struct vt_compositor_t *comp, void *user_data) {
 }
 void _wl_handle_keybind_term(struct vt_compositor_t *comp, void *user_data) {
   char buf[64];
-  snprintf(buf, sizeof(buf), "WAYLAND_DISPLAY=wayland-1 weston-terminal &");
+  snprintf(buf, sizeof(buf), "weston-terminal &");
   VT_TRACE(comp->log, "Doing: '%s'", buf);
   system(buf);
 }
