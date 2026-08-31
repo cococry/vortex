@@ -2,6 +2,7 @@
 
 #include "../protocols/linux_dmabuf.h"
 #include "../protocols/xdg_shell.h"
+#include "../protocols/wl_subcompositor.h"
 #include "scene.h"
 #include <wayland-server.h>
 #define VT_MAX_FRAME_CBS 8
@@ -23,8 +24,14 @@ struct vt_surface_release_t {
 struct vt_surface_pending_state_t {
   int32_t                      acquire_fence_fd;
   struct vt_surface_release_t *release;
+  pixman_region32_t            input_region;
+  bool                         input_region_changed;
+  bool                         input_region_set;
 
   struct wl_resource *buf_res;
+
+  int32_t dx;
+  int32_t dy;
 };
 
 enum vt_surface_type_t {
@@ -65,7 +72,9 @@ struct vt_surface_t {
   pixman_region32_t current_damage;
   pixman_region32_t pending_damage;
   pixman_region32_t opaque_region;
+
   pixman_region32_t input_region;
+  bool              input_region_set;
 
   int32_t buffer_transform;
   int32_t buffer_scale;
@@ -87,6 +96,10 @@ struct vt_surface_t {
   enum vt_surface_type_t type;
 
   struct vt_scene_node_t *scene_node;
+
+  struct wl_list subsurfaces;
+
+  struct vt_subsurface_t* subsurface;
 };
 
 void vt_surface_mapped(struct vt_surface_t *surf);

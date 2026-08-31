@@ -1,4 +1,5 @@
 #include "wl_surface.h"
+#include "pixman.h"
 #include "src/core/compositor.h"
 #include "src/core/scene.h"
 #include "src/core/surface.h"
@@ -95,8 +96,8 @@ void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
 
   surf->pending.buf_res = buffer;
 
-  surf->dx = x;
-  surf->dy = y;
+  surf->pending.dx = x;
+  surf->pending.dy = y;
 }
 
 void _wl_surface_commit(struct wl_client   *client,
@@ -213,6 +214,7 @@ void _wl_surface_commit(struct wl_client   *client,
              surf->geom_width, surf->geom_height);
     }
   }
+
   /* 4. Calculate current damage region  */
   if (!surf->_mask_outputs_visible_on) {
     /* Re-populate the output bitfield of the surface */
@@ -222,15 +224,24 @@ void _wl_surface_commit(struct wl_client   *client,
       output->needs_damage_rebuild = true;
     }
   }
-  if (surf->type == VT_SURFACE_TYPE_CURSOR) {
-    struct vt_pointer_t *ptr;
-    wl_list_for_each(ptr, &surf->comp->seat->pointers, link) {
-      if (ptr->cursor.surf == surf) {
-        ptr->cursor.hotspot_x -= surf->dx;
-        ptr->cursor.hotspot_y -= surf->dy;
-      }
-    }
+
+  /* Apply committed surface offset. */
+  int32_t dx = surf->pending.dx;
+  int32_t dy = surf->pending.dy;
+
+  surf->dx = dx;
+  surf->dy = dy;
+
+  if (surf->type == VT_SURFACE_TYPE_CURSOR &&
+      surf->comp->seat->cursor.surf == surf) {
+
+    surf->comp->seat->cursor.hotspot_x -= dx;
+    surf->comp->seat->cursor.hotspot_y -= dy;
   }
+
+  /* consumed */
+  surf->pending.dx = 0;
+  surf->pending.dy = 0;
 
   /* 5. If the surface has not yet been mapped and has a
    * valid XDG Surface and XDG Surface role, trigger a map request. */
@@ -238,6 +249,12 @@ void _wl_surface_commit(struct wl_client   *client,
     surf->mapped = true;
     vt_surface_mapped(surf);
   }
+
+  if (surf->subsurface) {
+    surf->mapped = surf->has_buffer;
+  }
+  if (surf->type == VT_SURFACE_TYPE_CURSOR)
+    surf->mapped = surf->has_buffer;
 
   bool needs_repaint = has_damage || has_new_buffer;
 
@@ -260,6 +277,16 @@ void _wl_surface_commit(struct wl_client   *client,
       vt_comp_schedule_repaint(surf->comp, output);
     }
     pixman_region32_fini(&global_damage);
+  }
+
+  if (surf->pending.input_region_changed) {
+    surf->input_region_set = surf->pending.input_region_set;
+
+    pixman_region32_copy(&surf->input_region, &surf->pending.input_region);
+
+    pixman_region32_clear(&surf->pending.input_region);
+
+    surf->pending.input_region_changed = false;
   }
 
   struct vt_surface_release_t *release = surf->pending.release;
@@ -407,24 +434,32 @@ void _wl_surface_set_input_region(struct wl_client   *client,
    * events. */
   struct vt_surface_t *surf =
       resource ? wl_resource_get_user_data(resource) : NULL;
+
   if (!surf)
     return;
 
+  surf->pending.input_region_changed = true;
+  surf->pending.input_region_set = region != NULL;
+
   /* 1. A NULL region means the entire surface accepts input events.
-   * If the region is set, we copy the internal handler of the given
-   * region resource (pixman_region32_t) into the input_region region
-   * of the surface. */
+   * If the region is not NULL, we copy the user data of the
+   * region resource (pixman_region32_t) into the pending input_region
+   * of the surface. By default we clear the pending input_region. */
+
+  pixman_region32_clear(&surf->pending.input_region);
+
   if (region) {
     struct vt_region_t *r = wl_resource_get_user_data(region);
-    pixman_region32_copy(&surf->input_region, &r->region);
-  } else {
-    pixman_region32_init_rect(&surf->input_region, 0, 0, surf->width,
-                              surf->height);
+
+    if (!r)
+      return;
+
+    pixman_region32_copy(&surf->pending.input_region, &r->region);
   }
 
   VT_TRACE(surf->comp->log,
-           "surface.set_input_region: updated input region for surface %p",
-           surf);
+           "surface.set_input_region: pending input region for surface %p",
+           (void *)surf);
 }
 
 void _wl_surface_set_buffer_transform(struct wl_client   *client,
@@ -546,7 +581,8 @@ void _wl_surface_handle_resource_destroy(struct wl_resource *resource) {
   /* Deallocate pixman regions */
   pixman_region32_fini(&surf->pending_damage);
   pixman_region32_fini(&surf->current_damage);
-  pixman_region32_fini(&surf->input_region);
+  pixman_region32_init(&surf->input_region);
+  pixman_region32_init(&surf->pending.input_region);
   pixman_region32_fini(&surf->opaque_region);
 
   /* Destroy the attached render texture */

@@ -34,3 +34,5 @@ void vt_comp_damage_entire_surface(struct vt_compositor_t *comp,
 
 void vt_comp_surf_mark_damaged(struct vt_compositor_t *comp,
                                struct vt_surface_t    *surf);
+
+bool vt_comp_surface_is_effectively_mapped(struct vt_surface_t *surf);

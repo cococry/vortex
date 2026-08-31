@@ -16,12 +16,22 @@ struct vt_keybind_t {
 
 struct vt_seat_focus_t {
   struct vt_surface_t *surf;
-  struct wl_resource  *res;
+  struct wl_client *client;
 };
 
 struct vt_kb_modifier_states_t {
   uint32_t depressed, latched, locked, group;
 };
+
+struct vt_seat_cursor_t {
+    struct vt_surface_t *surf;
+
+    struct vt_pointer_t *owner;
+
+    int32_t hotspot_x;
+    int32_t hotspot_y;
+};
+
 
 struct vt_seat_t {
   struct wl_global *global;
@@ -39,6 +49,8 @@ struct vt_seat_t {
   struct vt_kb_modifier_states_t _last_mods;
 
   double pointer_x, pointer_y;
+
+  struct vt_seat_cursor_t cursor;
 };
 
 struct vt_keyboard_t {
@@ -49,19 +61,12 @@ struct vt_keyboard_t {
   uint32_t _keymap_size;
 };
 
-struct vt_cursor_t {
-  struct vt_surface_t *surf;
-  bool                 visible;
-  int32_t              hotspot_x, hotspot_y;
-};
-
 struct vt_pointer_t {
-  struct vt_seat_t   *seat;
-  struct wl_resource *res;
-  struct wl_list      link;
+    struct vt_seat_t *seat;
+    struct wl_resource *res;
+    struct wl_list link;
 
-  struct vt_cursor_t cursor;
-  wl_fixed_t         px, py;
+    uint32_t enter_serial;
 };
 
 bool vt_seat_init(struct vt_seat_t *seat);

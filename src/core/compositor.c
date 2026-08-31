@@ -4,9 +4,10 @@
 #include "src/input/input.h"
 #include "src/input/wl_seat.h"
 #include "src/protocols/linux_dmabuf.h"
+#include "src/protocols/wl_data_device.h"
+#include "src/protocols/wl_subcompositor.h"
 #include "src/protocols/wl_surface.h"
 #include "src/protocols/xdg_shell.h"
-#include "src/protocols/wl_data_device.h"
 #include "src/render/renderer.h"
 
 #include <dirent.h>
@@ -315,11 +316,9 @@ const char *_vt_comp_handle_cmd_flags(struct vt_compositor_t *c, int argc,
           if (strcmp(argv[j], "linux-dmabuf") == 0) {
             c->have_proto_dmabuf = false;
             disabled = true;
-            VT_WARN(c->log, "Disabled protcol '%s'", argv[j]);
           } else if (strcmp(argv[j], "linux-dmabuf-explicit-sync") == 0) {
             c->have_proto_dmabuf_explicit_sync = false;
             disabled = true;
-            VT_WARN(c->log, "Disabled protocol '%s'", argv[j]);
           } else {
             VT_ERROR(c->log,
                      "Protocol %s is not valid, valid protocols are: "
@@ -460,11 +459,14 @@ void _vt_comp_wl_surface_create(struct wl_client   *client,
   surf->type = VT_SURFACE_TYPE_NORMAL;
   wl_list_init(&surf->link_focus);
 
-  // Init the damage regions
+  wl_list_init(&surf->subsurfaces);
+
+  // Init the regions
   pixman_region32_init(&surf->current_damage);
   pixman_region32_init(&surf->pending_damage);
   pixman_region32_init(&surf->opaque_region);
   pixman_region32_init(&surf->input_region);
+  pixman_region32_init(&surf->pending.input_region);
 
   // Add the surface to list of surfaces in the compositor
   wl_list_insert(&c->surfaces, &surf->link);
@@ -477,9 +479,8 @@ void _vt_comp_wl_surface_create(struct wl_client   *client,
     VT_ERROR(c->log, "compositor.surface_create: Failed to create surface.");
     return;
   }
-  if(c->have_proto_dmabuf)
+  if (c->have_proto_dmabuf)
     vt_proto_linux_dmabuf_v1_set_surface_feedback(surf);
-
 
   vt_scene_node_add_child(c, c->root_node, vt_scene_node_create(c, surf));
 }
@@ -618,6 +619,11 @@ bool _vt_comp_wl_init(struct vt_compositor_t *c) {
 
   if (!vt_proto_wl_data_device_init(c)) {
     VT_ERROR(c->log, "Cannot initialize Wayland data device protocol.");
+    return false;
+  }
+
+  if (!vt_proto_wl_subcompositor_init(c)) {
+    VT_ERROR(c->log, "Cannot initialize Wayland subcompositor protocol.");
     return false;
   }
 
@@ -788,6 +794,14 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
 
   // wl_list_insert(&c->surfaces, &c->root_cursor->link);
 
+  if (!c->have_proto_dmabuf) {
+    VT_WARN(c->log, "Running vortex without support for linux-dmabuf protocol");
+  }
+  if (!c->have_proto_dmabuf_explicit_sync) {
+    VT_WARN(c->log, "Running vortex without support for "
+                    "linux-dmabuf-explicit-sync protocol");
+  }
+
   return true;
 }
 
@@ -909,23 +923,66 @@ void vt_comp_invalidate_all_surfaces(struct vt_compositor_t *comp) {
   }
 }
 
+static bool _surface_accepts_input(struct vt_surface_t *surf, double sx,
+                                   double sy) {
+  if (!surf->input_region_set) {
+    return sx >= 0 && sy >= 0 && sx < surf->width && sy < surf->height;
+  }
+
+  return pixman_region32_contains_point(&surf->input_region, (int32_t)sx,
+                                        (int32_t)sy, NULL);
+}
+
+static struct vt_surface_t *_scene_pick_surface(struct vt_scene_node_t *node,
+                                                double parent_x,
+                                                double parent_y, double px,
+                                                double py) {
+  if (!node)
+    return NULL;
+
+  double x = parent_x + node->rect.x;
+  double y = parent_y + node->rect.y;
+
+  for (int i = (int)node->child_count - 1; i >= 0; i--) {
+    struct vt_surface_t *surf =
+        _scene_pick_surface(node->childs[i], x, y, px, py);
+
+    if (surf)
+      return surf;
+  }
+
+  if (!node->surf)
+    return NULL;
+
+  struct vt_surface_t *surf = node->surf;
+
+  if (!vt_comp_surface_is_effectively_mapped(surf))
+    return NULL;
+
+  if (surf->type != VT_SURFACE_TYPE_NORMAL)
+    return NULL;
+
+  double w = surf->width;
+  double h = surf->height;
+
+  if (px < x || py < y || px >= x + surf->width || py >= y + surf->height) {
+    return NULL;
+  }
+
+  if (!_surface_accepts_input(surf, px - x, py - y)) {
+    return NULL;
+  }
+
+  return surf;
+}
+
 struct vt_surface_t *vt_comp_pick_surface(struct vt_compositor_t *comp,
                                           double x, double y) {
-  struct vt_surface_t *surf;
-  wl_list_for_each(surf, &comp->surfaces, link) {
-    if (!surf->mapped)
-      continue;
-    if (surf->type != VT_SURFACE_TYPE_NORMAL)
-      continue;
-    if (x >= surf->geom_x && y >= surf->geom_y &&
-        x < surf->geom_x +
-                (surf->geom_width ? surf->geom_width : surf->width) &&
-        y < surf->geom_y +
-                (surf->geom_height ? surf->geom_height : surf->height)) {
-      return surf;
-    }
-  }
-  return NULL;
+  struct vt_surface_t *surf = _scene_pick_surface(comp->root_node, 0, 0, x, y);
+
+  VT_TRACE(comp->log, "Picked surface: %p", (void *)surf);
+
+  return surf;
 }
 
 void vt_comp_damage_entire_surface(struct vt_compositor_t *comp,
@@ -971,4 +1028,18 @@ void vt_comp_surf_mark_damaged(struct vt_compositor_t *comp,
     output->needs_damage_rebuild = true;
     vt_comp_schedule_repaint(comp, output);
   }
+}
+
+bool vt_comp_surface_is_effectively_mapped(struct vt_surface_t *surf) {
+  if (!surf || !surf->mapped)
+    return false;
+
+  while (surf->subsurface) {
+    surf = surf->subsurface->parent;
+
+    if (!surf || !surf->mapped)
+      return false;
+  }
+
+  return true;
 }
