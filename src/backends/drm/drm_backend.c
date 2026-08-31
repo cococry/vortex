@@ -34,6 +34,7 @@
 #include "protocols/linux_dmabuf.h"
 #include "protocols/linux_explicit_sync.h"
 #include "protocols/wl_shm.h"
+#include "protocols/wl_output.h"
 #include "render/dmabuf.h"
 
 #include <linux/input-event-codes.h>
@@ -727,35 +728,154 @@ bool _drm_init_active_outputs_for_device(struct drm_backend_state_t *drm) {
   return true;
 }
 
+static struct vt_output_mode_t *
+_drm_create_output_mode(struct wl_list *list, drmModeModeInfo *mode_info) {
+  if (!list || !mode_info)
+    return NULL;
+
+  struct vt_output_mode_t *mode = calloc(1, sizeof(*mode));
+  if (!mode)
+    return NULL;
+
+  mode->width = mode_info->hdisplay;
+  mode->height = mode_info->vdisplay;
+
+  mode->refresh = mode_info->vrefresh * 1000;
+
+  mode->flags = 0;
+
+  if (mode_info->type & DRM_MODE_TYPE_PREFERRED)
+    mode->flags |= WL_OUTPUT_MODE_PREFERRED;
+
+  switch (mode_info->flags & DRM_MODE_FLAG_PIC_AR_MASK) {
+  case DRM_MODE_FLAG_PIC_AR_4_3:
+    mode->aspect_ratio = VT_MODE_PIC_AR_4_3;
+    break;
+
+  case DRM_MODE_FLAG_PIC_AR_16_9:
+    mode->aspect_ratio = VT_MODE_PIC_AR_16_9;
+    break;
+
+  case DRM_MODE_FLAG_PIC_AR_64_27:
+    mode->aspect_ratio = VT_MODE_PIC_AR_64_27;
+    break;
+
+  case DRM_MODE_FLAG_PIC_AR_256_135:
+    mode->aspect_ratio = VT_MODE_PIC_AR_256_135;
+    break;
+
+  case DRM_MODE_FLAG_PIC_AR_NONE:
+  default:
+    mode->aspect_ratio = VT_MODE_PIC_AR_NONE;
+    break;
+  }
+
+  wl_list_insert(list, &mode->link);
+
+  return mode;
+}
+
+static uint32_t _drm_subpixel_to_wl(drmModeSubPixel subpixel) {
+  switch (subpixel) {
+  case DRM_MODE_SUBPIXEL_HORIZONTAL_RGB:
+    return WL_OUTPUT_SUBPIXEL_HORIZONTAL_RGB;
+  case DRM_MODE_SUBPIXEL_HORIZONTAL_BGR:
+    return WL_OUTPUT_SUBPIXEL_HORIZONTAL_BGR;
+  case DRM_MODE_SUBPIXEL_VERTICAL_RGB:
+    return WL_OUTPUT_SUBPIXEL_VERTICAL_RGB;
+  case DRM_MODE_SUBPIXEL_VERTICAL_BGR:
+    return WL_OUTPUT_SUBPIXEL_VERTICAL_BGR;
+  case DRM_MODE_SUBPIXEL_NONE:
+    return WL_OUTPUT_SUBPIXEL_NONE;
+  case DRM_MODE_SUBPIXEL_UNKNOWN:
+  default:
+    return WL_OUTPUT_SUBPIXEL_UNKNOWN;
+  }
+}
+
+static const char *
+_drm_connector_type_name(uint32_t type)
+{
+    switch (type) {
+    case DRM_MODE_CONNECTOR_VGA:         return "VGA";
+    case DRM_MODE_CONNECTOR_DVII:        return "DVI-I";
+    case DRM_MODE_CONNECTOR_DVID:        return "DVI-D";
+    case DRM_MODE_CONNECTOR_DVIA:        return "DVI-A";
+    case DRM_MODE_CONNECTOR_Composite:   return "Composite";
+    case DRM_MODE_CONNECTOR_SVIDEO:      return "SVIDEO";
+    case DRM_MODE_CONNECTOR_LVDS:        return "LVDS";
+    case DRM_MODE_CONNECTOR_Component:   return "Component";
+    case DRM_MODE_CONNECTOR_9PinDIN:     return "DIN";
+    case DRM_MODE_CONNECTOR_DisplayPort: return "DP";
+    case DRM_MODE_CONNECTOR_HDMIA:       return "HDMI-A";
+    case DRM_MODE_CONNECTOR_HDMIB:       return "HDMI-B";
+    case DRM_MODE_CONNECTOR_TV:          return "TV";
+    case DRM_MODE_CONNECTOR_eDP:         return "eDP";
+    case DRM_MODE_CONNECTOR_VIRTUAL:     return "Virtual";
+    case DRM_MODE_CONNECTOR_DSI:         return "DSI";
+#ifdef DRM_MODE_CONNECTOR_DPI
+    case DRM_MODE_CONNECTOR_DPI:         return "DPI";
+#endif
+    default:                             return "Unknown";
+    }
+}
+
 bool _drm_create_output_for_device(struct drm_backend_state_t *drm,
                                    struct vt_output_t *output, void *data) {
   if (!drm || !output || !data)
     return false;
+  
+  struct vt_compositor_t *comp = drm->comp;
 
-  VT_TRACE(drm->comp->log, "Creating DRM internal output.");
+  VT_TRACE(comp->log, "Creating DRM internal output.");
   if (!(output->user_data =
             VT_ALLOC(drm->comp, sizeof(struct drm_output_state_t)))) {
     return false;
   }
 
+  wl_list_init(&output->physical.modes);
+  wl_list_init(&output->proto.resources);
+
   drmModeConnector *conn = (drmModeConnector *)data;
-  drmModeModeInfo   mode;
-  bool              found = false;
+
+  struct vt_output_mode_t* fallback = NULL;
+  struct vt_output_mode_t* selected = NULL;
+
+  drmModeModeInfo* selected_drm = NULL;
+
   for (int j = 0; j < conn->count_modes; j++) {
-    if (conn->modes[j].type & DRM_MODE_TYPE_PREFERRED) {
-      mode = conn->modes[j];
-      found = true;
-      break;
+    drmModeModeInfo  *drm_mode = &conn->modes[j];
+    struct vt_output_mode_t *mode =
+        _drm_create_output_mode(&output->physical.modes, drm_mode);
+
+    if(!mode) return false;
+
+    if(!fallback) {
+      fallback = mode;
+    }
+
+    if (!selected && conn->modes[j].type & DRM_MODE_TYPE_PREFERRED) {
+      selected = mode;
+      selected_drm = drm_mode;
     }
   }
-  if (!found) {
-    // Fallback to the first mode if none marked preferred
-    mode = conn->modes[0];
+  if (!fallback) {
+    VT_ERROR(comp->log, "Connector %u has no modes", conn->connector_id);
+    return false;
   }
+
+  if (!selected) {
+    // Fallback to the first mode if none marked preferred
+    selected_drm = &conn->modes[0];
+    selected = fallback;
+  }
+
+  selected->flags |= WL_OUTPUT_MODE_CURRENT;
+
   struct drm_output_state_t *drm_output =
       BACKEND_DATA(output, struct drm_output_state_t);
-  drmModeModeInfo         preferred_mode = mode;
-  struct vt_compositor_t *comp = drm->comp;
+
+  drmModeModeInfo         preferred_mode = *selected_drm;
 
   output->needs_repaint = true;
 
@@ -771,22 +891,31 @@ bool _drm_create_output_for_device(struct drm_backend_state_t *drm,
     enc = drmModeGetEncoder(drm->drm_fd, conn->encoder_id);
 
   if (enc) {
-    drm_output->crtc_id = enc->crtc_id;
+    if (enc->crtc_id)
+      drm_output->crtc_id = enc->crtc_id;
+
     drmModeFreeEncoder(enc);
-  } else if (drm->res->count_encoders > 0) {
+    enc = NULL;
+  } 
+
+  if (!drm_output->crtc_id) {
     // fallback: try all encoders for this connector
     // (the voices are getting too loud)
     for (int i = 0; i < conn->count_encoders; i++) {
       enc = drmModeGetEncoder(drm->drm_fd, conn->encoders[i]);
       if (!enc)
         continue;
+
       for (int j = 0; j < drm->res->count_crtcs; j++) {
         if (enc->possible_crtcs & (1 << j)) {
           drm_output->crtc_id = drm->res->crtcs[j];
           break;
         }
       }
+
       drmModeFreeEncoder(enc);
+      enc = NULL;
+
       if (drm_output->crtc_id)
         break;
     }
@@ -795,7 +924,6 @@ bool _drm_create_output_for_device(struct drm_backend_state_t *drm,
   if (!drm_output->crtc_id) {
     VT_ERROR(comp->log, "Failed to find CRTC for connector %u",
              drm_output->conn_id);
-    drmModeFreeConnector(conn);
     return false;
   }
 
@@ -817,21 +945,50 @@ bool _drm_create_output_for_device(struct drm_backend_state_t *drm,
 
   struct drm_backend_master_state_t *drm_master =
       BACKEND_DATA(output->backend, struct drm_backend_master_state_t);
+
   // TODO: Implement correct output layouting e.g vertical monitors
-  output->width = (uint32_t)drm_output->mode.hdisplay;
-  output->height = (uint32_t)drm_output->mode.vdisplay;
   output->x = drm_master->x_ptr;
+  drm_master->x_ptr += output->width;
+
   output->y = 0;
-  output->height = (uint32_t)drm_output->mode.vdisplay;
-  output->refresh_rate = (uint32_t)drm_output->mode.vrefresh;
+  
+  output->width = (uint32_t)selected->width;
+  output->height = (uint32_t)selected->height;
+  output->refresh_rate = selected->refresh;
+
   output->native_window = drm_output->gbm_surf;
   output->format = desired_format;
   output->id = drm_output->conn_id;
 
-  drm_master->x_ptr += output->width;
+  output->physical.mm_width = conn->mmWidth;
+  output->physical.mm_height = conn->mmHeight;
+
+  output->physical.subpixel = _drm_subpixel_to_wl(conn->subpixel);
+
+  output->physical.transform = WL_OUTPUT_TRANSFORM_NORMAL;
+  
+  output->current_scale = 1;
+
+  output->physical.make = strdup("Unknown");
+  output->physical.model = strdup("Unknown");
+  output->physical.serial_number = NULL;
+
+  const char *type_name = _drm_connector_type_name(conn->connector_type);
+
+  char name[64];
+
+  snprintf(name, sizeof(name), "%s-%u", type_name, conn->connector_type_id);
+
+  output->physical.name = strdup(name);
+
 
   wl_list_insert(&drm->outputs, &output->link_local);
   wl_list_insert(&drm->comp->outputs, &output->link_global);
+
+  if(!vt_proto_wl_output_init(output)) {
+    VT_ERROR(comp->log,
+             "Failed to create wl_output global for output.");
+  }
 
   return true;
 }
@@ -858,6 +1015,11 @@ bool _drm_destroy_output_for_device(struct drm_backend_state_t *drm,
   }
 
   output->user_data = NULL;
+
+  free(output->physical.make);
+  free(output->physical.model);
+  free(output->physical.name);
+  free(output->physical.serial_number);
 
   wl_list_remove(&output->link_local);
 

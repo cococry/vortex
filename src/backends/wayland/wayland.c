@@ -586,6 +586,11 @@ bool _wl_backend_destroy_output(struct vt_backend_t *backend,
 
   output->user_data = NULL;
 
+  free(output->physical.make);
+  free(output->physical.model);
+  free(output->physical.name);
+  free(output->physical.serial_number);
+
   wl_list_remove(&output->link_global);
   output = NULL;
 

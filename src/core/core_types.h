@@ -69,11 +69,11 @@ struct vt_backend_t {
 };
 
 enum vt_output_mode_aspect_ratio_t {
-  WESTON_MODE_PIC_AR_NONE = 0,    /* DRM_MODE_PICTURE_ASPECT_NONE */
-  WESTON_MODE_PIC_AR_4_3 = 1,     /* DRM_MODE_PICTURE_ASPECT_4_3 */
-  WESTON_MODE_PIC_AR_16_9 = 2,    /* DRM_MODE_PICTURE_ASPECT_16_9 */
-  WESTON_MODE_PIC_AR_64_27 = 3,   /* DRM_MODE_PICTURE_ASPECT_64_27 */
-  WESTON_MODE_PIC_AR_256_135 = 4, /* DRM_MODE_PICTURE_ASPECT_256_135*/
+  VT_MODE_PIC_AR_NONE = 0,    /* DRM_MODE_PICTURE_ASPECT_NONE */
+  VT_MODE_PIC_AR_4_3 = 1,     /* DRM_MODE_PICTURE_ASPECT_4_3 */
+  VT_MODE_PIC_AR_16_9 = 2,    /* DRM_MODE_PICTURE_ASPECT_16_9 */
+  VT_MODE_PIC_AR_64_27 = 3,   /* DRM_MODE_PICTURE_ASPECT_64_27 */
+  VT_MODE_PIC_AR_256_135 = 4, /* DRM_MODE_PICTURE_ASPECT_256_135*/
 };
 
 struct vt_output_mode_t {
@@ -83,7 +83,7 @@ struct vt_output_mode_t {
   int32_t                            width;   /**< Width in pixels. */
   int32_t                            height;  /**< Height in pixels. */
   uint32_t                           refresh; /**< Refresh rate in mHz. */
-  struct wl_list                     link; /**< in weston_output::mode_list */
+  struct wl_list                     link;
 };
 
 struct vt_output_t {
