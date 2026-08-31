@@ -117,7 +117,7 @@ void vt_comp_frame_done(struct vt_compositor_t *c, struct vt_output_t *output,
   // output) and let the client know we're done rendering their frames by
   // calling wl_callback_send_done.
   //
-  // [!] This is the mechanism by which we achive vblank frame pacing.
+  // [!] This is the mechanism by which we achieve vblank frame pacing.
   struct vt_surface_t *surf;
   wl_list_for_each(surf, &c->surfaces, link) {
     if (!surf->needs_frame_done)
@@ -135,6 +135,9 @@ void vt_comp_frame_done(struct vt_compositor_t *c, struct vt_output_t *output,
         wl_resource_destroy(surf->cb_pool.cbs[i]);
         if (!c->sent_frame_cbs)
           c->sent_frame_cbs = true;
+
+        VT_TRACE(surf->comp->log, "FRAME DONE surf=%p callback=%p output=%p",
+                 surf, surf->cb_pool.cbs[i], output);
       }
       surf->needs_frame_done = false;
       surf->cb_pool.n_cbs = 0;
@@ -143,6 +146,7 @@ void vt_comp_frame_done(struct vt_compositor_t *c, struct vt_output_t *output,
                "Sent wl_callback.done() for all pending frame callbacks on "
                "output %p.",
                output);
+
     }
   }
   c->any_frame_cb_pending = false;

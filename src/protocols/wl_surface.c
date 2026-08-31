@@ -100,6 +100,20 @@ void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
   surf->pending.dy = y;
 }
 
+static uint32_t _surface_effective_output_mask(struct vt_surface_t *surf) {
+  while (surf) {
+    if (surf->_mask_outputs_visible_on)
+      return surf->_mask_outputs_visible_on;
+
+    if (!surf->subsurface)
+      break;
+
+    surf = surf->subsurface->parent;
+  }
+
+  return 0;
+}
+
 void _wl_surface_commit(struct wl_client   *client,
                         struct wl_resource *resource) {
   /*[0]: This function is the core of the wl_surface protocol.
@@ -196,22 +210,25 @@ void _wl_surface_commit(struct wl_client   *client,
       surf->geom_x = surf->xdg_surf->pending_geom.x;
       surf->geom_y = surf->xdg_surf->pending_geom.y;
       surf->xdg_surf->have_pending_geom = false;
-      printf("assigned geom non-popup: %i\n", 60);
+
     } else if (surf->xdg_surf->popup &&
                surf->xdg_surf->popup->have_pending_geom) {
+
       surf->width = surf->xdg_surf->popup->pending_geom.w;
       surf->height = surf->xdg_surf->popup->pending_geom.h;
       surf->x = surf->xdg_surf->popup->pending_geom.x +
                 surf->xdg_surf->popup->parent_xdg_surf->surf->geom_x;
+
       surf->y = surf->xdg_surf->popup->pending_geom.y +
                 surf->xdg_surf->popup->parent_xdg_surf->surf->geom_y;
+
       surf->geom_x = surf->xdg_surf->popup->pending_geom.x +
                      surf->xdg_surf->popup->parent_xdg_surf->surf->geom_x;
+
       surf->geom_y = surf->xdg_surf->popup->pending_geom.y +
                      surf->xdg_surf->popup->parent_xdg_surf->surf->geom_y;
+
       surf->xdg_surf->popup->have_pending_geom = false;
-      printf("assigned geom: %i, %i, %i, %i\n", surf->geom_x, surf->geom_y,
-             surf->geom_width, surf->geom_height);
     }
   }
 
@@ -256,7 +273,9 @@ void _wl_surface_commit(struct wl_client   *client,
   if (surf->type == VT_SURFACE_TYPE_CURSOR)
     surf->mapped = surf->has_buffer;
 
-  bool needs_repaint = has_damage || has_new_buffer;
+  bool new_frame_cbs = surf->cb_pool.n_cbs > 0 && surf->mapped;
+  
+  bool needs_repaint = has_damage || has_new_buffer || new_frame_cbs;
 
   if (needs_repaint) {
     pixman_region32_t global_damage;
@@ -268,6 +287,7 @@ void _wl_surface_commit(struct wl_client   *client,
     /* 6. Set damage regions and schedule a repaint for
      * all outputs that the surface intersects with */
     struct vt_output_t *output;
+
     wl_list_for_each(output, &surf->comp->outputs, link_global) {
       if (!(surf->_mask_outputs_visible_on & (1u << output->id)))
         continue;
@@ -275,6 +295,7 @@ void _wl_surface_commit(struct wl_client   *client,
       pixman_region32_union(&output->damage, &output->damage, &global_damage);
 
       vt_comp_schedule_repaint(surf->comp, output);
+
     }
     pixman_region32_fini(&global_damage);
   }
@@ -301,6 +322,12 @@ void _wl_surface_commit(struct wl_client   *client,
   surf->pending.acquire_fence_fd = -1;
 
   VT_TRACE(surf->comp->log, "surface.commit Finsihed commit.");
+
+  VT_TRACE(surf->comp->log,
+           "COMMIT surf=%p parent=%p mapped=%d "
+           "mask=0x%x buffer resource=%p",
+           surf, surf->subsurface ? surf->subsurface->parent : NULL,
+           surf->mapped, surf->_mask_outputs_visible_on, surf->buf_res);
 }
 
 void _wl_surface_frame(struct wl_client *client, struct wl_resource *resource,
