@@ -42,7 +42,7 @@ enum vt_surface_type_t {
 struct vt_linux_dmabuf_v1_surface_t;
 
 struct vt_surface_role_impl_t {
-    void (*commit)(struct vt_surface_t *surf);
+  void (*commit)(struct vt_surface_t *surf);
 };
 
 struct vt_surface_t {
@@ -61,7 +61,7 @@ struct vt_surface_t {
   uint32_t width, height;
   int32_t  x, y, dx, dy, hotspot_x, hotspot_y;
 
-  struct vt_surface_role_impl_t role_impl; 
+  struct vt_surface_role_impl_t role_impl;
 
   bool needs_frame_done;
 

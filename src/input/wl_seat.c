@@ -392,10 +392,11 @@ void vt_seat_handle_key(struct vt_seat_t *seat, uint32_t keycode,
 
   if (_wl_handle_global_keybind(seat, keycode, state, mod_states.depressed))
     return;
-  
-  VT_TRACE(seat->comp->log,
-           "INPUT: Handled global keybind: keycode: %i, state: %i, mods: %08x\n",
-           keycode, state, mod_states.depressed);
+
+  VT_TRACE(
+      seat->comp->log,
+      "INPUT: Handled global keybind: keycode: %i, state: %i, mods: %08x\n",
+      keycode, state, mod_states.depressed);
 
   struct wl_client *client = seat->kb_focus.client;
   if (!client)
@@ -427,7 +428,8 @@ void vt_seat_handle_key(struct vt_seat_t *seat, uint32_t keycode,
                                       : WL_KEYBOARD_KEY_STATE_RELEASED);
   }
   VT_TRACE(seat->comp->log,
-           "INPUT: Sent key data to keyboard clients: keycode: %i, state: %i, mods: %08x\n",
+           "INPUT: Sent key data to keyboard clients: keycode: %i, state: %i, "
+           "mods: %08x\n",
            keycode, state, mod_states.depressed);
 
   seat->_last_mods = mod_states;

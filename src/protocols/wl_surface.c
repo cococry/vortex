@@ -193,7 +193,6 @@ void _wl_surface_commit(struct wl_client   *client,
   pixman_region32_intersect_rect(&surf->current_damage, &surf->current_damage,
                                  0, 0, surf->width, surf->height);
 
-
   surf->width = surf->tex.width;
   surf->height = surf->tex.height;
 
@@ -227,7 +226,7 @@ void _wl_surface_commit(struct wl_client   *client,
   /* consumed */
   surf->pending.dx = 0;
   surf->pending.dy = 0;
-  
+
   bool is_valid_xdg_surf =
       surf->xdg_surf &&
       ((surf->xdg_surf->toplevel &&

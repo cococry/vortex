@@ -945,10 +945,11 @@ void _xdg_toplevel_set_parent(struct wl_client   *client,
   struct vt_xdg_toplevel_t *parent =
       parent_resource ? wl_resource_get_user_data(parent_resource) : NULL;
 
-  if(parent == xdg_toplevel->parent) return;
+  if (parent == xdg_toplevel->parent)
+    return;
 
   /* Remove the link from the old parent */
-  if(xdg_toplevel->parent) {
+  if (xdg_toplevel->parent) {
     wl_list_remove(&xdg_toplevel->link);
     wl_list_init(&xdg_toplevel->link);
   }

@@ -32,11 +32,10 @@ struct vt_xdg_popup_t {
 
   struct vt_xdg_surface_t *xdg_surf, *parent_xdg_surf;
 
-
   struct vt_xdg_window_geom_t configured_geom;
 
   struct vt_xdg_window_geom_t acked_geom;
-  bool have_acked_geom;
+  bool                        have_acked_geom;
 
   struct vt_xdg_window_geom_t pending_ack_geom;
   uint32_t                    pending_ack_serial;
@@ -65,7 +64,6 @@ struct vt_xdg_surface_t {
 
   bool                        have_pending_geom;
   struct vt_xdg_window_geom_t pending_geom;
-
 };
 
 bool vt_proto_xdg_shell_init(struct vt_compositor_t *c, uint32_t version);
