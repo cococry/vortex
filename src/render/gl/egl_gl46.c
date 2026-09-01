@@ -582,7 +582,6 @@ bool _egl_gl_create_output_fbo(struct vt_output_t *output) {
     return false;
   }
 
-  printf("recreated.\n");
   // clean up
   glBindFramebuffer(GL_FRAMEBUFFER, 0);
 

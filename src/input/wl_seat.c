@@ -242,8 +242,6 @@ static void _wl_seat_pointer_set_cursor(struct wl_client   *client,
     surf->type = VT_SURFACE_TYPE_CURSOR;
   }
 
-  VT_TRACE(surf->comp->log, "New cursor set. %p\n", surf);
-
   seat->cursor.surf = surf;
   seat->cursor.owner = ptr;
   seat->cursor.hotspot_x = hotspot_x;
@@ -440,10 +438,6 @@ static void _send_pointer_motion(struct vt_seat_t *seat, uint32_t time,
   struct wl_client    *client = seat->ptr_focus.client;
   struct vt_surface_t *surf = seat->ptr_focus.surf;
 
-  printf("POINTER MOTION: focus=%p client=%p cursor=%p\n",
-         (void *)seat->ptr_focus.surf, (void *)seat->ptr_focus.client,
-         (void *)seat->cursor.surf);
-
   if (!client || !surf || !surf->surf_res)
     return;
 
@@ -465,8 +459,6 @@ static void _send_pointer_motion(struct vt_seat_t *seat, uint32_t time,
 
   if (seat->cursor.surf) {
     vt_comp_surf_mark_damaged(seat->comp, seat->cursor.surf);
-
-    printf("Marked root cursor damaged.\n");
   }
 }
 

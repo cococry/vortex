@@ -202,35 +202,8 @@ void _wl_surface_commit(struct wl_client   *client,
   surf->width = surf->tex.width;
   surf->height = surf->tex.height;
 
-  /* 3. Update internal surface width and height */
-  if (is_valid_xdg_surf) {
-    if (!surf->xdg_surf->popup && surf->xdg_surf->have_pending_geom) {
-      surf->geom_width = surf->xdg_surf->pending_geom.w;
-      surf->geom_height = surf->xdg_surf->pending_geom.h;
-      surf->geom_x = surf->xdg_surf->pending_geom.x;
-      surf->geom_y = surf->xdg_surf->pending_geom.y;
-      surf->xdg_surf->have_pending_geom = false;
-
-    } else if (surf->xdg_surf->popup &&
-               surf->xdg_surf->popup->have_pending_geom) {
-
-      surf->width = surf->xdg_surf->popup->pending_geom.w;
-      surf->height = surf->xdg_surf->popup->pending_geom.h;
-      surf->x = surf->xdg_surf->popup->pending_geom.x +
-                surf->xdg_surf->popup->parent_xdg_surf->surf->geom_x;
-
-      surf->y = surf->xdg_surf->popup->pending_geom.y +
-                surf->xdg_surf->popup->parent_xdg_surf->surf->geom_y;
-
-      surf->geom_x = surf->xdg_surf->popup->pending_geom.x +
-                     surf->xdg_surf->popup->parent_xdg_surf->surf->geom_x;
-
-      surf->geom_y = surf->xdg_surf->popup->pending_geom.y +
-                     surf->xdg_surf->popup->parent_xdg_surf->surf->geom_y;
-
-      surf->xdg_surf->popup->have_pending_geom = false;
-    }
-  }
+  if (surf->role_impl.commit)
+    surf->role_impl.commit(surf);
 
   /* 4. Calculate current damage region  */
   if (!surf->_mask_outputs_visible_on) {
@@ -541,7 +514,6 @@ void _wl_surface_set_buffer_scale(struct wl_client   *client,
 
   VT_TRACE(surf->comp->log, "surface_set_buffer_scale: scale=%d for surface %p",
            scale, surf);
-  printf("Buffer scale: %i\n", scale);
 }
 
 void _wl_surface_offset(struct wl_client *client, struct wl_resource *resource,

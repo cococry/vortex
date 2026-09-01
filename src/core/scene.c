@@ -41,9 +41,9 @@ bool vt_scene_node_destroy(struct vt_compositor_t *c,
   return true;
 }
 
-struct vt_scene_node_t *vt_scene_node_create_rect(struct vt_compositor_t *c,
+struct vt_scene_node_t *_scene_node_create_rect(struct vt_compositor_t *c,
                                                   float x, float y, float w,
-                                                  float h, uint32_t color) {
+                                                  float h, uint32_t color, enum vt_scene_node_type_t type) {
   struct vt_scene_node_t *n = VT_ALLOC(c, sizeof(*n));
   if (!n) {
     VT_ERROR(c->log, "Failed to allocate scene node.");
@@ -51,7 +51,7 @@ struct vt_scene_node_t *vt_scene_node_create_rect(struct vt_compositor_t *c,
   }
 
   n->surf = NULL;
-  n->type = VT_SCENE_NODE_RECT;
+  n->type = type;
 
   n->rect.x = x;
   n->rect.y = y;
@@ -60,6 +60,19 @@ struct vt_scene_node_t *vt_scene_node_create_rect(struct vt_compositor_t *c,
   n->rect.color = color;
 
   return n;
+}
+
+struct vt_scene_node_t *vt_scene_node_create_rect(struct vt_compositor_t *c,
+                                                  float x, float y, float w,
+                                                  float h, uint32_t color) {
+  return _scene_node_create_rect(c, x, y, w, h, color, VT_SCENE_NODE_RECT);
+}
+
+struct vt_scene_node_t *
+vt_scene_node_create_rect_invisible(struct vt_compositor_t *c, float x, float y,
+                                    float w, float h) {
+  return _scene_node_create_rect(c, x, y, w, h, 0x0,
+                                 VT_SCENE_NODE_INVISIBLE_GEOMETRY);
 }
 
 bool vt_scene_node_reparent(struct vt_compositor_t *c,
@@ -207,6 +220,9 @@ void vt_scene_node_render(struct vt_renderer_t   *renderer,
 }
 
 static bool _composite_scene_node_filter(struct vt_scene_node_t *node) {
+  if (node->type == VT_SCENE_NODE_INVISIBLE_GEOMETRY) 
+    return false;
+
   if (!node->surf)
     return true;
 
@@ -335,6 +351,12 @@ void vt_scene_render(struct vt_renderer_t *renderer, struct vt_output_t *output,
 
   pixman_region32_clear(&output->damage);
   output->needs_repaint = false;
+}
+
+void vt_scene_node_set_position(struct vt_scene_node_t* node, int32_t x, int32_t y) {
+  if(!node) return;
+  node->rect.x = x;
+  node->rect.y = y;
 }
 
 void vt_scene_node_get_global_position(struct vt_scene_node_t *node, double *x,

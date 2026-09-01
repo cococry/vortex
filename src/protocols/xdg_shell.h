@@ -29,15 +29,18 @@ struct vt_xdg_toplevel_t {
 struct vt_xdg_popup_t {
   struct wl_resource *xdg_popup_res;
   struct wl_resource *parent_xdg_surface_res;
-  struct wl_resource *positioner_res;
 
   struct vt_xdg_surface_t *xdg_surf, *parent_xdg_surf;
 
-  struct vt_xdg_window_geom_t geom;
-  struct vt_xdg_window_geom_t pending_geom;
-  bool                        have_pending_geom;
 
-  uint32_t last_configure_serial;
+  struct vt_xdg_window_geom_t configured_geom;
+
+  struct vt_xdg_window_geom_t acked_geom;
+  bool have_acked_geom;
+
+  struct vt_xdg_window_geom_t pending_ack_geom;
+  uint32_t                    pending_ack_serial;
+  bool                        have_pending_ack_geom;
 
   bool                mapped, reactive;
   bool                has_grab;
@@ -57,8 +60,12 @@ struct vt_xdg_surface_t {
   struct vt_xdg_toplevel_t *toplevel;
   struct vt_xdg_popup_t    *popup;
 
+  struct vt_xdg_window_geom_t geom;
+  struct vt_scene_node_t     *geom_node;
+
   bool                        have_pending_geom;
   struct vt_xdg_window_geom_t pending_geom;
+
 };
 
 bool vt_proto_xdg_shell_init(struct vt_compositor_t *c, uint32_t version);

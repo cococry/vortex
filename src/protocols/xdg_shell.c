@@ -4,6 +4,7 @@
 #include "src/core/util.h"
 
 #include "src/core/core_types.h"
+#include "src/core/scene.h"
 #include "src/core/surface.h"
 #include "xdg-shell-protocol.h"
 
@@ -233,6 +234,10 @@ static const struct xdg_wm_base_interface xdg_wm_base_impl = {
 
 static struct vt_proto_xdg_shell_t _proto;
 
+static bool _popup_resolve_pos(struct vt_xdg_popup_t       *popup,
+                               struct vt_xdg_positioner_t  *pos,
+                               struct vt_xdg_window_geom_t *o_geom);
+
 void _xdg_wm_base_bind(struct wl_client *client, void *data, uint32_t version,
                        uint32_t id) {
   /* 1. Allocate resource for the XDG WM-base interface */
@@ -267,6 +272,7 @@ void _xdg_wm_base_create_positioner(struct wl_client   *client,
   /* 2. Allocate internal data for the positioner handle.
    * We are not yet setting any positioning related data in
    * this call. */
+
   struct vt_xdg_positioner_t *pos = calloc(1, sizeof(*pos));
   if (!pos) {
     wl_resource_destroy(res);
@@ -390,9 +396,37 @@ void _xdg_popup_handle_resource_destroy(struct wl_resource *resource) {
   if (popup->parent_xdg_surf)
     popup->parent_xdg_surf->popup = NULL;
   popup->parent_xdg_surf = NULL;
-  popup->positioner_res = NULL;
   wl_resource_set_user_data(resource, NULL);
   free(popup);
+}
+
+static void _xdg_surface_commit(struct vt_surface_t *surf) {
+  struct vt_xdg_surface_t *xdg = surf->xdg_surf;
+
+  if (!xdg)
+    return;
+
+  if (xdg->have_pending_geom) {
+    xdg->geom = xdg->pending_geom;
+    xdg->have_pending_geom = false;
+
+    vt_scene_node_set_position(xdg->geom_node, xdg->geom.x, xdg->geom.y);
+
+    xdg->geom_node->rect.width = (float)xdg->geom.w;
+
+    xdg->geom_node->rect.height = (float)xdg->geom.h;
+  }
+
+  struct vt_xdg_popup_t *popup = xdg->popup;
+
+  if (popup && popup->have_acked_geom) {
+    popup->configured_geom = popup->acked_geom;
+
+    popup->have_acked_geom = false;
+
+    vt_scene_node_set_position(surf->scene_node, popup->configured_geom.x,
+                               popup->configured_geom.y);
+  }
 }
 
 void _xdg_wm_base_get_xdg_surface(struct wl_client   *client,
@@ -420,6 +454,13 @@ void _xdg_wm_base_get_xdg_surface(struct wl_client   *client,
     VT_WL_OUT_OF_MEMORY(_proto.comp, client);
     return;
   }
+
+  surf->role_impl.commit = _xdg_surface_commit;
+
+  xdg_surf->geom_node =
+      vt_scene_node_create_rect_invisible(surf->comp, 0, 0, 0, 0);
+
+  vt_scene_node_add_child(surf->comp, surf->scene_node, xdg_surf->geom_node);
 
   xdg_surf->surf = surf;
   xdg_surf->xdg_surf_res = res;
@@ -711,8 +752,13 @@ void _xdg_surface_get_popup(struct wl_client   *client,
   struct vt_xdg_surface_t *parent_xdg_surf =
       parent_surface ? wl_resource_get_user_data(parent_surface) : NULL;
 
-  if (!popup_xdg_surf || !parent_xdg_surf) {
-    VT_WL_OUT_OF_MEMORY(_proto.comp, client);
+  if (!popup_xdg_surf) {
+    return;
+  }
+
+  if (!parent_xdg_surf) {
+    wl_resource_post_error(resource, XDG_WM_BASE_ERROR_INVALID_SURFACE_STATE,
+                           "parentless xdg_popup is not supported");
     return;
   }
 
@@ -738,16 +784,18 @@ void _xdg_surface_get_popup(struct wl_client   *client,
   }
 
   /* 4. Allcoate internal popup handle and assign pointers. */
-  popup_xdg_surf->popup = calloc(1, sizeof(*popup_xdg_surf->popup));
-  if (!popup_xdg_surf->popup) {
+  struct vt_xdg_popup_t *popup = calloc(1, sizeof(*popup));
+  if (!popup) {
+    wl_resource_destroy(res);
     VT_WL_OUT_OF_MEMORY(_proto.comp, client);
     return;
   }
 
-  popup_xdg_surf->popup->xdg_popup_res = res;
-  popup_xdg_surf->popup->parent_xdg_surf = parent_xdg_surf;
-  popup_xdg_surf->popup->xdg_surf = popup_xdg_surf;
-  popup_xdg_surf->popup->positioner_res = positioner;
+  popup->xdg_popup_res = res;
+  popup->parent_xdg_surf = parent_xdg_surf;
+  popup->xdg_surf = popup_xdg_surf;
+
+  popup_xdg_surf->popup = popup;
 
   /* 5. Set handler functions via the implementation */
   wl_resource_set_implementation(res, &xdg_popup_impl, popup_xdg_surf->popup,
@@ -756,32 +804,58 @@ void _xdg_surface_get_popup(struct wl_client   *client,
   /* 6. Send popup configure with positioner data*/
   struct vt_xdg_positioner_t *pos =
       positioner ? wl_resource_get_user_data(positioner) : NULL;
-  if (pos) {
-    int32_t  x = pos->anchor_rect_pos.x + pos->offset_x;
-    int32_t  y = pos->anchor_rect_pos.y + pos->offset_y;
-    uint32_t w = pos->width;
-    uint32_t h = pos->height;
 
-    popup_xdg_surf->popup->pending_geom.x = x;
-    popup_xdg_surf->popup->pending_geom.y = y;
-    popup_xdg_surf->popup->pending_geom.w = w;
-    popup_xdg_surf->popup->pending_geom.h = h;
-    popup_xdg_surf->popup->have_pending_geom = true;
-    printf("SETTING ON POPUP: %i, %i, %i, %i\n", x, y, w, h);
-    xdg_popup_send_configure(res, x, y, w, h);
+  if (!pos)
+    return;
+
+  struct vt_xdg_window_geom_t geom;
+
+  if (!_popup_resolve_pos(popup, pos, &geom)) {
+    VT_ERROR(popup_xdg_surf->surf->comp->log,
+             "Failed to resolve initial popup geometry.");
+    return;
   }
+
+  uint32_t serial = wl_display_next_serial(popup_xdg_surf->surf->comp->wl.dsp);
+
+  popup->pending_ack_geom = geom;
+  popup->pending_ack_serial = serial;
+  popup->have_pending_ack_geom = true;
+
+  xdg_popup_send_configure(res, geom.x, geom.y, geom.w, geom.h);
 
   /* 7. Send the corresponding xdg_surface.configure with a fresh serial
    * to the xdg surface associated with the popup*/
-  uint32_t serial = wl_display_next_serial(popup_xdg_surf->surf->comp->wl.dsp);
   xdg_surface_send_configure(popup_xdg_surf->xdg_surf_res, serial);
+
+  popup_xdg_surf->last_configure_serial = serial;
+
+  struct vt_surface_t *popup_surf = popup_xdg_surf->surf;
+  if (popup_surf)
+    vt_scene_node_reparent(popup_surf->comp, popup_surf->scene_node,
+                           popup->parent_xdg_surf->geom_node);
 }
 
 void _xdg_surface_ack_configure(struct wl_client   *client,
                                 struct wl_resource *resource, uint32_t serial) {
-  struct vt_xdg_surface_t *surf = wl_resource_get_user_data(resource);
+  struct vt_xdg_surface_t *xdg = wl_resource_get_user_data(resource);
+
+  if (!xdg)
+    return;
   /* Set last known configure serial */
-  surf->last_configure_serial = serial;
+  xdg->last_configure_serial = serial;
+
+  if (xdg->popup) {
+    struct vt_xdg_popup_t *popup = xdg->popup;
+
+    if (popup->have_pending_ack_geom && serial == popup->pending_ack_serial) {
+
+      popup->acked_geom = popup->pending_ack_geom;
+
+      popup->have_pending_ack_geom = false;
+      popup->have_acked_geom = true;
+    }
+  }
 }
 
 void _xdg_surface_set_window_geometry(struct wl_client   *client,
@@ -818,7 +892,6 @@ void _xdg_surface_set_window_geometry(struct wl_client   *client,
   xdg_surf->pending_geom.w = (uint32_t)width;
   xdg_surf->pending_geom.h = (uint32_t)height;
 
-  printf("SETTING ON SET GEOM: %i, %i, %i, %i\n", x, y, width, height);
   VT_TRACE(xdg_surf->surf->comp->log,
            "xdg_surface.set_window_geometry: Set window window geometry of "
            "surface %p to (%ix%i, %ix%i).",
@@ -949,47 +1022,341 @@ void _xdg_popup_grab(struct wl_client *client, struct wl_resource *resource,
   /* 4. Set seat's keyboard to grabbed popup */
   vt_seat_set_keyboard_focus(wl_resource_get_user_data(seat),
                              popup->xdg_surf->surf);
+}
 
-  popup->mapped = true;
+static int _xdg_anchor_dir_x(uint32_t anchor) {
+  switch (anchor) {
+  case XDG_POSITIONER_ANCHOR_LEFT:
+  case XDG_POSITIONER_ANCHOR_TOP_LEFT:
+  case XDG_POSITIONER_ANCHOR_BOTTOM_LEFT:
+    return -1;
+
+  case XDG_POSITIONER_ANCHOR_RIGHT:
+  case XDG_POSITIONER_ANCHOR_TOP_RIGHT:
+  case XDG_POSITIONER_ANCHOR_BOTTOM_RIGHT:
+    return 1;
+
+  default:
+    return 0;
+  }
+}
+
+static int _xdg_anchor_dir_y(uint32_t anchor) {
+  switch (anchor) {
+  case XDG_POSITIONER_ANCHOR_TOP:
+  case XDG_POSITIONER_ANCHOR_TOP_LEFT:
+  case XDG_POSITIONER_ANCHOR_TOP_RIGHT:
+    return -1;
+
+  case XDG_POSITIONER_ANCHOR_BOTTOM:
+  case XDG_POSITIONER_ANCHOR_BOTTOM_LEFT:
+  case XDG_POSITIONER_ANCHOR_BOTTOM_RIGHT:
+    return 1;
+
+  default:
+    return 0;
+  }
+}
+
+static int _xdg_gravity_dir_x(uint32_t gravity) {
+  switch (gravity) {
+  case XDG_POSITIONER_GRAVITY_LEFT:
+  case XDG_POSITIONER_GRAVITY_TOP_LEFT:
+  case XDG_POSITIONER_GRAVITY_BOTTOM_LEFT:
+    return -1;
+
+  case XDG_POSITIONER_GRAVITY_RIGHT:
+  case XDG_POSITIONER_GRAVITY_TOP_RIGHT:
+  case XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT:
+    return 1;
+
+  default:
+    return 0;
+  }
+}
+
+static int _xdg_gravity_dir_y(uint32_t gravity) {
+  switch (gravity) {
+  case XDG_POSITIONER_GRAVITY_TOP:
+  case XDG_POSITIONER_GRAVITY_TOP_LEFT:
+  case XDG_POSITIONER_GRAVITY_TOP_RIGHT:
+    return -1;
+
+  case XDG_POSITIONER_GRAVITY_BOTTOM:
+  case XDG_POSITIONER_GRAVITY_BOTTOM_LEFT:
+  case XDG_POSITIONER_GRAVITY_BOTTOM_RIGHT:
+    return 1;
+
+  default:
+    return 0;
+  }
+}
+
+static int64_t _xdg_positioner_axis(int64_t anchor_pos, int64_t anchor_size,
+                                    int anchor_dir, int64_t popup_size,
+                                    int gravity_dir, int64_t offset) {
+  int64_t anchor_point;
+
+  if (anchor_dir < 0)
+    anchor_point = anchor_pos;
+  else if (anchor_dir > 0)
+    anchor_point = anchor_pos + anchor_size;
+  else
+    anchor_point = anchor_pos + anchor_size / 2;
+
+  int64_t pos = anchor_point + offset;
+
+  if (gravity_dir < 0)
+    pos -= popup_size;
+  else if (gravity_dir == 0)
+    pos -= popup_size / 2;
+
+  return pos;
+}
+
+static bool _xdg_axis_constrained(int64_t pos, int64_t size, int64_t bound_min,
+                                  int64_t bound_max) {
+  return pos < bound_min || pos + size > bound_max;
+}
+
+static void _xdg_slide_axis(int64_t *pos, int64_t size, int64_t bound_min,
+                            int64_t bound_max) {
+  int64_t available = bound_max - bound_min;
+
+  if (size > available)
+    return;
+
+  if (*pos < bound_min)
+    *pos = bound_min;
+
+  if (*pos + size > bound_max)
+    *pos = bound_max - size;
+}
+
+static bool _xdg_resize_axis(int64_t *pos, int64_t *size, int64_t bound_min,
+                             int64_t bound_max) {
+  int64_t old_start = *pos;
+  int64_t old_end = *pos + *size;
+
+  int64_t new_start = old_start < bound_min ? bound_min : old_start;
+
+  int64_t new_end = old_end > bound_max ? bound_max : old_end;
+
+  if (new_end <= new_start)
+    return false;
+
+  *pos = new_start;
+  *size = new_end - new_start;
+
+  return true;
+}
+
+static bool _xdg_positioner_calculate_geometry(
+    const struct vt_xdg_positioner_t  *pos,
+    const struct vt_xdg_window_geom_t *constraint,
+    struct vt_xdg_window_geom_t       *out) {
+  if (!pos || !out)
+    return false;
+
+  if (pos->width <= 0 || pos->height <= 0)
+    return false;
+
+  if (pos->anchor_rect_size.width <= 0 || pos->anchor_rect_size.height <= 0)
+    return false;
+
+  int anchor_x = _xdg_anchor_dir_x(pos->anchor);
+  int anchor_y = _xdg_anchor_dir_y(pos->anchor);
+  int gravity_x = _xdg_gravity_dir_x(pos->gravity);
+  int gravity_y = _xdg_gravity_dir_y(pos->gravity);
+
+  int64_t width = pos->width;
+  int64_t height = pos->height;
+
+  /* First, calculate completely unconstrained geometry. */
+
+  int64_t x =
+      _xdg_positioner_axis(pos->anchor_rect_pos.x, pos->anchor_rect_size.width,
+                           anchor_x, width, gravity_x, pos->offset_x);
+
+  int64_t y =
+      _xdg_positioner_axis(pos->anchor_rect_pos.y, pos->anchor_rect_size.height,
+                           anchor_y, height, gravity_y, pos->offset_y);
+
+  if (constraint) {
+    if (constraint->w == 0 || constraint->h == 0)
+      return false;
+
+    int64_t left = constraint->x;
+    int64_t top = constraint->y;
+    int64_t right = left + constraint->w;
+    int64_t bottom = top + constraint->h;
+
+    uint32_t adjust = pos->constraint_adjustment;
+
+    /* Flip */
+    if ((adjust & XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_FLIP_X) &&
+        _xdg_axis_constrained(x, width, left, right)) {
+
+      int flipped_anchor_x = -anchor_x;
+      int flipped_gravity_x = -gravity_x;
+
+      int64_t flipped_x = _xdg_positioner_axis(
+          pos->anchor_rect_pos.x, pos->anchor_rect_size.width, flipped_anchor_x,
+          width, flipped_gravity_x, pos->offset_x);
+
+      if (!_xdg_axis_constrained(flipped_x, width, left, right)) {
+
+        x = flipped_x;
+
+        anchor_x = flipped_anchor_x;
+        gravity_x = flipped_gravity_x;
+      }
+    }
+
+    if ((adjust & XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_FLIP_Y) &&
+        _xdg_axis_constrained(y, height, top, bottom)) {
+
+      int flipped_anchor_y = -anchor_y;
+      int flipped_gravity_y = -gravity_y;
+
+      int64_t flipped_y = _xdg_positioner_axis(
+          pos->anchor_rect_pos.y, pos->anchor_rect_size.height,
+          flipped_anchor_y, height, flipped_gravity_y, pos->offset_y);
+
+      if (!_xdg_axis_constrained(flipped_y, height, top, bottom)) {
+
+        y = flipped_y;
+
+        anchor_y = flipped_anchor_y;
+        gravity_y = flipped_gravity_y;
+      }
+    }
+
+    /* Slide */
+    if ((adjust & XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_X) &&
+        _xdg_axis_constrained(x, width, left, right)) {
+
+      _xdg_slide_axis(&x, width, left, right);
+    }
+
+    if ((adjust & XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_SLIDE_Y) &&
+        _xdg_axis_constrained(y, height, top, bottom)) {
+
+      _xdg_slide_axis(&y, height, top, bottom);
+    }
+
+    /* Resize */
+    if ((adjust & XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_RESIZE_X) &&
+        _xdg_axis_constrained(x, width, left, right)) {
+
+      if (!_xdg_resize_axis(&x, &width, left, right))
+        return false;
+    }
+
+    if ((adjust & XDG_POSITIONER_CONSTRAINT_ADJUSTMENT_RESIZE_Y) &&
+        _xdg_axis_constrained(y, height, top, bottom)) {
+
+      if (!_xdg_resize_axis(&y, &height, top, bottom))
+        return false;
+    }
+  }
+
+  if (x < INT32_MIN || x > INT32_MAX || y < INT32_MIN || y > INT32_MAX ||
+      width <= 0 || width > INT32_MAX || height <= 0 || height > INT32_MAX)
+    return false;
+
+  out->x = (int32_t)x;
+  out->y = (int32_t)y;
+  out->w = (uint32_t)width;
+  out->h = (uint32_t)height;
+
+  return true;
+}
+
+static struct vt_output_t *
+_xdg_popup_choose_output(struct vt_xdg_surface_t *parent) {
+  struct vt_surface_t *surf = parent->surf;
+
+  struct vt_output_t *output;
+
+  wl_list_for_each(output, &surf->comp->outputs, link_global) {
+    if (surf->_mask_outputs_visible_on & (1u << output->id))
+      return output;
+  }
+
+  return NULL;
+}
+
+static bool _popup_resolve_pos(struct vt_xdg_popup_t       *popup,
+                               struct vt_xdg_positioner_t  *pos,
+                               struct vt_xdg_window_geom_t *out_geom) {
+  if (!popup || !pos || !out_geom || !popup->parent_xdg_surf ||
+      !popup->parent_xdg_surf->geom_node)
+    return false;
+
+  struct vt_output_t *output = _xdg_popup_choose_output(popup->parent_xdg_surf);
+
+  if (!output)
+    return false;
+
+  double parent_geom_gx, parent_geom_gy;
+
+  vt_scene_node_get_global_position(popup->parent_xdg_surf->geom_node,
+                                    &parent_geom_gx, &parent_geom_gy);
+
+  struct vt_xdg_window_geom_t constraint = {
+      .x = output->x - (int32_t)parent_geom_gx,
+      .y = output->y - (int32_t)parent_geom_gy,
+      .w = output->width,
+      .h = output->height,
+  };
+
+  return _xdg_positioner_calculate_geometry(pos, &constraint, out_geom);
 }
 
 void _xdg_popup_reposition(struct wl_client   *client,
                            struct wl_resource *resource,
                            struct wl_resource *positioner, uint32_t token) {
-  /* 1. Retrieve internal XDG-Popup handle */
   struct vt_xdg_popup_t *popup =
       resource ? wl_resource_get_user_data(resource) : NULL;
+
   if (!popup) {
     VT_PARAM_CHECK_FAIL(_proto.comp);
     return;
   }
 
-  /* 2. Update internally stored positioner resource */
-  popup->positioner_res = positioner;
-
-  VT_TRACE(popup->parent_xdg_surf->surf->comp->log,
-           "xdg_popup_reposition: token=%i.", token);
-
-  /* 3. Send new positioning properties if positioner is valid*/
   struct vt_xdg_positioner_t *pos =
       positioner ? wl_resource_get_user_data(positioner) : NULL;
-  if (pos) {
-    int32_t  x = pos->anchor_rect_pos.x + pos->offset_x;
-    int32_t  y = pos->anchor_rect_pos.y + pos->offset_y;
-    uint32_t w = pos->width;
-    uint32_t h = pos->height;
 
-    popup->pending_geom.x = x;
-    popup->pending_geom.y = x;
-    popup->pending_geom.w = w;
-    popup->pending_geom.h = h;
-    popup->have_pending_geom = true;
+  if (!pos)
+    return;
 
-    printf("SETTING ON REPOS: %i, %i, %i, %i\n", x, y, w, h);
+  struct vt_xdg_window_geom_t geom;
 
-    xdg_popup_send_configure(resource, x, y, w, h);
-    xdg_popup_send_repositioned(resource, token);
-  }
+  if (!_popup_resolve_pos(popup, pos, &geom))
+    return;
+
+  struct vt_xdg_surface_t *xdg = popup->xdg_surf;
+  struct vt_compositor_t  *comp = xdg->surf->comp;
+
+  uint32_t serial = wl_display_next_serial(comp->wl.dsp);
+
+  xdg_popup_send_repositioned(popup->xdg_popup_res, token);
+
+  xdg_popup_send_configure(popup->xdg_popup_res, geom.x, geom.y, geom.w,
+                           geom.h);
+
+  xdg_surface_send_configure(xdg->xdg_surf_res, serial);
+
+  xdg->last_configure_serial = serial;
+
+  popup->pending_ack_geom = geom;
+  popup->pending_ack_serial = serial;
+  popup->have_pending_ack_geom = true;
+
+  VT_TRACE(comp->log,
+           "xdg_popup.reposition: token=%u serial=%u geom=(%d,%d %ux%u)", token,
+           serial, geom.x, geom.y, geom.w, geom.h);
 }
 
 bool _xdg_toplevel_send_state(struct vt_xdg_toplevel_t *top, uint32_t state,
