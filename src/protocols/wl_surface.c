@@ -193,11 +193,6 @@ void _wl_surface_commit(struct wl_client   *client,
   pixman_region32_intersect_rect(&surf->current_damage, &surf->current_damage,
                                  0, 0, surf->width, surf->height);
 
-  bool is_valid_xdg_surf =
-      surf->xdg_surf &&
-      ((surf->xdg_surf->toplevel &&
-        surf->xdg_surf->toplevel->xdg_toplevel_res) ||
-       (surf->xdg_surf->popup && surf->xdg_surf->popup->xdg_popup_res));
 
   surf->width = surf->tex.width;
   surf->height = surf->tex.height;
@@ -232,11 +227,16 @@ void _wl_surface_commit(struct wl_client   *client,
   /* consumed */
   surf->pending.dx = 0;
   surf->pending.dy = 0;
+  
+  bool is_valid_xdg_surf =
+      surf->xdg_surf &&
+      ((surf->xdg_surf->toplevel &&
+        surf->xdg_surf->toplevel->xdg_toplevel_res) ||
+       (surf->xdg_surf->popup && surf->xdg_surf->popup->xdg_popup_res));
 
   /* 5. If the surface has not yet been mapped and has a
    * valid XDG Surface and XDG Surface role, trigger a map request. */
   if (!surf->mapped && surf->has_buffer && is_valid_xdg_surf) {
-    surf->mapped = true;
     vt_surface_mapped(surf);
   }
 

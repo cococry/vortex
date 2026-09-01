@@ -325,6 +325,7 @@ void _xdg_toplevel_handle_resource_destroy(struct wl_resource *resource) {
     VT_PARAM_CHECK_FAIL(_proto.comp);
     return;
   }
+  top->xdg_toplevel_res = NULL;
 
   /* 1. Unmap all children surfaces of the toplevel and remove
    * them from this toplevel's children list. */
@@ -332,8 +333,10 @@ void _xdg_toplevel_handle_resource_destroy(struct wl_resource *resource) {
   wl_list_for_each_safe(child, tmp, &top->childs, link) {
     /* Remove child from list first to avoid list corruption
      * in unmap handle. */
-    if (!wl_list_empty(&child->link))
+    if (!wl_list_empty(&child->link)) {
       wl_list_remove(&child->link);
+      wl_list_init(&child->link);
+    }
 
     /* Unmap child */
     child->parent = NULL;
@@ -354,6 +357,8 @@ void _xdg_toplevel_handle_resource_destroy(struct wl_resource *resource) {
 
   if (top->parent) {
     wl_list_remove(&top->link);
+    wl_list_init(&top->link);
+
     top->parent = NULL;
   }
 
@@ -362,19 +367,41 @@ void _xdg_toplevel_handle_resource_destroy(struct wl_resource *resource) {
 }
 
 void _xdg_surface_handle_resource_destroy(struct wl_resource *resource) {
-  struct vt_xdg_surface_t *surf =
+  struct vt_xdg_surface_t *xdg =
       resource ? wl_resource_get_user_data(resource) : NULL;
-  if (!surf) {
+  if (!xdg) {
     VT_PARAM_CHECK_FAIL(_proto.comp);
     return;
   }
 
   /* Unlink internal pointers and deallocate the toplevel
    * handle associated with the resource. */
-  if (surf->surf)
-    surf->surf->xdg_surf = NULL;
+
+  if (xdg->toplevel) {
+    if (xdg->toplevel->xdg_surf == xdg)
+      xdg->toplevel->xdg_surf = NULL;
+
+    xdg->toplevel = NULL;
+  }
+
+  if (xdg->popup) {
+    if (xdg->popup->xdg_surf == xdg)
+      xdg->popup->xdg_surf = NULL;
+
+    xdg->popup = NULL;
+  }
+
+  if (xdg->surf) {
+    if (xdg->surf->xdg_surf == xdg)
+      xdg->surf->xdg_surf = NULL;
+
+    xdg->surf = NULL;
+  }
+
+  xdg->xdg_surf_res = NULL;
+
   wl_resource_set_user_data(resource, NULL);
-  free(surf);
+  free(xdg);
 }
 
 void _xdg_popup_handle_resource_destroy(struct wl_resource *resource) {
@@ -731,6 +758,7 @@ void _xdg_surface_get_toplevel(struct wl_client   *client,
   xdg_surf->toplevel->xdg_toplevel_res = res;
   xdg_surf->toplevel->parent = NULL;
   wl_list_init(&xdg_surf->toplevel->childs);
+  wl_list_init(&xdg_surf->toplevel->link);
 
   /* 5. Set handler functions via the implementation */
   wl_resource_set_implementation(res, &xdg_toplevel_impl, xdg_surf->toplevel,
@@ -916,14 +944,23 @@ void _xdg_toplevel_set_parent(struct wl_client   *client,
   /* 2. Retrieve parent's internal XDG-Toplevel handle */
   struct vt_xdg_toplevel_t *parent =
       parent_resource ? wl_resource_get_user_data(parent_resource) : NULL;
-  if (parent) {
-    /* 3. Insert the request-making XDG Toplevel into the list of children of
-     * the given parent XDG-Toplevel. */
-    wl_list_insert(&parent->childs, &xdg_toplevel->link);
+
+  if(parent == xdg_toplevel->parent) return;
+
+  /* Remove the link from the old parent */
+  if(xdg_toplevel->parent) {
+    wl_list_remove(&xdg_toplevel->link);
+    wl_list_init(&xdg_toplevel->link);
   }
 
-  /* 4. Set parent of request-making XDG-Toplevel */
+  /* 3. Set parent of the XDG Toplevel making the request */
   xdg_toplevel->parent = parent;
+
+  if (parent) {
+    /* 4. Insert the request-making XDG Toplevel into the list of children of
+     * the parent XDG Toplevel. */
+    wl_list_insert(&parent->childs, &xdg_toplevel->link);
+  }
 
   VT_TRACE(xdg_toplevel->xdg_surf->surf->comp->log,
            "xdg_toplevel.set_parent: Set parent of toplevel %p to %p.",
