@@ -24,7 +24,7 @@ static void _client_source_cancel(struct vt_data_source_t *source);
 static void _destroy_data_source(struct wl_resource *resource);
 
 static const struct wl_data_device_manager_interface manager_interface = {
-    .create_data_source =  _create_data_source,
+    .create_data_source = _create_data_source,
     .get_data_device = _get_data_device,
 };
 
@@ -89,7 +89,6 @@ static void _create_data_source(struct wl_client   *client,
   wl_resource_set_implementation(source->resource, &data_source_interface,
                                  source, _destroy_data_source);
 }
-
 
 static void _unbind_data_device(struct wl_resource *resource) {
   wl_list_remove(wl_resource_get_link(resource));
@@ -230,8 +229,8 @@ static void _manager_bind(struct wl_client *client, void *data,
   wl_resource_set_implementation(resource, &manager_interface, NULL, NULL);
 }
 bool vt_proto_wl_data_device_init(struct vt_compositor_t *comp) {
-  if (!wl_global_create(comp->wl.dsp, &wl_data_device_manager_interface, 3, NULL,
-                       _manager_bind)) {
+  if (!wl_global_create(comp->wl.dsp, &wl_data_device_manager_interface, 3,
+                        NULL, _manager_bind)) {
     return false;
   }
 

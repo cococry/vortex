@@ -146,7 +146,6 @@ void vt_comp_frame_done(struct vt_compositor_t *c, struct vt_output_t *output,
                "Sent wl_callback.done() for all pending frame callbacks on "
                "output %p.",
                output);
-
     }
   }
   c->any_frame_cb_pending = false;

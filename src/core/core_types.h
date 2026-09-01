@@ -111,7 +111,7 @@ struct vt_output_t {
 
   struct {
     struct wl_global *global;
-    struct wl_list resources;
+    struct wl_list    resources;
   } proto;
 
   uint32_t transform;
@@ -123,14 +123,14 @@ struct vt_output_t {
     int32_t mm_width;
     int32_t mm_height;
 
-    // WL_OUTPUT_TRANSFORM 
+    // WL_OUTPUT_TRANSFORM
     uint32_t transform;
 
-    char    *make;
-    char    *model;
-    char    *name;
+    char *make;
+    char *model;
+    char *name;
 
-    char    *serial_number; 
+    char    *serial_number;
     uint32_t subpixel;
 
     struct wl_list modes;

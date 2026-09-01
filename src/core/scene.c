@@ -1,8 +1,8 @@
 #include "scene.h"
 #include "pixman.h"
+#include "src/core/compositor.h"
 #include "src/core/core_types.h"
 #include "src/core/surface.h"
-#include "src/core/compositor.h"
 #include "src/core/util.h"
 #include "src/render/renderer.h"
 #include <wayland-util.h>
@@ -205,7 +205,6 @@ void vt_scene_node_render(struct vt_renderer_t   *renderer,
                           vt_scene_node_filter_func_t filter) {
   _scene_node_render_at(renderer, output, node, 0, 0, filter);
 }
-
 
 static bool _composite_scene_node_filter(struct vt_scene_node_t *node) {
   if (!node->surf)

@@ -32,22 +32,21 @@ struct vt_scene_node_t *vt_scene_node_create(struct vt_compositor_t *c,
                                              struct vt_surface_t    *surf);
 
 bool vt_scene_node_destroy(struct vt_compositor_t *c,
-                                              struct vt_scene_node_t *node);
+                           struct vt_scene_node_t *node);
 
 struct vt_scene_node_t *vt_scene_node_create_rect(struct vt_compositor_t *c,
                                                   float x, float y, float w,
                                                   float h, uint32_t color);
 
 bool vt_scene_node_reparent(struct vt_compositor_t *c,
-                             struct vt_scene_node_t *node,
-                             struct vt_scene_node_t *new_parent);
+                            struct vt_scene_node_t *node,
+                            struct vt_scene_node_t *new_parent);
 
 bool vt_scene_node_add_child(struct vt_compositor_t *c,
                              struct vt_scene_node_t *node,
                              struct vt_scene_node_t *child);
-bool
-vt_scene_node_remove_child(struct vt_scene_node_t *parent,
-                           struct vt_scene_node_t *child);
+bool vt_scene_node_remove_child(struct vt_scene_node_t *parent,
+                                struct vt_scene_node_t *child);
 struct vt_renderer_t;
 struct vt_output_t;
 void vt_scene_node_render(struct vt_renderer_t   *renderer,
@@ -60,4 +59,3 @@ void vt_scene_render(struct vt_renderer_t *renderer, struct vt_output_t *output,
 
 void vt_scene_node_get_global_position(struct vt_scene_node_t *node, double *x,
                                        double *y);
-

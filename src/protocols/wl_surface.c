@@ -274,7 +274,7 @@ void _wl_surface_commit(struct wl_client   *client,
     surf->mapped = surf->has_buffer;
 
   bool new_frame_cbs = surf->cb_pool.n_cbs > 0 && surf->mapped;
-  
+
   bool needs_repaint = has_damage || has_new_buffer || new_frame_cbs;
 
   if (needs_repaint) {
@@ -295,7 +295,6 @@ void _wl_surface_commit(struct wl_client   *client,
       pixman_region32_union(&output->damage, &output->damage, &global_damage);
 
       vt_comp_schedule_repaint(surf->comp, output);
-
     }
     pixman_region32_fini(&global_damage);
   }
@@ -620,7 +619,7 @@ void _wl_surface_handle_resource_destroy(struct wl_resource *resource) {
   }
 
   /* destroy dmabuf resources of the surface */
-  if(surf->comp->have_proto_dmabuf)
+  if (surf->comp->have_proto_dmabuf)
     vt_proto_linux_dmabuf_v1_surface_destroy(surf);
 
   if (surf->scene_node)

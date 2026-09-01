@@ -709,17 +709,17 @@ bool backend_init_wl(struct vt_backend_t *backend) {
 
   backend->comp->renderer->impl.init(c->backend, backend->comp->renderer,
                                      wl->parent_display);
-    
+
   uint32_t *shm_formats = calloc(2, sizeof(uint32_t));
-    shm_formats[0] = _VT_DRM_FORMAT_XRGB8888;
-    shm_formats[1] = _VT_DRM_FORMAT_ARGB8888;
+  shm_formats[0] = _VT_DRM_FORMAT_XRGB8888;
+  shm_formats[1] = _VT_DRM_FORMAT_ARGB8888;
 
-    if (!vt_proto_wl_shm_init(backend->comp, shm_formats, 2)) {
-      VT_ERROR(backend->comp->log, "Failed to initialize WL SHM protcol.\n");
-      return false;
-    }
+  if (!vt_proto_wl_shm_init(backend->comp, shm_formats, 2)) {
+    VT_ERROR(backend->comp->log, "Failed to initialize WL SHM protcol.\n");
+    return false;
+  }
 
-    free(shm_formats);
+  free(shm_formats);
 
   const uint8_t dmabuf_ver = 4, dmabuf_explicit_sync_ver = 2;
 

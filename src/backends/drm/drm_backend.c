@@ -33,8 +33,8 @@
 #include "input/wl_seat.h"
 #include "protocols/linux_dmabuf.h"
 #include "protocols/linux_explicit_sync.h"
-#include "protocols/wl_shm.h"
 #include "protocols/wl_output.h"
+#include "protocols/wl_shm.h"
 #include "render/dmabuf.h"
 
 #include <linux/input-event-codes.h>
@@ -793,38 +793,54 @@ static uint32_t _drm_subpixel_to_wl(drmModeSubPixel subpixel) {
   }
 }
 
-static const char *
-_drm_connector_type_name(uint32_t type)
-{
-    switch (type) {
-    case DRM_MODE_CONNECTOR_VGA:         return "VGA";
-    case DRM_MODE_CONNECTOR_DVII:        return "DVI-I";
-    case DRM_MODE_CONNECTOR_DVID:        return "DVI-D";
-    case DRM_MODE_CONNECTOR_DVIA:        return "DVI-A";
-    case DRM_MODE_CONNECTOR_Composite:   return "Composite";
-    case DRM_MODE_CONNECTOR_SVIDEO:      return "SVIDEO";
-    case DRM_MODE_CONNECTOR_LVDS:        return "LVDS";
-    case DRM_MODE_CONNECTOR_Component:   return "Component";
-    case DRM_MODE_CONNECTOR_9PinDIN:     return "DIN";
-    case DRM_MODE_CONNECTOR_DisplayPort: return "DP";
-    case DRM_MODE_CONNECTOR_HDMIA:       return "HDMI-A";
-    case DRM_MODE_CONNECTOR_HDMIB:       return "HDMI-B";
-    case DRM_MODE_CONNECTOR_TV:          return "TV";
-    case DRM_MODE_CONNECTOR_eDP:         return "eDP";
-    case DRM_MODE_CONNECTOR_VIRTUAL:     return "Virtual";
-    case DRM_MODE_CONNECTOR_DSI:         return "DSI";
+static const char *_drm_connector_type_name(uint32_t type) {
+  switch (type) {
+  case DRM_MODE_CONNECTOR_VGA:
+    return "VGA";
+  case DRM_MODE_CONNECTOR_DVII:
+    return "DVI-I";
+  case DRM_MODE_CONNECTOR_DVID:
+    return "DVI-D";
+  case DRM_MODE_CONNECTOR_DVIA:
+    return "DVI-A";
+  case DRM_MODE_CONNECTOR_Composite:
+    return "Composite";
+  case DRM_MODE_CONNECTOR_SVIDEO:
+    return "SVIDEO";
+  case DRM_MODE_CONNECTOR_LVDS:
+    return "LVDS";
+  case DRM_MODE_CONNECTOR_Component:
+    return "Component";
+  case DRM_MODE_CONNECTOR_9PinDIN:
+    return "DIN";
+  case DRM_MODE_CONNECTOR_DisplayPort:
+    return "DP";
+  case DRM_MODE_CONNECTOR_HDMIA:
+    return "HDMI-A";
+  case DRM_MODE_CONNECTOR_HDMIB:
+    return "HDMI-B";
+  case DRM_MODE_CONNECTOR_TV:
+    return "TV";
+  case DRM_MODE_CONNECTOR_eDP:
+    return "eDP";
+  case DRM_MODE_CONNECTOR_VIRTUAL:
+    return "Virtual";
+  case DRM_MODE_CONNECTOR_DSI:
+    return "DSI";
 #ifdef DRM_MODE_CONNECTOR_DPI
-    case DRM_MODE_CONNECTOR_DPI:         return "DPI";
+  case DRM_MODE_CONNECTOR_DPI:
+    return "DPI";
 #endif
-    default:                             return "Unknown";
-    }
+  default:
+    return "Unknown";
+  }
 }
 
 bool _drm_create_output_for_device(struct drm_backend_state_t *drm,
                                    struct vt_output_t *output, void *data) {
   if (!drm || !output || !data)
     return false;
-  
+
   struct vt_compositor_t *comp = drm->comp;
 
   VT_TRACE(comp->log, "Creating DRM internal output.");
@@ -838,19 +854,20 @@ bool _drm_create_output_for_device(struct drm_backend_state_t *drm,
 
   drmModeConnector *conn = (drmModeConnector *)data;
 
-  struct vt_output_mode_t* fallback = NULL;
-  struct vt_output_mode_t* selected = NULL;
+  struct vt_output_mode_t *fallback = NULL;
+  struct vt_output_mode_t *selected = NULL;
 
-  drmModeModeInfo* selected_drm = NULL;
+  drmModeModeInfo *selected_drm = NULL;
 
   for (int j = 0; j < conn->count_modes; j++) {
-    drmModeModeInfo  *drm_mode = &conn->modes[j];
+    drmModeModeInfo         *drm_mode = &conn->modes[j];
     struct vt_output_mode_t *mode =
         _drm_create_output_mode(&output->physical.modes, drm_mode);
 
-    if(!mode) return false;
+    if (!mode)
+      return false;
 
-    if(!fallback) {
+    if (!fallback) {
       fallback = mode;
     }
 
@@ -875,7 +892,7 @@ bool _drm_create_output_for_device(struct drm_backend_state_t *drm,
   struct drm_output_state_t *drm_output =
       BACKEND_DATA(output, struct drm_output_state_t);
 
-  drmModeModeInfo         preferred_mode = *selected_drm;
+  drmModeModeInfo preferred_mode = *selected_drm;
 
   output->needs_repaint = true;
 
@@ -896,7 +913,7 @@ bool _drm_create_output_for_device(struct drm_backend_state_t *drm,
 
     drmModeFreeEncoder(enc);
     enc = NULL;
-  } 
+  }
 
   if (!drm_output->crtc_id) {
     // fallback: try all encoders for this connector
@@ -951,7 +968,7 @@ bool _drm_create_output_for_device(struct drm_backend_state_t *drm,
   drm_master->x_ptr += output->width;
 
   output->y = 0;
-  
+
   output->width = (uint32_t)selected->width;
   output->height = (uint32_t)selected->height;
   output->refresh_rate = selected->refresh;
@@ -966,7 +983,7 @@ bool _drm_create_output_for_device(struct drm_backend_state_t *drm,
   output->physical.subpixel = _drm_subpixel_to_wl(conn->subpixel);
 
   output->physical.transform = WL_OUTPUT_TRANSFORM_NORMAL;
-  
+
   output->current_scale = 1;
 
   output->physical.make = strdup("Unknown");
@@ -981,13 +998,11 @@ bool _drm_create_output_for_device(struct drm_backend_state_t *drm,
 
   output->physical.name = strdup(name);
 
-
   wl_list_insert(&drm->outputs, &output->link_local);
   wl_list_insert(&drm->comp->outputs, &output->link_global);
 
-  if(!vt_proto_wl_output_init(output)) {
-    VT_ERROR(comp->log,
-             "Failed to create wl_output global for output.");
+  if (!vt_proto_wl_output_init(output)) {
+    VT_ERROR(comp->log, "Failed to create wl_output global for output.");
   }
 
   return true;

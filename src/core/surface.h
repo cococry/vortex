@@ -1,8 +1,8 @@
 #pragma once
 
 #include "../protocols/linux_dmabuf.h"
-#include "../protocols/xdg_shell.h"
 #include "../protocols/wl_subcompositor.h"
+#include "../protocols/xdg_shell.h"
 #include "scene.h"
 #include <wayland-server.h>
 #define VT_MAX_FRAME_CBS 8
@@ -99,7 +99,7 @@ struct vt_surface_t {
 
   struct wl_list subsurfaces;
 
-  struct vt_subsurface_t* subsurface;
+  struct vt_subsurface_t *subsurface;
 };
 
 void vt_surface_mapped(struct vt_surface_t *surf);

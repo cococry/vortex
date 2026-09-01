@@ -16,7 +16,7 @@ struct vt_keybind_t {
 
 struct vt_seat_focus_t {
   struct vt_surface_t *surf;
-  struct wl_client *client;
+  struct wl_client    *client;
 };
 
 struct vt_kb_modifier_states_t {
@@ -24,14 +24,13 @@ struct vt_kb_modifier_states_t {
 };
 
 struct vt_seat_cursor_t {
-    struct vt_surface_t *surf;
+  struct vt_surface_t *surf;
 
-    struct vt_pointer_t *owner;
+  struct vt_pointer_t *owner;
 
-    int32_t hotspot_x;
-    int32_t hotspot_y;
+  int32_t hotspot_x;
+  int32_t hotspot_y;
 };
-
 
 struct vt_seat_t {
   struct wl_global *global;
@@ -62,11 +61,11 @@ struct vt_keyboard_t {
 };
 
 struct vt_pointer_t {
-    struct vt_seat_t *seat;
-    struct wl_resource *res;
-    struct wl_list link;
+  struct vt_seat_t   *seat;
+  struct wl_resource *res;
+  struct wl_list      link;
 
-    uint32_t enter_serial;
+  uint32_t enter_serial;
 };
 
 bool vt_seat_init(struct vt_seat_t *seat);
