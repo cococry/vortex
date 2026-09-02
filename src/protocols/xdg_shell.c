@@ -341,12 +341,15 @@ void _xdg_toplevel_handle_resource_destroy(struct wl_resource *resource) {
     /* Unmap child */
     child->parent = NULL;
     if (child->xdg_surf && child->xdg_surf->surf) {
+      printf("Unmapping child.\n");
       vt_surface_unmapped(child->xdg_surf->surf);
     }
   }
 
+      printf("top->xdg_surf: %p\n", top->xdg_surf);
   /* 2. Unmap the toplevel surface itself. */
   if (top->xdg_surf && top->xdg_surf->surf) {
+      printf("Unmapping surface: %p.\n", top->xdg_surf->surf);
     vt_surface_unmapped(top->xdg_surf->surf);
   }
 
@@ -376,6 +379,12 @@ void _xdg_surface_handle_resource_destroy(struct wl_resource *resource) {
 
   /* Unlink internal pointers and deallocate the toplevel
    * handle associated with the resource. */
+
+  struct vt_surface_t *surf = xdg->surf;
+  if (surf && surf->mapped) {
+    printf("Called unmapped.\n");
+    vt_surface_unmapped(surf);
+  }
 
   if (xdg->toplevel) {
     if (xdg->toplevel->xdg_surf == xdg)
@@ -1404,7 +1413,6 @@ bool _xdg_toplevel_send_state(struct vt_xdg_toplevel_t *top, uint32_t state,
   /* The 'state' parameter is a XDG_TOPLEVEL_STATE_* value. */
   if (!top || !top->xdg_surf || !top->xdg_surf->surf ||
       !top->xdg_toplevel_res) {
-    VT_PARAM_CHECK_FAIL(_proto.comp);
     return false;
   }
 
@@ -1443,7 +1451,7 @@ bool _xdg_toplevel_send_state(struct vt_xdg_toplevel_t *top, uint32_t state,
 
   if (!top->xdg_surf->xdg_surf_res) {
     VT_ERROR(top->xdg_surf->surf->comp->log,
-             "_proto_xdg_toplevel_send_state: Toplevel %p has no associated "
+             "Toplevel %p has no associated "
              "XDG surface resource.",
              top);
     return false;

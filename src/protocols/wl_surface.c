@@ -570,10 +570,37 @@ void _wl_surface_handle_resource_destroy(struct wl_resource *resource) {
 
   VT_TRACE(surf->comp->log, "Got surface.destroy handler: Unmanaging client.")
 
+  if (surf->mapped)
+    vt_surface_unmapped(surf);
+
   /* Unlink from lists */
   wl_list_remove(&surf->link);
-  if (!wl_list_empty(&surf->link_focus))
+
+  struct vt_seat_t *seat = surf->comp ? surf->comp->seat : NULL;
+
+  /* no seat field may retain this pointer past free(surf). */
+  if (seat) {
+    if (seat->kb_focus.surf == surf) {
+      seat->kb_focus.surf = NULL;
+      seat->kb_focus.client = NULL;
+    }
+
+    if (seat->ptr_focus.surf == surf) {
+      seat->ptr_focus.surf = NULL;
+      seat->ptr_focus.client = NULL;
+    }
+
+    if (seat->cursor.surf == surf) {
+      seat->cursor.surf = NULL;
+      seat->cursor.owner = NULL;
+    }
+  }
+
+  /* Focus stack must not retain the surface. */
+  if (!wl_list_empty(&surf->link_focus)) {
     wl_list_remove(&surf->link_focus);
+    wl_list_init(&surf->link_focus);
+  }
 
   /* Deallocate pixman regions */
   pixman_region32_fini(&surf->pending_damage);
