@@ -149,7 +149,13 @@ static void _subcompositor_get_subsurface(struct wl_client   *client,
     return;
   }
 
-  vt_scene_node_reparent(surf->comp, sub->scene_node, parent->scene_node);
+  struct vt_scene_node_t *parent_node = parent->scene_node;
+
+  if (parent->xdg_surf && parent->xdg_surf->subsurface_layer) {
+    parent_node = parent->xdg_surf->subsurface_layer;
+  }
+
+  vt_scene_node_reparent(surf->comp, sub->scene_node, parent_node);
 
   wl_list_insert(&parent->subsurfaces, &sub->parent_link);
 

@@ -62,6 +62,9 @@ struct vt_xdg_surface_t {
   struct vt_xdg_window_geom_t geom;
   struct vt_scene_node_t     *geom_node;
 
+  struct vt_scene_node_t *popup_layer;
+  struct vt_scene_node_t *subsurface_layer;
+
   bool                        have_pending_geom;
   struct vt_xdg_window_geom_t pending_geom;
 };

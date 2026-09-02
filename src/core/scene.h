@@ -42,6 +42,8 @@ struct vt_scene_node_t *vt_scene_node_create_rect(struct vt_compositor_t *c,
 struct vt_scene_node_t *
 vt_scene_node_create_rect_invisible(struct vt_compositor_t *c, float x, float y,
                                     float w, float h);
+struct vt_scene_node_t *
+vt_scene_node_create_container(struct vt_compositor_t *c);
 
 bool vt_scene_node_reparent(struct vt_compositor_t *c,
                             struct vt_scene_node_t *node,

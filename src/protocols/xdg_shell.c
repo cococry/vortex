@@ -494,9 +494,21 @@ void _xdg_wm_base_get_xdg_surface(struct wl_client   *client,
   surf->role_impl.commit = _xdg_surface_commit;
 
   xdg_surf->geom_node =
-      vt_scene_node_create_rect_invisible(surf->comp, 0, 0, 0, 0);
+      vt_scene_node_create_container(surf->comp); 
+  
+  xdg_surf->subsurface_layer =
+      vt_scene_node_create_container(surf->comp); 
+
+  xdg_surf->popup_layer =
+      vt_scene_node_create_container(surf->comp);
+
+  vt_scene_node_add_child(surf->comp, surf->scene_node,
+                          xdg_surf->subsurface_layer);
 
   vt_scene_node_add_child(surf->comp, surf->scene_node, xdg_surf->geom_node);
+
+  vt_scene_node_add_child(surf->comp, xdg_surf->geom_node,
+                          xdg_surf->popup_layer);
 
   xdg_surf->surf = surf;
   xdg_surf->xdg_surf_res = res;
@@ -866,11 +878,17 @@ void _xdg_surface_get_popup(struct wl_client   *client,
   xdg_surface_send_configure(popup_xdg_surf->xdg_surf_res, serial);
 
   popup_xdg_surf->last_configure_serial = serial;
+  
+  if(!popup_xdg_surf->surf || !popup->parent_xdg_surf) return;
 
-  struct vt_surface_t *popup_surf = popup_xdg_surf->surf;
-  if (popup_surf)
-    vt_scene_node_reparent(popup_surf->comp, popup_surf->scene_node,
-                           popup->parent_xdg_surf->geom_node);
+  struct vt_scene_node_t *parent_node = popup->parent_xdg_surf->geom_node;
+
+  if (popup->parent_xdg_surf && popup->parent_xdg_surf->popup_layer) {
+    parent_node = popup->parent_xdg_surf->popup_layer;
+  }
+
+  vt_scene_node_reparent(popup_xdg_surf->surf->comp,
+                         popup_xdg_surf->surf->scene_node, parent_node);
 }
 
 void _xdg_surface_ack_configure(struct wl_client   *client,
