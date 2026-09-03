@@ -27,6 +27,7 @@ struct vt_surface_pending_state_t {
   pixman_region32_t            input_region;
   bool                         input_region_changed;
   bool                         input_region_set;
+  bool                         buffer_attached;
 
   struct wl_resource *buf_res;
 

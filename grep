@@ -1,0 +1,3 @@
+[20591:20591:0903/114345.369232:ERROR:ui/ozone/platform/wayland/host/wayland_connection.cc:202] Failed to connect to Wayland display: Connection refused (111)
+[20591:20591:0903/114345.369317:ERROR:ui/ozone/platform/wayland/ozone_platform_wayland.cc:288] Failed to initialize Wayland platform
+[20591:20591:0903/114345.369345:ERROR:ui/aura/env.cc:246] The platform failed to initialize.  Exiting.

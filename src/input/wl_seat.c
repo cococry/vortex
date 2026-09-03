@@ -502,18 +502,19 @@ vt_surface_get_focus_toplevel(struct vt_surface_t *surf) {
     return NULL;
 
   for (;;) {
-    /* Escape wl_subsurface hierarchy. */
+    /* Escape wl_subsurface hierarchy */
     while (surf->subsurface && surf->subsurface->parent) {
       surf = surf->subsurface->parent;
     }
 
+    /* Not a subsurface and not an XDG surface -> focusable surface */
     if (!surf->xdg_surf)
       return surf;
 
     if (surf->xdg_surf->toplevel)
       return surf;
 
-    /* This xdg_surface is a popup: walk to its xdg parent and continue. */
+    /* This xdg_surface is a popup: walk to its xdg parent and continue */
     if (surf->xdg_surf->popup && surf->xdg_surf->popup->parent_xdg_surf &&
         surf->xdg_surf->popup->parent_xdg_surf->surf) {
 

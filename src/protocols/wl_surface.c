@@ -98,6 +98,8 @@ void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
 
   surf->pending.dx = x;
   surf->pending.dy = y;
+
+  surf->pending.buffer_attached = true;
 }
 
 static uint32_t _surface_effective_output_mask(struct vt_surface_t *surf) {
@@ -112,6 +114,25 @@ static uint32_t _surface_effective_output_mask(struct vt_surface_t *surf) {
   }
 
   return 0;
+}
+
+static void
+_surface_drop_current_buffer(struct vt_surface_t *surf)
+{
+    if (!surf)
+        return;
+
+    struct vt_renderer_t *r = surf->comp->renderer;
+
+    if (r && r->impl.destroy_surface_texture)
+        r->impl.destroy_surface_texture(r, surf);
+
+    if (surf->buf_res) {
+        wl_buffer_send_release(surf->buf_res);
+        surf->buf_res = NULL;
+    }
+
+    surf->has_buffer = false;
 }
 
 void _wl_surface_commit(struct wl_client   *client,
@@ -137,8 +158,6 @@ void _wl_surface_commit(struct wl_client   *client,
 
   bool has_damage = !pixman_region32_empty(&surf->pending_damage);
 
-  bool has_new_buffer = surf->pending.buf_res != NULL;
-
   /* 1. If the size of the surface changed, we need to
    * recalculate the outputs that the surface is visible on */
   if (surf->width != surf->tex.width || surf->height != surf->tex.height) {
@@ -148,32 +167,41 @@ void _wl_surface_commit(struct wl_client   *client,
   /* 2. Import attached buffer into the renderer */
   struct vt_renderer_t *r = surf->comp->renderer;
 
-  if (has_new_buffer) {
+  bool had_buffer_attached = surf->pending.buffer_attached;
+
+  if (surf->pending.buffer_attached) {
     struct wl_resource *new_buffer = surf->pending.buf_res;
 
-    surf->pending.buf_res = NULL;
+    if (!new_buffer) {
+      if (surf->has_buffer) {
+        vt_comp_surf_mark_damaged(surf->comp, surf);
+      }
 
-    surf->buf_res = new_buffer;
+      _surface_drop_current_buffer(surf);
 
-    if (new_buffer == NULL) {
-      /*
-       * NULL attach committed:
-       * remove surface contents.
-       */
-      surf->has_buffer = false;
+      surf->width = 0;
+      surf->height = 0;
 
-      /* unmap / destroy current render content as appropriate */
+      vt_surface_unmapped(surf);
     } else {
-      surf->has_buffer = true;
+      if (surf->has_buffer)
+        _surface_drop_current_buffer(surf);
 
       if (r && r->impl.import_buffer) {
-        r->impl.import_buffer(r, surf, new_buffer);
-        wl_buffer_send_release(new_buffer);
+        if (!r->impl.import_buffer(r, surf, new_buffer)) {
+          // TODO: handle error
+        } else {
+          surf->buf_res = new_buffer;
+          surf->has_buffer = true;
 
-        surf->width = surf->tex.width;
-        surf->height = surf->tex.height;
+          surf->width = surf->tex.width;
+          surf->height = surf->tex.height;
+        }
       }
     }
+
+    surf->pending.buf_res = NULL;
+    surf->pending.buffer_attached = false;
   }
 
   pixman_region32_clear(&surf->current_damage);
@@ -185,7 +213,7 @@ void _wl_surface_commit(struct wl_client   *client,
 
   pixman_region32_clear(&surf->pending_damage);
 
-  if (has_new_buffer && surf->has_buffer) {
+  if (had_buffer_attached && surf->has_buffer) {
     pixman_region32_union_rect(&surf->current_damage, &surf->current_damage, 0,
                                0, surf->width, surf->height);
   }
@@ -247,7 +275,7 @@ void _wl_surface_commit(struct wl_client   *client,
 
   bool new_frame_cbs = surf->cb_pool.n_cbs > 0 && surf->mapped;
 
-  bool needs_repaint = has_damage || has_new_buffer || new_frame_cbs;
+  bool needs_repaint = has_damage || had_buffer_attached || new_frame_cbs;
 
   if (needs_repaint) {
     pixman_region32_t global_damage;
@@ -610,11 +638,7 @@ void _wl_surface_handle_resource_destroy(struct wl_resource *resource) {
   pixman_region32_fini(&surf->opaque_region);
 
   /* Destroy the attached render texture */
-  struct vt_output_t   *output;
-  struct vt_renderer_t *r = surf->comp->renderer;
-  if (r && r->impl.destroy_surface_texture) {
-    r->impl.destroy_surface_texture(r, surf);
-  }
+  _surface_drop_current_buffer(surf);
 
   /* destroy dmabuf resources of the surface */
   if (surf->comp->have_proto_dmabuf)
@@ -623,6 +647,7 @@ void _wl_surface_handle_resource_destroy(struct wl_resource *resource) {
   if (surf->scene_node)
     vt_scene_node_destroy(surf->comp, surf->scene_node);
 
+  struct vt_output_t   *output;
   wl_list_for_each(output, &surf->comp->outputs, link_global) {
     if (!(surf->_mask_outputs_visible_on & (1u << output->id)))
       continue;
