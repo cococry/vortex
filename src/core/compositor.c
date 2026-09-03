@@ -950,6 +950,10 @@ static struct vt_surface_t *_scene_pick_surface(struct vt_scene_node_t *node,
     struct vt_surface_t *surf =
         _scene_pick_surface(node->childs[i], x, y, px, py);
 
+    if(surf && surf->xdg_surf && surf->xdg_surf->popup) {
+      VT_TRACE(surf->comp->log, "PICKED A POPUP: %p\n", surf);
+    }
+
     if (surf)
       return surf;
   }
@@ -982,8 +986,6 @@ static struct vt_surface_t *_scene_pick_surface(struct vt_scene_node_t *node,
 struct vt_surface_t *vt_comp_pick_surface(struct vt_compositor_t *comp,
                                           double x, double y) {
   struct vt_surface_t *surf = _scene_pick_surface(comp->root_node, 0, 0, x, y);
-
-  VT_TRACE(comp->log, "Picked surface: %p", (void *)surf);
 
   return surf;
 }
