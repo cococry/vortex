@@ -27,12 +27,12 @@ bool renderer_resize_renderable_output_egl(struct vt_renderer_t *r,
 bool renderer_destroy_renderable_output_egl(struct vt_renderer_t *r,
                                             struct vt_output_t   *output);
 
-bool renderer_import_buffer_egl(struct vt_renderer_t *r,
-                                struct vt_surface_t  *surf,
-                                struct wl_resource   *buffer_resource);
+bool renderer_import_buffer_egl(struct vt_renderer_t    *r,
+                                struct vt_buffer_t      *buf,
+                                const pixman_region32_t *damage);
 
-bool renderer_destroy_surface_texture_egl(struct vt_renderer_t *r,
-                                          struct vt_surface_t  *surf);
+bool renderer_destroy_buffer_texture_egl(struct vt_renderer_t *r,
+                                         struct vt_buffer_t   *buf);
 
 bool renderer_drop_context_egl(struct vt_renderer_t *r);
 

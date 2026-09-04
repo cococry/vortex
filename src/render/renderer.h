@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../core/core_types.h"
+#include "src/core/buffer.h"
 #include <wayland-util.h>
 
 enum vt_rendering_backend_t {
@@ -23,10 +24,10 @@ struct vt_renderer_interface_t {
                                    int32_t h);
   bool (*destroy_renderable_output)(struct vt_renderer_t *r,
                                     struct vt_output_t   *output);
-  bool (*import_buffer)(struct vt_renderer_t *r, struct vt_surface_t *surf,
-                        struct wl_resource *buffer_resource);
-  bool (*destroy_surface_texture)(struct vt_renderer_t *r,
-                                  struct vt_surface_t  *surf);
+  bool (*import_buffer)(struct vt_renderer_t *r, struct vt_buffer_t *buf,
+                        const pixman_region32_t *damage);
+  bool (*destroy_buffer_texture)(struct vt_renderer_t *r,
+                                 struct vt_buffer_t   *buf);
   bool (*drop_context)(struct vt_renderer_t *r);
   void (*set_vsync)(struct vt_renderer_t *r, bool vsync);
   void (*set_clear_color)(struct vt_renderer_t *r, struct vt_output_t *output,

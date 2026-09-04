@@ -4,6 +4,7 @@
 #include <wayland-util.h>
 
 #include "linux-explicit-synchronization-v1-server-protocol.h"
+#include "pixman.h"
 #include "src/core/compositor.h"
 #include "src/core/core_types.h"
 #include "src/core/surface.h"
@@ -82,8 +83,9 @@ struct egl_output_state_t {
 
 static const char *_egl_err_str(EGLint error);
 static bool        _egl_gl_import_buffer_shm(struct vt_renderer_t *r,
-                                             struct vt_surface_t  *surf,
-                                             struct wl_shm_buffer *shm_buf);
+                                             struct vt_buffer_t*buf,
+                                             struct wl_shm_buffer *shm_buf,
+                                             const pixman_region32_t *damage);
 static bool        _egl_pick_config_from_format(struct vt_compositor_t     *c,
                                                 struct egl_backend_state_t *egl,
                                                 uint32_t                    format);
@@ -137,8 +139,11 @@ const char *_egl_err_str(EGLint error) {
 }
 
 bool _egl_gl_import_buffer_shm(struct vt_renderer_t *r,
-                               struct vt_surface_t  *surf,
-                               struct wl_shm_buffer *shm_buf) {
+                               struct vt_buffer_t *buf,
+                               struct wl_shm_buffer *shm_buf,
+                               const pixman_region32_t *damage) {
+  if(!buf) return false;
+
   int      width = wl_shm_buffer_get_width(shm_buf);
   int      height = wl_shm_buffer_get_height(shm_buf);
   int      stride = wl_shm_buffer_get_stride(shm_buf);
@@ -158,15 +163,17 @@ bool _egl_gl_import_buffer_shm(struct vt_renderer_t *r,
   }
 
   wl_shm_buffer_begin_access(shm_buf);
+
   void *data = wl_shm_buffer_get_data(shm_buf);
 
-  bool need_regen =
-      surf->tex.width != width || surf->tex.height != height || !surf->tex.id;
-  if (need_regen) {
-    if (!surf->tex.id)
-      glGenTextures(1, &surf->tex.id);
+  bool need_buf_regen =
+      buf->tex.width != width || buf->tex.height != height || !buf->tex.id;
 
-    glBindTexture(GL_TEXTURE_2D, surf->tex.id);
+  if (need_buf_regen) {
+    if (!buf->tex.id)
+      glGenTextures(1, &buf->tex.id);
+
+    glBindTexture(GL_TEXTURE_2D, buf->tex.id);
 
     if (fmt == WL_SHM_FORMAT_XRGB8888)
       glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_ONE);
@@ -174,8 +181,8 @@ bool _egl_gl_import_buffer_shm(struct vt_renderer_t *r,
     glTexImage2D(GL_TEXTURE_2D, 0, internal_format, width, height, 0, format,
                  type, data);
 
-    surf->tex.width = width;
-    surf->tex.height = height;
+    buf->tex.width = width;
+    buf->tex.height = height;
 
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -183,13 +190,13 @@ bool _egl_gl_import_buffer_shm(struct vt_renderer_t *r,
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
   }
 
-  glBindTexture(GL_TEXTURE_2D, surf->tex.id);
+  glBindTexture(GL_TEXTURE_2D, buf->tex.id);
 
   glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
   glPixelStorei(GL_UNPACK_ROW_LENGTH, stride / 4);
 
-  if (!need_regen) {
-    pixman_box32_t ext = *pixman_region32_extents(&surf->current_damage);
+  if (!need_buf_regen) {
+    pixman_box32_t ext = *pixman_region32_extents(damage);
     glTexSubImage2D(GL_TEXTURE_2D, 0, ext.x1, ext.y1, ext.x2 - ext.x1,
                     ext.y2 - ext.y1, format, type,
                     data + ext.y1 * stride + ext.x1 * 4);
@@ -209,7 +216,8 @@ bool _egl_gl_import_buffer_shm(struct vt_renderer_t *r,
 
 bool _egl_gl_import_buffer_dmabuf(struct vt_renderer_t               *r,
                                   struct vt_linux_dmabuf_v1_buffer_t *dmabuf,
-                                  struct vt_surface_t                *surf) {
+                                  struct vt_buffer_t *buf) {
+                                 
   struct vt_dmabuf_attr_t *a = &dmabuf->attr;
 
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
@@ -222,15 +230,15 @@ bool _egl_gl_import_buffer_dmabuf(struct vt_renderer_t               *r,
       a->mod != _VT_DRM_FORMAT_MOD_LINEAR &&
       !egl->has_dmabuf_modifiers_support) {
     VT_ERROR(r->comp->log,
-             "No support for DMABUF modifiers, skipping importing.");
+             "No support for DMABUF modifiers, skipping import.");
     return false;
   }
 
-  if (surf->render_tex_handle && surf->render_tex_handle != EGL_NO_IMAGE_KHR) {
+  if (buf->render_tex_handle && buf->render_tex_handle != EGL_NO_IMAGE_KHR) {
 
-    eglDestroyImageKHR_ptr(egl->egl_dsp, surf->render_tex_handle);
+    eglDestroyImageKHR_ptr(egl->egl_dsp, buf->render_tex_handle);
 
-    surf->render_tex_handle = EGL_NO_IMAGE_KHR;
+    buf->render_tex_handle = EGL_NO_IMAGE_KHR;
   }
 
   // https://gitlab.freedesktop.org/wlroots/wlroots/-/blob/master/render/egl.c#L750
@@ -284,9 +292,9 @@ bool _egl_gl_import_buffer_dmabuf(struct vt_renderer_t               *r,
   attribs[atti++] = EGL_NONE;
   assert(atti <= sizeof(attribs) / sizeof(attribs[0]));
 
-  surf->render_tex_handle = eglCreateImageKHR_ptr(
+  buf->render_tex_handle = eglCreateImageKHR_ptr(
       egl->egl_dsp, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, attribs);
-  if (surf->render_tex_handle == EGL_NO_IMAGE_KHR) {
+  if (buf->render_tex_handle == EGL_NO_IMAGE_KHR) {
     EGLint err = eglGetError();
     VT_ERROR(r->comp->log,
              "Failed to import dmabuf into EGLImage: error=0x%x "
@@ -314,19 +322,19 @@ bool _egl_gl_import_buffer_dmabuf(struct vt_renderer_t               *r,
 
   GLenum target = is_external_only ? GL_TEXTURE_EXTERNAL_OES : GL_TEXTURE_2D;
 
-  if (!surf->tex.id)
-    glGenTextures(1, &surf->tex.id);
+  if (!buf->tex.id)
+    glGenTextures(1, &buf->tex.id);
 
-  glBindTexture(target, surf->tex.id);
-  glEGLImageTargetTexture2DOES_ptr(target, surf->render_tex_handle);
+  glBindTexture(target, buf->tex.id);
+  glEGLImageTargetTexture2DOES_ptr(target, buf->render_tex_handle);
 
   glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
   glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
   glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
   glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-  surf->tex.width = a->width;
-  surf->tex.height = a->height;
+  buf->tex.width = a->width;
+  buf->tex.height = a->height;
 
   VT_TRACE(r->comp->log,
            "Imported dmabuf %ux%u fmt=0x%x mod=0x%016" PRIx64 " (%s)", a->width,
@@ -516,7 +524,8 @@ bool _egl_send_surface_release_fences(struct vt_renderer_t *renderer,
     wl_list_for_each_reverse(surf, &comp->surfaces, link) {
       if (!(surf->_mask_outputs_presented_on & (1u << output->id)))
         continue;
-      if (!surf->buf_res)
+      // TODO: maybe weird
+      if (!surf->buf)
         continue;
 
       struct vt_surface_release_t *release = surf->sync.release;
@@ -1122,46 +1131,58 @@ bool renderer_destroy_renderable_output_egl(struct vt_renderer_t *r,
 }
 
 bool renderer_import_buffer_egl(struct vt_renderer_t *r,
-                                struct vt_surface_t  *surf,
-                                struct wl_resource   *buffer_resource) {
-  struct wl_shm_buffer       *shmbuf = wl_shm_buffer_get(buffer_resource);
+                                struct vt_buffer_t *buf,
+                                const pixman_region32_t* damage) {
+  if (!buf)
+    return false;
+
+  struct wl_shm_buffer       *shmbuf = wl_shm_buffer_get(buf->res);
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
 
-  VT_TRACE(r->comp->log, "Importing buffer for surface %p", surf);
+  VT_TRACE(r->comp->log, "Importing buffer to handle %p", buf);
+
   if (shmbuf) {
     VT_TRACE(r->comp->log, "Importing buffer as SHM.");
-    return _egl_gl_import_buffer_shm(r, surf, shmbuf);
+    return _egl_gl_import_buffer_shm(r, buf, shmbuf, damage);
   }
 
   struct vt_linux_dmabuf_v1_buffer_t *dmabuf =
-      vt_proto_linux_dmabuf_v1_from_buffer_res(buffer_resource);
+      vt_proto_linux_dmabuf_v1_from_buffer_res(buf->res);
 
   if (dmabuf && egl->has_dmabuf_support) {
     // import dmabuf
     VT_TRACE(r->comp->log, "Importing buffer as DMABUF.");
-    return _egl_gl_import_buffer_dmabuf(r, dmabuf, surf);
+    return _egl_gl_import_buffer_dmabuf(r, dmabuf, buf);
   }
 
-  VT_WARN(r->comp->log, "Unknown buffer type for surface %p", surf);
+  VT_WARN(r->comp->log, "Unknown buffer import type for buffer %p", buf);
   return false;
 }
 
-bool renderer_destroy_surface_texture_egl(struct vt_renderer_t *r,
-                                          struct vt_surface_t  *surf) {
-  if (!surf || !r)
+bool renderer_destroy_buffer_texture_egl(struct vt_renderer_t *r,
+                                         struct vt_buffer_t   *buf) {
+  if (!buf || !r)
     return false;
-  struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
-  glBindTexture(GL_TEXTURE_2D, 0);
-  if (surf->tex.id)
-    glDeleteTextures(1, &surf->tex.id);
 
-  if (surf->render_tex_handle && surf->render_tex_handle != EGL_NO_IMAGE_KHR) {
-    eglDestroyImageKHR_ptr(egl->egl_dsp, (EGLImageKHR)surf->render_tex_handle);
-    surf->render_tex_handle = EGL_NO_IMAGE_KHR;
+  struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
+  if (buf->tex.id)
+    glDeleteTextures(1, &buf->tex.id);
+
+  VT_TRACE(r->comp->log, "Deleted OpenGL texture for buffer %p",
+           buf);
+
+  if (buf->render_tex_handle && buf->render_tex_handle != EGL_NO_IMAGE_KHR) {
+    eglDestroyImageKHR_ptr(egl->egl_dsp, (EGLImageKHR)buf->render_tex_handle);
+    buf->render_tex_handle = EGL_NO_IMAGE_KHR;
   }
-  surf->tex.id = 0;
-  surf->tex.width = 0;
-  surf->tex.height = 0;
+
+  buf->tex.id = 0;
+  buf->tex.width = 0;
+  buf->tex.height = 0;
+
+  VT_TRACE(r->comp->log, "Destroyed EGL Image handle for buffer %p",
+           buf);
+
   return true;
 }
 
@@ -1292,9 +1313,10 @@ void renderer_begin_frame_egl(struct vt_renderer_t *r,
 void renderer_draw_surface_egl(struct vt_renderer_t *r,
                                struct vt_output_t   *output,
                                struct vt_surface_t *surface, float x, float y) {
-  if (!surface)
+  if (!surface || !surface->buf)
     return;
-  if (!surface->tex.id)
+
+  if (!surface->buf->tex.id)
     return;
   if (!r || !r->impl.draw_surface || !r->user_data) {
     VT_ERROR(r->comp->log,
@@ -1308,9 +1330,9 @@ void renderer_draw_surface_egl(struct vt_renderer_t *r,
 
   rn_image_render(
       egl->render, (vec2s){x, y}, RN_WHITE,
-      (RnTexture){.id = surface->tex.id,
-                  .width = surface->tex.width * surface->buffer_scale,
-                  .height = surface->tex.height * surface->buffer_scale});
+      (RnTexture){.id = surface->buf->tex.id,
+                  .width = surface->buf->tex.width * surface->buffer_scale,
+                  .height = surface->buf->tex.height * surface->buffer_scale});
 
   surface->_mask_outputs_presented_on |= (1u << output->id);
 

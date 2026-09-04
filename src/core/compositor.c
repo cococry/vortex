@@ -1,3 +1,5 @@
+#include "src/core/buffer.h"
+#include <wayland-util.h>
 #define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
@@ -445,6 +447,16 @@ void _vt_comp_associate_surface_with_output(struct vt_compositor_t *c,
   }
 }
 
+static void _surface_current_buffer_destroyed(struct wl_listener *listener,
+                                              void               *data) {
+  struct vt_surface_t *surf = wl_container_of(listener, surf, buf_destroy);
+
+  surf->buf_res = NULL;
+  surf->buf_destroy_linked = false;
+
+  wl_list_init(&surf->buf_destroy.link);
+}
+
 void _vt_comp_wl_surface_create(struct wl_client   *client,
                                 struct wl_resource *resource, uint32_t id) {
   struct vt_compositor_t *c =
@@ -465,11 +477,16 @@ void _vt_comp_wl_surface_create(struct wl_client   *client,
   wl_list_init(&surf->subsurfaces);
 
   // Init the regions
-  pixman_region32_init(&surf->current_damage);
-  pixman_region32_init(&surf->pending_damage);
+  pixman_region32_init(&surf->pending.damage);
+  pixman_region32_init(&surf->damage);
+
+  pixman_region32_init(&surf->pending.opaque_region);
   pixman_region32_init(&surf->opaque_region);
-  pixman_region32_init(&surf->input_region);
+
   pixman_region32_init(&surf->pending.input_region);
+  pixman_region32_init(&surf->input_region);
+
+  vt_buffer_init(&surf->buf);
 
   // Add the surface to list of surfaces in the compositor
   wl_list_insert(&c->surfaces, &surf->link);
@@ -790,9 +807,13 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
   wl_list_init(&c->root_cursor->link_focus);
 
   // Init the damage regions
-  pixman_region32_init(&c->root_cursor->current_damage);
-  pixman_region32_init(&c->root_cursor->pending_damage);
+  pixman_region32_init(&c->root_cursor->pending.damage);
+  pixman_region32_init(&c->root_cursor->damage);
+
+  pixman_region32_init(&c->root_cursor->pending.opaque_region);
   pixman_region32_init(&c->root_cursor->opaque_region);
+
+  pixman_region32_init(&c->root_cursor->pending.input_region);
   pixman_region32_init(&c->root_cursor->input_region);
 
   // wl_list_insert(&c->surfaces, &c->root_cursor->link);

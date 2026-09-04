@@ -1,5 +1,7 @@
 #include "wl_surface.h"
 #include "pixman.h"
+#include "runara/runara.h"
+#include "src/core/buffer.h"
 #include "src/core/compositor.h"
 #include "src/core/scene.h"
 #include "src/core/surface.h"
@@ -92,9 +94,24 @@ void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
     return;
   }
 
-  VT_TRACE(surf->comp->log, "Got compositor.surface_attach.")
+  VT_TRACE(surf->comp->log, "Got compositor.surface_attach.");
 
-  surf->pending.buf_res = buffer;
+  /* Replace any previously pending buffer */
+  vt_buffer_unref(&surf->pending.buf);
+
+  if(buffer) {
+    struct vt_buffer_t* buf = vt_buffer_from_resource(surf->comp->renderer, buffer);
+
+    if(!buf) {
+      VT_WL_OUT_OF_MEMORY(surf->comp, client);
+      return;
+    }
+
+    surf->pending.buf = vt_buffer_ref(buf); 
+  } else { 
+    /* attach(NULL) */
+    surf->pending.buf = NULL;
+  }
 
   surf->pending.dx = x;
   surf->pending.dy = y;
@@ -119,20 +136,6 @@ static uint32_t _surface_effective_output_mask(struct vt_surface_t *surf) {
 static void
 _surface_drop_current_buffer(struct vt_surface_t *surf)
 {
-    if (!surf)
-        return;
-
-    struct vt_renderer_t *r = surf->comp->renderer;
-
-    if (r && r->impl.destroy_surface_texture)
-        r->impl.destroy_surface_texture(r, surf);
-
-    if (surf->buf_res) {
-        wl_buffer_send_release(surf->buf_res);
-        surf->buf_res = NULL;
-    }
-
-    surf->has_buffer = false;
 }
 
 void _wl_surface_commit(struct wl_client   *client,
@@ -156,13 +159,11 @@ void _wl_surface_commit(struct wl_client   *client,
     return;
   }
 
-  bool has_damage = !pixman_region32_empty(&surf->pending_damage);
+  bool has_damage = !pixman_region32_empty(&surf->pending.damage);
 
   /* 1. If the size of the surface changed, we need to
    * recalculate the outputs that the surface is visible on */
-  if (surf->width != surf->tex.width || surf->height != surf->tex.height) {
-    surf->_mask_outputs_visible_on = 0;
-  }
+  // TODO: do this ^  
 
   /* 2. Import attached buffer into the renderer */
   struct vt_renderer_t *r = surf->comp->renderer;
@@ -170,59 +171,58 @@ void _wl_surface_commit(struct wl_client   *client,
   bool had_buffer_attached = surf->pending.buffer_attached;
 
   if (surf->pending.buffer_attached) {
-    struct wl_resource *new_buffer = surf->pending.buf_res;
+    struct vt_buffer_t *new_buffer = surf->pending.buf;
 
     if (!new_buffer) {
-      if (surf->has_buffer) {
+      VT_TRACE(surf->comp->log,
+               "Got wl_surface.attach(NULL), dropping buffer and unmapping "
+               "surface %p",
+               surf);
+      if (surf->buf != NULL) {
         vt_comp_surf_mark_damaged(surf->comp, surf);
       }
 
-      _surface_drop_current_buffer(surf);
-
-      surf->width = 0;
-      surf->height = 0;
+      vt_buffer_unref(&surf->buf);
 
       vt_surface_unmapped(surf);
     } else {
-      if (surf->has_buffer)
-        _surface_drop_current_buffer(surf);
+      VT_TRACE(surf->comp->log,
+               "Importing new buffer (resource: %p) for surface %p", new_buffer,
+               surf);
 
-      if (r && r->impl.import_buffer) {
-        if (!r->impl.import_buffer(r, surf, new_buffer)) {
-          // TODO: handle error
-        } else {
-          surf->buf_res = new_buffer;
-          surf->has_buffer = true;
-
-          surf->width = surf->tex.width;
-          surf->height = surf->tex.height;
-        }
+      if (!vt_buffer_import(&surf->buf, &surf->damage)) {
+        vt_buffer_unref(&surf->buf);
+        return;
       }
+
+      vt_buffer_unref(&surf->buf);
+
+      surf->buf = new_buffer;
     }
 
-    surf->pending.buf_res = NULL;
+    surf->pending.buf = NULL;
     surf->pending.buffer_attached = false;
+
+
   }
 
-  pixman_region32_clear(&surf->current_damage);
+  pixman_region32_clear(&surf->damage);
 
   if (has_damage) {
-    pixman_region32_union(&surf->current_damage, &surf->current_damage,
-                          &surf->pending_damage);
+    pixman_region32_union(&surf->damage, &surf->damage,
+                          &surf->pending.damage);
   }
 
-  pixman_region32_clear(&surf->pending_damage);
+  pixman_region32_clear(&surf->pending.damage);
 
-  if (had_buffer_attached && surf->has_buffer) {
-    pixman_region32_union_rect(&surf->current_damage, &surf->current_damage, 0,
-                               0, surf->width, surf->height);
+  if (had_buffer_attached && surf->buf) {
+    // TODO: maybe not do this 
+    pixman_region32_union_rect(&surf->damage, &surf->damage, 0, 0,
+                               surf->buf->tex.width, surf->buf->tex.height);
+
+    pixman_region32_intersect_rect(&surf->damage, &surf->damage, 0, 0,
+                                   surf->buf->tex.width, surf->buf->tex.height);
   }
-
-  pixman_region32_intersect_rect(&surf->current_damage, &surf->current_damage,
-                                 0, 0, surf->width, surf->height);
-
-  surf->width = surf->tex.width;
-  surf->height = surf->tex.height;
 
   if (surf->role_impl.commit)
     surf->role_impl.commit(surf);
@@ -263,24 +263,21 @@ void _wl_surface_commit(struct wl_client   *client,
 
   /* 5. If the surface has not yet been mapped and has a
    * valid XDG Surface and XDG Surface role, trigger a map request. */
-  if (!surf->mapped && surf->has_buffer && is_valid_xdg_surf) {
+  if (!surf->mapped && surf->buf && is_valid_xdg_surf) {
     vt_surface_mapped(surf);
   }
 
-  if (surf->subsurface) {
-    surf->mapped = surf->has_buffer;
+  if (surf->subsurface || surf->type == VT_SURFACE_TYPE_CURSOR) {
+    surf->mapped = surf->buf != NULL;
   }
-  if (surf->type == VT_SURFACE_TYPE_CURSOR)
-    surf->mapped = surf->has_buffer;
 
-  bool new_frame_cbs = surf->cb_pool.n_cbs > 0 && surf->mapped;
-
-  bool needs_repaint = has_damage || had_buffer_attached || new_frame_cbs;
+  bool needs_repaint = surf->mapped && (has_damage || had_buffer_attached ||
+                                        surf->cb_pool.n_cbs > 0);
 
   if (needs_repaint) {
     pixman_region32_t global_damage;
     pixman_region32_init(&global_damage);
-    pixman_region32_copy(&global_damage, &surf->current_damage);
+    pixman_region32_copy(&global_damage, &surf->damage);
 
     pixman_region32_translate(&global_damage, surf->x, surf->y);
 
@@ -309,6 +306,14 @@ void _wl_surface_commit(struct wl_client   *client,
     surf->pending.input_region_changed = false;
   }
 
+  if (surf->pending.opaque_region_changed) {
+    pixman_region32_copy(&surf->opaque_region, &surf->pending.opaque_region);
+
+    pixman_region32_clear(&surf->pending.opaque_region);
+
+    surf->pending.opaque_region_changed = false;
+  }
+
   struct vt_surface_release_t *release = surf->pending.release;
   surf->pending.release = NULL;
   if (release) {
@@ -326,7 +331,8 @@ void _wl_surface_commit(struct wl_client   *client,
            "COMMIT surf=%p parent=%p mapped=%d "
            "mask=0x%x buffer resource=%p",
            surf, surf->subsurface ? surf->subsurface->parent : NULL,
-           surf->mapped, surf->_mask_outputs_visible_on, surf->buf_res);
+           surf->mapped, surf->_mask_outputs_visible_on,
+           surf->buf ? surf->buf->res : NULL);
 }
 
 void _wl_surface_frame(struct wl_client *client, struct wl_resource *resource,
@@ -380,7 +386,7 @@ void _wl_surface_damage(struct wl_client *client, struct wl_resource *resource,
 
   /* 1. Union the requested damage into the pending damage region
    * of the surface. */
-  pixman_region32_union_rect(&surf->pending_damage, &surf->pending_damage, x, y,
+  pixman_region32_union_rect(&surf->pending.damage, &surf->pending.damage, x, y,
                              width, height);
 
   /* 2. Makr all outputs the surface intersects with for needing a damage
@@ -393,7 +399,7 @@ void _wl_surface_damage(struct wl_client *client, struct wl_resource *resource,
   }
 
   /* 3. Set surface .damaged flag to avoid calling
-   * pixman_region32_empty(surf->current_damage) */
+   * pixman_region32_empty(surf->damage) */
   surf->damaged = true;
 }
 void _wl_surface_damage_buffer(struct wl_client   *client,
@@ -408,7 +414,7 @@ void _wl_surface_damage_buffer(struct wl_client   *client,
 
   /* 1. Union the requested damage into the pending damage region
    * of the surface. */
-  pixman_region32_union_rect(&surf->pending_damage, &surf->pending_damage, x, y,
+  pixman_region32_union_rect(&surf->pending.damage, &surf->pending.damage, x, y,
                              width, height);
 
   /* 2. Makr all outputs the surface intersects with for needing a damage
@@ -422,7 +428,7 @@ void _wl_surface_damage_buffer(struct wl_client   *client,
   }
 
   /* 3. Set surface .damaged flag to avoid calling
-   * pixman_region32_empty(surf->current_damage) */
+   * pixman_region32_empty(surf->damage) */
   surf->damaged = true;
 }
 
@@ -441,16 +447,20 @@ void _wl_surface_set_opaque_region(struct wl_client   *client,
    * If the region is set, we copy the internal handler of the given
    * region resource (pixman_region32_t) into the opaque_region region
    * of the surface. */
+  pixman_region32_clear(&surf->pending.opaque_region);
+
   if (region) {
     struct vt_region_t *r = wl_resource_get_user_data(region);
-    pixman_region32_copy(&surf->opaque_region, &r->region);
-  } else {
-    pixman_region32_clear(&surf->opaque_region);
+
+    if (!r)
+      return;
+
+    pixman_region32_copy(&surf->pending.opaque_region, &r->region);
   }
 
   VT_TRACE(surf->comp->log,
-           "surface.set_opaque_region: updated opaque region for surface %p",
-           surf);
+           "surface.set_opaque_region: pending opaque region for surface %p",
+           (void *)surf);
 }
 
 void _wl_surface_set_input_region(struct wl_client   *client,
@@ -593,8 +603,8 @@ void _wl_surface_handle_resource_destroy(struct wl_resource *resource) {
 
   const int32_t x = surf->x;
   const int32_t y = surf->y;
-  const int32_t w = surf->width;
-  const int32_t h = surf->height;
+  const int32_t w = surf->buf ? surf->buf->tex.width : 0;
+  const int32_t h = surf->buf ? surf->buf->tex.height : 0;
 
   VT_TRACE(surf->comp->log, "Got surface.destroy handler: Unmanaging client.")
 
@@ -631,10 +641,13 @@ void _wl_surface_handle_resource_destroy(struct wl_resource *resource) {
   }
 
   /* Deallocate pixman regions */
-  pixman_region32_fini(&surf->pending_damage);
-  pixman_region32_fini(&surf->current_damage);
-  pixman_region32_init(&surf->input_region);
+  pixman_region32_fini(&surf->pending.damage);
+  pixman_region32_fini(&surf->damage);
+
   pixman_region32_init(&surf->pending.input_region);
+  pixman_region32_init(&surf->input_region);
+  
+  pixman_region32_init(&surf->pending.opaque_region);
   pixman_region32_fini(&surf->opaque_region);
 
   /* Destroy the attached render texture */
@@ -669,9 +682,19 @@ void _wl_surface_handle_resource_destroy(struct wl_resource *resource) {
 void _wl_surface_associate_with_output(struct vt_compositor_t *c,
                                        struct vt_surface_t    *surf,
                                        struct vt_output_t     *output) {
-  if (surf->x + surf->width <= output->x ||
+  if(!surf || !c || !output) 
+    return;
+
+  if(!surf->buf) {
+    surf->_mask_outputs_visible_on = 0;
+    return;
+  }
+
+  // TODO: Not use buffer width
+  RnTexture tex = surf->buf->tex;
+  if (surf->x + tex.width <= output->x ||
       surf->x >= output->x + output->width ||
-      surf->y + surf->height <= output->y ||
+      surf->y + tex.height <= output->y ||
       surf->y >= output->y + output->height)
     return;
   surf->_mask_outputs_visible_on |= (1u << output->id);

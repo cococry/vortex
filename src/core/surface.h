@@ -4,6 +4,7 @@
 #include "../protocols/wl_subcompositor.h"
 #include "../protocols/xdg_shell.h"
 #include "scene.h"
+#include "src/core/buffer.h"
 #include <wayland-server.h>
 #define VT_MAX_FRAME_CBS 8
 
@@ -24,12 +25,18 @@ struct vt_surface_release_t {
 struct vt_surface_pending_state_t {
   int32_t                      acquire_fence_fd;
   struct vt_surface_release_t *release;
+
   pixman_region32_t            input_region;
   bool                         input_region_changed;
   bool                         input_region_set;
   bool                         buffer_attached;
 
-  struct wl_resource *buf_res;
+  pixman_region32_t            opaque_region;
+  bool                         opaque_region_changed;
+
+  pixman_region32_t            damage;
+
+  struct vt_buffer_t *buf;
 
   int32_t dx;
   int32_t dy;
@@ -48,33 +55,30 @@ struct vt_surface_role_impl_t {
 
 struct vt_surface_t {
   struct wl_resource *surf_res;
-  struct wl_resource *buf_res;
+
+  struct vt_buffer_t* buf;
 
   struct vt_xdg_surface_t *xdg_surf;
-
-  RnTexture tex;
-  void     *render_tex_handle;
 
   struct wl_list link, link_focus;
 
   struct vt_compositor_t *comp;
 
-  uint32_t width, height;
-  int32_t  x, y, dx, dy, hotspot_x, hotspot_y;
+  int32_t  x, y, dx, dy;
 
   struct vt_surface_role_impl_t role_impl;
 
   bool needs_frame_done;
 
-  bool has_buffer, mapped;
+  bool mapped;
 
   uint32_t _mask_outputs_visible_on;
   uint32_t _mask_outputs_presented_on;
 
   void *user_data;
 
-  pixman_region32_t current_damage;
-  pixman_region32_t pending_damage;
+  pixman_region32_t damage;
+
   pixman_region32_t opaque_region;
 
   pixman_region32_t input_region;
