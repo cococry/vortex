@@ -23,8 +23,6 @@ void vt_comp_schedule_repaint(struct vt_compositor_t *c,
 void vt_comp_repaint_scene(struct vt_compositor_t *c,
                            struct vt_output_t     *output);
 
-void vt_comp_invalidate_all_surfaces(struct vt_compositor_t *comp);
-
 struct vt_surface_t *vt_comp_pick_surface(struct vt_compositor_t *comp,
                                           double x, double y);
 

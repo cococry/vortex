@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../core/core_types.h"
-#include "src/core/buffer.h"
+#include "../core/buffer.h"
 #include <wayland-util.h>
 
 enum vt_rendering_backend_t {

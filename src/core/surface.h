@@ -4,7 +4,7 @@
 #include "../protocols/wl_subcompositor.h"
 #include "../protocols/xdg_shell.h"
 #include "scene.h"
-#include "src/core/buffer.h"
+#include "../core/buffer.h"
 #include <wayland-server.h>
 #define VT_MAX_FRAME_CBS 8
 

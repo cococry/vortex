@@ -182,6 +182,7 @@ void _wl_surface_commit(struct wl_client   *client,
         vt_comp_surf_mark_damaged(surf->comp, surf);
       }
 
+      /* Drop ownership of current buffer */
       vt_buffer_unref(&surf->buf);
 
       vt_surface_unmapped(surf);
@@ -190,11 +191,15 @@ void _wl_surface_commit(struct wl_client   *client,
                "Importing new buffer (resource: %p) for surface %p", new_buffer,
                surf);
 
-      if (!vt_buffer_import(&surf->buf, &surf->damage)) {
+      /* Import from the new resource */
+      surf->buf->res = new_buffer->res;
+
+      if (!vt_buffer_import(surf->buf, &surf->damage)) {
         vt_buffer_unref(&surf->buf);
         return;
       }
 
+      /* Drop ownership of current buffer */
       vt_buffer_unref(&surf->buf);
 
       surf->buf = new_buffer;
@@ -202,8 +207,6 @@ void _wl_surface_commit(struct wl_client   *client,
 
     surf->pending.buf = NULL;
     surf->pending.buffer_attached = false;
-
-
   }
 
   pixman_region32_clear(&surf->damage);

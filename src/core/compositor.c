@@ -1,5 +1,3 @@
-#include "src/core/buffer.h"
-#include <wayland-util.h>
 #define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
@@ -10,6 +8,7 @@
 #include "src/protocols/wl_subcompositor.h"
 #include "src/protocols/wl_surface.h"
 #include "src/protocols/xdg_shell.h"
+#include "src/core/buffer.h"
 #include "src/render/renderer.h"
 
 #include <dirent.h>
@@ -430,10 +429,12 @@ void _vt_comp_load_backend(struct vt_compositor_t *c, const char *backend_name,
 void _vt_comp_associate_surface_with_output(struct vt_compositor_t *c,
                                             struct vt_surface_t    *surf,
                                             struct vt_output_t     *output) {
+  // TODO: Do not rely on buffer size
   // Skip if surface and output don’t intersect
-  if (surf->x + surf->width <= output->x ||
+  if(!surf || !surf->buf) return;
+  if (surf->x + surf->buf->tex.width <= output->x ||
       surf->x >= output->x + output->width ||
-      surf->y + surf->height <= output->y ||
+      surf->y + surf->buf->tex.height <= output->y ||
       surf->y >= output->y + output->height)
     return;
 
@@ -445,16 +446,6 @@ void _vt_comp_associate_surface_with_output(struct vt_compositor_t *c,
   if (visibility_updated) {
     output->needs_damage_rebuild = true;
   }
-}
-
-static void _surface_current_buffer_destroyed(struct wl_listener *listener,
-                                              void               *data) {
-  struct vt_surface_t *surf = wl_container_of(listener, surf, buf_destroy);
-
-  surf->buf_res = NULL;
-  surf->buf_destroy_linked = false;
-
-  wl_list_init(&surf->buf_destroy.link);
 }
 
 void _vt_comp_wl_surface_create(struct wl_client   *client,
@@ -485,8 +476,6 @@ void _vt_comp_wl_surface_create(struct wl_client   *client,
 
   pixman_region32_init(&surf->pending.input_region);
   pixman_region32_init(&surf->input_region);
-
-  vt_buffer_init(&surf->buf);
 
   // Add the surface to list of surfaces in the compositor
   wl_list_insert(&c->surfaces, &surf->link);
@@ -801,8 +790,10 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
   c->root_cursor->x = 0;
   c->root_cursor->y = 0;
   c->root_cursor->type = VT_SURFACE_TYPE_CURSOR;
-  c->root_cursor->width = 20;
-  c->root_cursor->height = 20;
+  struct vt_buffer_t* fake_cursor_buf = calloc(1, sizeof(*c->root_cursor->buf));
+  fake_cursor_buf->tex.width = 20;
+  fake_cursor_buf->tex.height= 20;
+  c->root_cursor->buf = fake_cursor_buf;
   c->root_cursor->buffer_scale = 1;
   wl_list_init(&c->root_cursor->link_focus);
 
@@ -910,47 +901,12 @@ void vt_comp_repaint_scene(struct vt_compositor_t *c,
   vt_scene_render(c->renderer, output, c->root_node);
 }
 
-void vt_comp_invalidate_all_surfaces(struct vt_compositor_t *comp) {
-  if (!comp)
-    return;
-
-  VT_TRACE(comp->log, "Invalidating all surface GPU imports...");
-  struct vt_output_t *output;
-  wl_list_for_each(output, &comp->outputs, link_global) {
-    output->needs_damage_rebuild = true;
-  }
-
-  struct vt_surface_t *surf, *tmp;
-  wl_list_for_each_safe(surf, tmp, &comp->surfaces, link) {
-    // Destroy GPU texture if surface has one
-    if (surf->tex.id) {
-      struct vt_renderer_t *r = comp->renderer;
-      if (r && r->impl.destroy_surface_texture) {
-        r->impl.destroy_surface_texture(r, surf);
-      }
-      memset(&surf->tex, 0, sizeof(surf->tex));
-    }
-
-    // Force re-import
-    surf->_mask_outputs_visible_on = 0;
-
-    // Optionally, if the client still has a buffer attached, ask it to repaint
-    if (surf->buf_res) {
-      // Send a frame done to poke the client
-      uint32_t            t = vt_util_get_time_msec();
-      struct wl_resource *cb = wl_resource_create(
-          wl_resource_get_client(surf->buf_res), &wl_callback_interface, 1, 0);
-      if (cb)
-        ;
-      wl_callback_send_done(cb, t);
-    }
-  }
-}
-
 static bool _surface_accepts_input(struct vt_surface_t *surf, double sx,
                                    double sy) {
+  // TODO: Do not rely on buffer size
+  if(!surf || !surf->buf) return false;
   if (!surf->input_region_set) {
-    return sx >= 0 && sy >= 0 && sx < surf->width && sy < surf->height;
+    return sx >= 0 && sy >= 0 && sx < surf->buf->tex.width && sy < surf->buf->tex.height;
   }
 
   return pixman_region32_contains_point(&surf->input_region, (int32_t)sx,
@@ -990,10 +946,13 @@ static struct vt_surface_t *_scene_pick_surface(struct vt_scene_node_t *node,
   if (surf->type != VT_SURFACE_TYPE_NORMAL)
     return NULL;
 
-  double w = surf->width;
-  double h = surf->height;
+  if(!surf->buf) return NULL;
 
-  if (px < x || py < y || px >= x + surf->width || py >= y + surf->height) {
+  // TODO: Do not rely on buffer size
+  double w = surf->buf->tex.width;
+  double h = surf->buf->tex.height;
+
+  if (px < x || py < y || px >= x + w || py >= y + h) {
     return NULL;
   }
 
@@ -1014,8 +973,9 @@ struct vt_surface_t *vt_comp_pick_surface(struct vt_compositor_t *comp,
 void vt_comp_damage_entire_surface(struct vt_compositor_t *comp,
                                    struct vt_surface_t *surf, int32_t x,
                                    int32_t y) {
-  if (!surf)
+  if (!surf || !surf->buf)
     return;
+
   surf->damaged = true;
   struct vt_output_t *output;
   wl_list_for_each(output, &comp->outputs, link_global) {
@@ -1028,11 +988,11 @@ void vt_comp_damage_entire_surface(struct vt_compositor_t *comp,
                                  output->width, output->height);
     } else {
       pixman_region32_union_rect(&output->damage, &output->damage, surf->x,
-                                 surf->y, surf->width * surf->buffer_scale,
-                                 surf->height * surf->buffer_scale);
+                                 surf->y, surf->buf->tex.width * surf->buffer_scale,
+                                 surf->buf->tex.height * surf->buffer_scale);
       pixman_region32_union_rect(&output->damage, &output->damage, x, y,
-                                 surf->width * surf->buffer_scale,
-                                 surf->height * surf->buffer_scale);
+                                 surf->buf->tex.width * surf->buffer_scale,
+                                 surf->buf->tex.height * surf->buffer_scale);
       surf->x = x;
       surf->y = y;
     }

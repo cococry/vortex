@@ -2,7 +2,7 @@
 
 #include "core_types.h"
 #include "pixman.h"
-#include "src/render/renderer.h"
+#include "../render/renderer.h"
 #include <runara/runara.h>
 
 struct vt_buffer_t {
