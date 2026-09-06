@@ -24,8 +24,8 @@ struct vt_scene_node_t *vt_scene_node_create(struct vt_compositor_t *c,
 
   n->rect.x = surf->x;
   n->rect.y = surf->y;
-  n->rect.width = surf->width;
-  n->rect.height = surf->height;
+  n->rect.width = surf->buf ? surf->buf->tex.width : 0;
+  n->rect.height = surf->buf ? surf->buf->tex.height : 0;
 
   if (surf)
     surf->scene_node = n;
@@ -300,13 +300,13 @@ static void _damage_pass(struct vt_renderer_t *r, struct vt_output_t *output) {
                                    prev_cur_y, prev_cur_w, prev_cur_h);
       }
       struct vt_surface_t *under_cursor = r->comp->seat->ptr_focus.surf;
-      if (under_cursor) {
+      if (under_cursor && surf->buf) {
         int32_t hx, hy;
         _get_cursor_hotspot(under_cursor, &hx, &hy);
         pixman_region32_union_rect(&output->damage, &output->damage,
                                    seat->pointer_x - hx, seat->pointer_y - hy,
-                                   surf->width * surf->buffer_scale,
-                                   surf->height * surf->buffer_scale);
+                                   surf->buf->tex.width * surf->buffer_scale,
+                                   surf->buf->tex.height * surf->buffer_scale);
         surf->damaged = false;
       }
     }

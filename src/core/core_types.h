@@ -1,5 +1,10 @@
 #pragma once
 
+struct vt_renderer_t;
+struct vt_surface_t;
+struct vt_backend_t;
+struct vt_output_t;
+
 #include <stdbool.h>
 
 #include <pixman.h>
@@ -17,11 +22,6 @@
 
 #define VT_ALLOC(c, size)       vt_util_alloc(&(c)->arena, (size))
 #define VT_ALLOC_FRAME(c, size) vt_util_alloc(&(c)->frame_arena, (size))
-
-struct vt_renderer_t;
-struct vt_surface_t;
-struct vt_backend_t;
-struct vt_output_t;
 
 struct log_state_t {
   FILE *stream;

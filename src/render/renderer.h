@@ -1,8 +1,9 @@
 #pragma once
 
 #include "../core/core_types.h"
-#include "../core/buffer.h"
 #include <wayland-util.h>
+
+struct vt_buffer_t;
 
 enum vt_rendering_backend_t {
   VT_RENDERING_BACKEND_EGL_OPENGL = 0,

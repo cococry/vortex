@@ -191,10 +191,8 @@ void _wl_surface_commit(struct wl_client   *client,
                "Importing new buffer (resource: %p) for surface %p", new_buffer,
                surf);
 
-      /* Import from the new resource */
-      surf->buf->res = new_buffer->res;
-
-      if (!vt_buffer_import(surf->buf, &surf->damage)) {
+      /* import from the pending resource */
+      if (!vt_buffer_import(surf->pending.buf, &surf->damage)) {
         vt_buffer_unref(&surf->buf);
         return;
       }

@@ -122,6 +122,7 @@ vortex_src = files('src/vortex.c',
 'src/core/util.h',
 'src/core/surface.c',
 'src/core/surface.h',
+'src/core/buffer.c',
 'src/core/scene.c',
 'src/core/scene.h',
 )

@@ -21,6 +21,9 @@ static void _buffer_destroyed(struct wl_listener *listener, void *data) {
 
   if(!buf) return;
 
+  VT_TRACE(buf->renderer->comp->log,
+           "Buffer resource %p (wrapper: %p) destroyed.", buf->res, buf);
+
   buf->res = NULL;
 
   _buffer_unref_raw(buf);
@@ -37,7 +40,7 @@ struct vt_buffer_t* _buffer_create_from_resource(struct vt_renderer_t* renderer,
     VT_ERROR(renderer->comp->log, "calloc() failed: %s", strerror(errno));
     return NULL;
   }
-  
+
   buf->renderer = renderer;
 
   wl_list_init(&buf->destroy.link);
@@ -46,7 +49,12 @@ struct vt_buffer_t* _buffer_create_from_resource(struct vt_renderer_t* renderer,
   wl_resource_add_destroy_listener(res, &buf->destroy);
   buf->destroy_linked = true;
 
-  buf->refcount = 1;
+  buf->res = res;
+
+  buf->refcount = 0;
+
+  VT_TRACE(renderer->comp->log,
+           "Allocated buffer resource wrapper %p (resource: %p)", buf, res);
 
   return buf;
 }
@@ -99,7 +107,12 @@ void vt_buffer_destroy(struct vt_buffer_t *buf) {
   if (buf->res) {
     wl_buffer_send_release(buf->res);
   }
-  buf->res = NULL;
+
+  VT_TRACE(r->comp->log, "Sent wl_buffer.release to %p", buf);
+
+  if(buf->res != NULL) return;
+  
+  VT_TRACE(r->comp->log, "Deallocating buffer resource wrapper %p...", buf);
 
   if (buf->destroy_linked) {
     wl_list_remove(&buf->destroy.link);
@@ -108,7 +121,7 @@ void vt_buffer_destroy(struct vt_buffer_t *buf) {
   }
 
   if (r && r->comp)
-    VT_TRACE(r->comp->log, "Successfully dropped buffer %p", buf);
+    VT_TRACE(r->comp->log, "Deallocated buffer resource wrapper %p", buf);
 
   free(buf);
 }
