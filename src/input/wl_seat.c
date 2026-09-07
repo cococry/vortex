@@ -573,8 +573,6 @@ void vt_seat_handle_pointer_button(struct vt_seat_t *seat, uint32_t button,
       wl_pointer_send_frame(ptr->res);
     }
   }
-
-  vt_comp_surf_mark_damaged(surf->comp, surf);
 }
 
 struct vt_keybind_t *vt_seat_add_global_keybind(
