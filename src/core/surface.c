@@ -128,3 +128,32 @@ void vt_surface_unmapped(struct vt_surface_t *surf) {
 
   vt_seat_set_keyboard_focus(seat, new_focus);
 }
+
+bool vt_surface_apply_buffer(struct vt_surface_t *surf,
+                             struct vt_buffer_t  *buf) {
+  if (!surf || !surf->comp || !buf)
+    return false;
+
+  if (!buf) {
+    if (surf->applied.buf != NULL) {
+      vt_comp_surf_mark_damaged(surf->comp, surf);
+    }
+
+    vt_buffer_unref(&surf->applied.buf);
+
+    vt_surface_unmapped(surf);
+
+    return true;
+  }
+
+  /* import from the new buffer */
+  if (!vt_buffer_import(buf, &surf->applied.damage)) {
+    return false;
+  }
+
+  vt_buffer_unref(&surf->applied.buf);
+
+  surf->applied.buf = buf;
+
+  return true;
+}

@@ -459,23 +459,17 @@ void _vt_comp_wl_surface_create(struct wl_client   *client,
   // Allocate the struct to store protocol information about the surface
   struct vt_surface_t *surf = calloc(1, sizeof(*surf));
   surf->comp = c;
-  surf->x = 0;
-  surf->buffer_scale = 1.0f;
-  surf->y = 0;
-  surf->type = VT_SURFACE_TYPE_NORMAL;
   wl_list_init(&surf->link_focus);
-
-  wl_list_init(&surf->subsurfaces);
 
   // Init the regions
   pixman_region32_init(&surf->pending.damage);
-  pixman_region32_init(&surf->damage);
+  pixman_region32_init(&surf->current.damage);
 
   pixman_region32_init(&surf->pending.opaque_region);
-  pixman_region32_init(&surf->opaque_region);
+  pixman_region32_init(&surf->current.opaque_region);
 
   pixman_region32_init(&surf->pending.input_region);
-  pixman_region32_init(&surf->input_region);
+  pixman_region32_init(&surf->current.input_region);
 
   // Add the surface to list of surfaces in the compositor
   wl_list_insert(&c->surfaces, &surf->link);
@@ -488,8 +482,8 @@ void _vt_comp_wl_surface_create(struct wl_client   *client,
     VT_ERROR(c->log, "compositor.surface_create: Failed to create surface.");
     return;
   }
-  if (c->have_proto_dmabuf)
-    vt_proto_linux_dmabuf_v1_set_surface_feedback(surf);
+
+  wl_list_init(&surf->addons);
 
   vt_scene_node_add_child(c, c->root_node, vt_scene_node_create(c, surf));
 }

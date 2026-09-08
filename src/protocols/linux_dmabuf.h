@@ -1,7 +1,7 @@
 #pragma once
 
 #include "../core/core_types.h"
-#include "../core/surface.h"
+#include "../core/surface_addon.h"
 #include "../render/dmabuf.h"
 
 #include "../render/dmabuf_attr.h"
@@ -12,7 +12,8 @@ struct vt_linux_dmabuf_v1_buffer_t {
   struct wl_resource     *res;
 };
 
-struct vt_linux_dmabuf_v1_surface_t {
+struct vt_linux_dmabuf_v1_surface_state_t {
+  struct vt_surface_addon_t addon;
   struct vt_surface_t *surf;
   struct wl_list       link;
 

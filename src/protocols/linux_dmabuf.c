@@ -57,7 +57,7 @@ struct vt_proto_linux_dmabuf_v1_t {
   struct vt_linux_dmabuf_v1_packed_feedback_t *default_feedback;
   int32_t                                      fd_main_dev;
 
-  struct wl_list dmabuf_surfaces;
+  struct wl_list dmabuf_surface_states;
 };
 
 struct vt_linux_dmabuf_v1_params_t {
@@ -65,6 +65,8 @@ struct vt_linux_dmabuf_v1_params_t {
   struct vt_dmabuf_attr_t attr;
   bool                    has_mod;
 };
+
+static void _linux_dmabuf_surface_destroy_addon(struct vt_surface_addon *addon);
 
 static void _proto_linux_dmabuf_v1_bind(struct wl_client *client, void *data,
                                         uint32_t version, uint32_t id);
@@ -140,7 +142,7 @@ static void _linux_dmabuf_free_feedback(
 static void
 _linux_dmabuf_close_params(struct vt_linux_dmabuf_v1_params_t *params);
 
-static struct vt_linux_dmabuf_v1_surface_t *
+static struct vt_linux_dmabuf_v1_surface_state_t *
 _linux_dmabuf_surface_from_surf(struct vt_surface_t *surf);
 
 static void _linux_dmabuf_send_feedback(
@@ -172,6 +174,19 @@ static const struct zwp_linux_dmabuf_feedback_v1_interface
 
 static const struct wl_buffer_interface _dmabuf_wl_buffer_impl = {
     .destroy = _linux_dmabuf_v1_buffer_destroy,
+};
+
+static void
+_linux_dmabuf_surface_destroy_addon(struct vt_surface_addon *addon) {
+  struct vt_linux_dmabuf_v1_surface_state_t *state =
+      wl_container_of(addon, state, addon);
+
+  vt_proto_linux_dmabuf_v1_surface_destroy(state->surf);
+}
+
+static const struct vt_surface_addon_impl dmabuf_surface_addon_impl = {
+    .name = "linux-dmabuf-v1",
+    .destroy = _linux_dmabuf_surface_destroy_addon,
 };
 
 // ===================================================
@@ -241,9 +256,9 @@ void _proto_linux_dmabuf_v1_destroy(struct vt_proto_linux_dmabuf_v1_t *dmabuf) {
   dmabuf->default_feedback = NULL;
 
   /* 2. Destroy all associated DMA-BUF surfaces */
-  struct vt_linux_dmabuf_v1_surface_t *surface;
-  struct vt_linux_dmabuf_v1_surface_t *surface_tmp;
-  wl_list_for_each_safe(surface, surface_tmp, &dmabuf->dmabuf_surfaces, link) {
+  struct vt_linux_dmabuf_v1_surface_state_t *surface;
+  struct vt_linux_dmabuf_v1_surface_state_t *surface_tmp;
+  wl_list_for_each_safe(surface, surface_tmp, &dmabuf->dmabuf_surface_states, link) {
     vt_proto_linux_dmabuf_v1_surface_destroy(surface->surf);
   }
 
@@ -365,7 +380,7 @@ void _linux_dmabuf_v1_get_surface_feedback(struct wl_client   *client,
   }
 
   /* 2. Retrieve internal DMA-BUF surface handle */
-  struct vt_linux_dmabuf_v1_surface_t *dmabuf_surf =
+  struct vt_linux_dmabuf_v1_surface_state_t *dmabuf_surf =
       _linux_dmabuf_surface_from_surf(surf);
   if (!dmabuf_surf) {
     VT_WL_OUT_OF_MEMORY(_proto->comp, client);
@@ -1156,7 +1171,7 @@ void _linux_dmabuf_close_params(struct vt_linux_dmabuf_v1_params_t *params) {
   params->attr.num_planes = 0;
 }
 
-struct vt_linux_dmabuf_v1_surface_t *
+struct vt_linux_dmabuf_v1_surface_state_t *
 _linux_dmabuf_surface_from_surf(struct vt_surface_t *surf) {
   /* 1. Validate params */
   if (!surf) {
@@ -1165,20 +1180,26 @@ _linux_dmabuf_surface_from_surf(struct vt_surface_t *surf) {
   }
 
   /* 2. Reuse existing surface handle if present */
-  if (surf->dmabuf_surf)
-    return surf->dmabuf_surf;
+  if (surf->proto_state.linux_dmabuf_v1)
+    return surf->proto_state.linux_dmabuf_v1;
 
-  /* 3. Allocate new DMA-BUF surface wrapper */
-  struct vt_linux_dmabuf_v1_surface_t *dmabuf_surf =
+  /* 3. Allocate new DMA-BUF surface state */
+  struct vt_linux_dmabuf_v1_surface_state_t *dmabuf_surf =
       calloc(1, sizeof(*dmabuf_surf));
+
   if (!dmabuf_surf)
     return NULL;
 
   /* 4. Initialize linkage */
   dmabuf_surf->surf = surf;
-  surf->dmabuf_surf = dmabuf_surf;
+  surf->proto_state.linux_dmabuf_v1 = dmabuf_surf;
+  
   wl_list_init(&dmabuf_surf->res_feedback);
-  wl_list_insert(&_proto->dmabuf_surfaces, &dmabuf_surf->link);
+
+  dmabuf_surf->addon.impl = &dmabuf_surface_addon_impl;
+  wl_list_insert(&surf->addons, &dmabuf_surf->addon.link);
+
+  wl_list_insert(&_proto->dmabuf_surface_states, &dmabuf_surf->link);
 
   VT_TRACE(_proto->comp->log,
            "linux_dmabuf.surface_from_surf: created dmabuf surface %p for %p.",
@@ -1340,7 +1361,7 @@ bool vt_proto_linux_dmabuf_v1_init(
   }
 
   /* 4. Initialize surface list */
-  wl_list_init(&_proto->dmabuf_surfaces);
+  wl_list_init(&_proto->dmabuf_surface_states);
 
   /* 5. Attach display destroy listener */
   _proto->dsp_destroy.notify = _proto_linux_dmabuf_v1_handle_dsp_destroy;
@@ -1379,8 +1400,9 @@ void vt_proto_linux_dmabuf_v1_surface_destroy(struct vt_surface_t *surf) {
   }
 
   /* 2. Retrieve associated DMABUF surface */
-  struct vt_linux_dmabuf_v1_surface_t *dmabuf_surf =
+  struct vt_linux_dmabuf_v1_surface_state_t *dmabuf_surf =
       _linux_dmabuf_surface_from_surf(surf);
+
   if (!dmabuf_surf)
     return;
 
@@ -1401,9 +1423,9 @@ void vt_proto_linux_dmabuf_v1_surface_destroy(struct vt_surface_t *surf) {
   _linux_dmabuf_free_feedback(dmabuf_surf->feedback);
   wl_list_remove(&dmabuf_surf->link);
 
-  /* 5. Release allocated memory */
+  /* 5. Free allocated surface state */
   free(dmabuf_surf);
-  surf->dmabuf_surf = NULL;
+  surf->proto_state.linux_dmabuf_v1 = NULL;
 
   VT_TRACE(_proto->comp->log,
            "linux_dmabuf.surface_destroy: completed destruction of surface %p.",
@@ -1411,7 +1433,7 @@ void vt_proto_linux_dmabuf_v1_surface_destroy(struct vt_surface_t *surf) {
 }
 
 bool vt_proto_linux_dmabuf_v1_set_surface_feedback(struct vt_surface_t *surf) {
-  struct vt_linux_dmabuf_v1_surface_t *dmabuf_surf =
+  struct vt_linux_dmabuf_v1_surface_state_t *dmabuf_surf =
       _linux_dmabuf_surface_from_surf(surf);
   if (dmabuf_surf == NULL) {
     return false;
