@@ -4,7 +4,7 @@
 
 struct vt_content_update_t *
 vt_content_update_create(struct vt_surface_t                     *surf,
-                         const struct vt_surface_state_pending_t *state,
+                         struct vt_surface_state_pending_t *state,
                          enum vt_content_update_type_t            type) {
   if (!surf || !state)
     return NULL;
@@ -15,12 +15,15 @@ vt_content_update_create(struct vt_surface_t                     *surf,
   }
 
   update->surf = surf;
-  update->state = *state;
   update->type = type;
+
+  vt_surface_pending_state_move(&update->state, state);
 
   wl_list_init(&update->constraints);
   wl_list_init(&update->dependencies);
   wl_list_init(&update->dependants);
+  wl_list_init(&update->queue_link);
+  wl_list_init(&update->retire_link);
 
   return update;
 }
@@ -29,7 +32,32 @@ void vt_content_update_destroy(struct vt_content_update_t *cu) {
   if (!cu)
     return;
 
+  struct vt_content_update_dependency_t *it, *tmp;
+  wl_list_for_each_safe(it, tmp, &cu->dependencies, dependency_link) {
+    vt_content_update_dependency_destroy(it);
+  }
+  
+  wl_list_for_each_safe(it, tmp, &cu->dependants, dependant_link) {
+    vt_content_update_dependency_destroy(it);
+  }
+  
+  vt_surface_pending_state_fini(&cu->state);
+
+  if(cu->queued) {
+    wl_list_remove(&cu->queue_link);
+  }
+
   free(cu);
+}
+
+void vt_content_update_dependency_destroy(
+    struct vt_content_update_dependency_t *edge) {
+  if(!edge) return;
+
+  wl_list_remove(&edge->dependency_link);
+  wl_list_remove(&edge->dependant_link);
+
+  free(edge);
 }
 
 bool vt_content_update_apply(struct vt_content_update_t *cu) {
@@ -40,7 +68,11 @@ bool vt_content_update_apply(struct vt_content_update_t *cu) {
   struct vt_surface_state_pending_t *s = &cu->state;
 
   if (s->buffer_attached) {
-    vt_surface_apply_buffer(surf, s->buf);
+    if(!vt_surface_apply_buffer(surf, s->buf)) {
+      // TODO: Atomic DAG applying should not stop halfway through due to failed
+      // a buffer import
+      return false;
+    }
   }
 
   if (s->buffer_scale_changed)
@@ -64,7 +96,7 @@ bool vt_content_update_apply(struct vt_content_update_t *cu) {
 
 bool vt_content_update_add_dependency(struct vt_content_update_t *cu,
                                       struct vt_content_update_t *dependency) {
-  if (!cu || !dependency)
+  if (!cu || !dependency || cu == dependency)
     return false;
 
   struct vt_content_update_dependency_t *edge = calloc(1, sizeof(*edge));
@@ -140,6 +172,37 @@ _vt_content_update_apply_dag_recursive(struct vt_content_update_t *cu) {
   return true;
 }
 
+static void _collect_applied_dag(struct vt_content_update_t *cu,
+                           struct wl_list             *list) {
+  if (!cu || !cu->applied)
+    return;
+
+  if (!wl_list_empty(&cu->retire_link))
+    return;
+
+  wl_list_insert(list, &cu->retire_link);
+
+  struct vt_content_update_dependency_t *edge;
+  wl_list_for_each(edge, &cu->dependencies, dependency_link) {
+    _collect_applied_dag(edge->dependency, list);
+  }
+
+}
+
+static void _retire_applied_dag(struct vt_content_update_t* root) {
+  struct wl_list applied;
+  wl_list_init(&applied);
+  _collect_applied_dag(root, &applied);
+
+  struct vt_content_update_t *retired, *tmp;
+  wl_list_for_each_safe(retired, tmp, &applied, retire_link) {
+    wl_list_remove(&retired->retire_link);
+    wl_list_init(&retired->retire_link);
+
+    vt_content_update_destroy(retired);
+  }
+}
+
 bool vt_content_update_apply_dag(struct vt_content_update_t *root) {
   if (!root)
     return false;
@@ -149,6 +212,11 @@ bool vt_content_update_apply_dag(struct vt_content_update_t *root) {
 
   if (!vt_content_update_is_ready(root))
     return false;
+  
+  if(!_vt_content_update_apply_dag_recursive(root))
+    return false;
 
-  return _vt_content_update_apply_dag_recursive(root);
+  _retire_applied_dag(root);
+
+  return true;
 }

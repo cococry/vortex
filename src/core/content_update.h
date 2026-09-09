@@ -15,11 +15,12 @@ struct vt_content_update_t {
   enum vt_content_update_type_t type;
 
   struct wl_list queue_link;
+  struct wl_list retire_link;
   struct wl_list constraints;
   struct wl_list dependants;
   struct wl_list dependencies;
 
-  bool applied;
+  bool applied, queued;
 };
 
 struct vt_content_update_dependency_t {
@@ -32,10 +33,13 @@ struct vt_content_update_dependency_t {
 
 struct vt_content_update_t *
 vt_content_update_create(struct vt_surface_t                     *surf,
-                         const struct vt_surface_state_pending_t *state,
+                         struct vt_surface_state_pending_t *state,
                          enum vt_content_update_type_t            type);
 
-void vt_content_update_destroy(struct vt_content_update_t *cu);
+void vt_content_update_destroy(struct vt_content_update_t *edge);
+
+void vt_content_update_dependency_destroy(
+    struct vt_content_update_dependency_t *dependency);
 
 bool vt_content_update_apply(struct vt_content_update_t *cu);
 

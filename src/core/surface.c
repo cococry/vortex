@@ -157,3 +157,104 @@ bool vt_surface_apply_buffer(struct vt_surface_t *surf,
 
   return true;
 }
+void vt_surface_pending_state_init(struct vt_surface_state_pending_t *state) {
+  memset(state, 0, sizeof(*state));
+
+  pixman_region32_init(&state->input_region);
+  pixman_region32_init(&state->opaque_region);
+
+  pixman_region32_init(&state->damage_surface);
+  pixman_region32_init(&state->damage_buffer);
+
+  wl_list_init(&state->frame_callbacks);
+  wl_list_init(&state->release_callbacks);
+}
+
+void vt_surface_pending_state_move(struct vt_surface_state_pending_t *dst,
+                                   struct vt_surface_state_pending_t *src) {
+  if (!dst || !src || dst == src)
+    return;
+
+  vt_surface_pending_state_init(dst);
+
+  dst->input_region_changed = src->input_region_changed;
+  dst->input_region_infinite = src->input_region_infinite;
+  pixman_region32_copy(&dst->input_region, &src->input_region);
+
+  dst->opaque_region_changed = src->opaque_region_changed;
+  pixman_region32_copy(&dst->opaque_region, &src->opaque_region);
+
+  dst->buffer_transform = src->buffer_transform;
+  dst->buffer_transform_changed = src->buffer_transform_changed;
+
+  dst->buffer_scale = src->buffer_scale;
+  dst->buffer_scale_changed = src->buffer_scale_changed;
+
+  dst->buffer_attached = src->buffer_attached;
+
+  dst->buf = src->buf;
+  src->buf = NULL;
+
+  pixman_region32_copy(&dst->damage_surface, &src->damage_surface);
+  pixman_region32_copy(&dst->damage_buffer, &src->damage_buffer);
+
+  dst->offset_set = src->offset_set;
+  dst->offset_x = src->offset_x;
+  dst->offset_y = src->offset_y;
+
+  wl_list_insert_list(&dst->frame_callbacks, &src->frame_callbacks);
+  wl_list_init(&src->frame_callbacks);
+
+  wl_list_insert_list(&dst->release_callbacks, &src->release_callbacks);
+  wl_list_init(&src->release_callbacks);
+
+  src->input_region_changed = false;
+  src->input_region_infinite = false;
+  pixman_region32_clear(&src->input_region);
+
+  src->opaque_region_changed = false;
+  pixman_region32_clear(&src->opaque_region);
+
+  src->buffer_transform_changed = false;
+  src->buffer_scale_changed = false;
+
+  src->buffer_attached = false;
+
+  pixman_region32_clear(&src->damage_surface);
+  pixman_region32_clear(&src->damage_buffer);
+
+  src->offset_set = false;
+  src->offset_x = 0;
+  src->offset_y = 0;
+}
+
+void vt_surface_pending_state_fini(struct vt_surface_state_pending_t *state) {
+  if (!state)
+    return;
+
+  vt_buffer_unref(&state->buf);
+
+  struct vt_surface_frame_callback_t *frame_cb, *frame_tmp;
+  wl_list_for_each_safe(frame_cb, frame_tmp, &state->frame_callbacks, link) {
+
+    wl_list_remove(&frame_cb->link);
+
+    if (frame_cb->res)
+      wl_resource_destroy(frame_cb->res);
+  }
+
+  struct vt_surface_release_t *release, *release_tmp;
+  wl_list_for_each_safe(release, release_tmp, &state->release_callbacks, link) {
+
+    wl_list_remove(&release->link);
+
+    if (release->res)
+      wl_resource_destroy(release->res);
+  }
+
+  pixman_region32_fini(&state->input_region);
+  pixman_region32_fini(&state->opaque_region);
+
+  pixman_region32_fini(&state->damage_surface);
+  pixman_region32_fini(&state->damage_buffer);
+}

@@ -18,6 +18,7 @@ struct vt_frame_cb_pool {
 struct vt_surface_release_t {
   struct wl_resource  *res;
   struct vt_surface_t *pending_surface;
+  struct wl_list       link;
 };
 
 struct vt_surface_state_applied_t {
@@ -99,6 +100,11 @@ struct vt_surface_role_t {
   void                         *data;
 };
 
+struct vt_surface_frame_callback_t {
+  struct wl_resource *res;
+  struct wl_list      link;
+};
+
 struct vt_surface_t {
   struct wl_resource     *res;
   struct vt_compositor_t *comp;
@@ -133,3 +139,11 @@ void vt_surface_mapped(struct vt_surface_t *surf);
 void vt_surface_unmapped(struct vt_surface_t *surf);
 
 bool vt_surface_apply_buffer(struct vt_surface_t* surf, struct vt_buffer_t* buf);
+
+void vt_surface_pending_state_init(struct vt_surface_state_pending_t *state);
+
+void
+vt_surface_pending_state_move(struct vt_surface_state_pending_t *dst,
+                              struct vt_surface_state_pending_t *src);
+
+void vt_surface_pending_state_fini(struct vt_surface_state_pending_t *state);
