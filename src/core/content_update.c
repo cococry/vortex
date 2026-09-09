@@ -3,9 +3,9 @@
 #include <wayland-util.h>
 
 struct vt_content_update_t *
-vt_content_update_create(struct vt_surface_t                     *surf,
+vt_content_update_create(struct vt_surface_t               *surf,
                          struct vt_surface_state_pending_t *state,
-                         enum vt_content_update_type_t            type) {
+                         enum vt_content_update_type_t      type) {
   if (!surf || !state)
     return NULL;
 
@@ -36,14 +36,14 @@ void vt_content_update_destroy(struct vt_content_update_t *cu) {
   wl_list_for_each_safe(it, tmp, &cu->dependencies, dependency_link) {
     vt_content_update_dependency_destroy(it);
   }
-  
+
   wl_list_for_each_safe(it, tmp, &cu->dependants, dependant_link) {
     vt_content_update_dependency_destroy(it);
   }
-  
+
   vt_surface_pending_state_fini(&cu->state);
 
-  if(cu->queued) {
+  if (cu->queued) {
     wl_list_remove(&cu->queue_link);
   }
 
@@ -52,7 +52,8 @@ void vt_content_update_destroy(struct vt_content_update_t *cu) {
 
 void vt_content_update_dependency_destroy(
     struct vt_content_update_dependency_t *edge) {
-  if(!edge) return;
+  if (!edge)
+    return;
 
   wl_list_remove(&edge->dependency_link);
   wl_list_remove(&edge->dependant_link);
@@ -68,7 +69,7 @@ bool vt_content_update_apply(struct vt_content_update_t *cu) {
   struct vt_surface_state_pending_t *s = &cu->state;
 
   if (s->buffer_attached) {
-    if(!vt_surface_apply_buffer(surf, s->buf)) {
+    if (!vt_surface_apply_buffer(surf, s->buf)) {
       // TODO: Atomic DAG applying should not stop halfway through due to failed
       // a buffer import
       return false;
@@ -173,7 +174,7 @@ _vt_content_update_apply_dag_recursive(struct vt_content_update_t *cu) {
 }
 
 static void _collect_applied_dag(struct vt_content_update_t *cu,
-                           struct wl_list             *list) {
+                                 struct wl_list             *list) {
   if (!cu || !cu->applied)
     return;
 
@@ -186,10 +187,9 @@ static void _collect_applied_dag(struct vt_content_update_t *cu,
   wl_list_for_each(edge, &cu->dependencies, dependency_link) {
     _collect_applied_dag(edge->dependency, list);
   }
-
 }
 
-static void _retire_applied_dag(struct vt_content_update_t* root) {
+static void _retire_applied_dag(struct vt_content_update_t *root) {
   struct wl_list applied;
   wl_list_init(&applied);
   _collect_applied_dag(root, &applied);
@@ -212,8 +212,8 @@ bool vt_content_update_apply_dag(struct vt_content_update_t *root) {
 
   if (!vt_content_update_is_ready(root))
     return false;
-  
-  if(!_vt_content_update_apply_dag_recursive(root))
+
+  if (!_vt_content_update_apply_dag_recursive(root))
     return false;
 
   _retire_applied_dag(root);
