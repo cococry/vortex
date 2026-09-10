@@ -2,12 +2,42 @@
 #include "../input/wl_seat.h"
 #include "src/core/compositor.h"
 #include "src/core/core_types.h"
+#include "src/core/surface_addon.h"
 #include "src/core/util.h"
 #include "src/protocols/xdg_shell.h"
 #include <wayland-server-protocol.h>
 #include <wayland-util.h>
 
 #define _SUBSYS_NAME "SURFACE"
+
+bool vt_surface_init(struct vt_surface_t* surf) {
+  if(!surf) return false;
+
+  vt_surface_pending_state_init(&surf->pending);
+  vt_surface_pending_state_defaults(&surf->pending);
+  vt_surface_applied_state_init(&surf->applied);
+  vt_surface_applied_state_defaults(&surf->pending);
+
+  wl_list_init(&surf->content_updates);
+  wl_list_init(&surf->addons);
+
+  wl_list_init(&surf->link);
+  wl_list_init(&surf->link_focus);
+
+  surf->role = NULL;
+
+  surf->scene_node = NULL;
+
+  surf->proto_state.linux_dmabuf_v1 = NULL;
+
+  surf->damaged = false;
+  surf->mapped = false;
+
+  surf->outputs_visible_on = 0;
+  surf->outputs_presented_on = 0;
+
+  return true;
+}
 
 void vt_surface_mapped(struct vt_surface_t *surf) {
   if (!surf)
@@ -157,7 +187,10 @@ bool vt_surface_apply_buffer(struct vt_surface_t *surf,
 
   return true;
 }
+
 void vt_surface_pending_state_init(struct vt_surface_state_pending_t *state) {
+  if(!state) return;
+
   memset(state, 0, sizeof(*state));
 
   pixman_region32_init(&state->input_region);
@@ -168,6 +201,41 @@ void vt_surface_pending_state_init(struct vt_surface_state_pending_t *state) {
 
   wl_list_init(&state->frame_callbacks);
   wl_list_init(&state->release_callbacks);
+
+  state->buffer_scale = 1;
+  state->buffer_transform = WL_OUTPUT_TRANSFORM_NORMAL;
+
+  state->input_region_infinite = true;
+}
+
+void vt_surface_pending_state_defaults(struct vt_surface_state_pending_t *state) {
+  if(!state) return;
+  
+  state->buffer_scale = 1;
+  state->buffer_transform = WL_OUTPUT_TRANSFORM_NORMAL;
+
+  state->input_region_infinite = true;
+}
+
+
+void vt_surface_applied_state_init(struct vt_surface_state_applied_t *state) {
+  if(!state) return;
+
+  memset(state, 0, sizeof(*state));
+
+  pixman_region32_init(&state->input_region);
+  pixman_region32_init(&state->opaque_region);
+  
+  pixman_region32_init(&state->damage);
+}
+
+void vt_surface_applied_state_defaults(struct vt_surface_state_applied_t *state) {
+  if(!state) return;
+  
+  state->buffer_scale = 1;
+  state->buffer_transform = WL_OUTPUT_TRANSFORM_NORMAL;
+
+  state->input_region_infinite = true;
 }
 
 void vt_surface_pending_state_move(struct vt_surface_state_pending_t *dst,
@@ -257,4 +325,23 @@ void vt_surface_pending_state_fini(struct vt_surface_state_pending_t *state) {
 
   pixman_region32_fini(&state->damage_surface);
   pixman_region32_fini(&state->damage_buffer);
+}
+
+bool vt_surface_validate_commit(struct vt_surface_t* surf) {
+  if(!surf) return false;
+
+  if(surf->role.impl.validate_commit) {
+    if(!surf->role.impl.validate_commit(surf)) return false;
+  }
+
+  const struct vt_surface_addon_t* it;
+  wl_list_for_each(it, &surf->addons, link) {
+    if(it->impl.validate_commit) {
+      if(!it->impl.validate_commit(it)) {
+        return false;
+      }
+    } 
+  }
+
+  return true;
 }

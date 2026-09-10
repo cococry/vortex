@@ -66,7 +66,7 @@ struct vt_linux_dmabuf_v1_params_t {
   bool                    has_mod;
 };
 
-static void _linux_dmabuf_surface_destroy_addon(struct vt_surface_addon *addon);
+static void _linux_dmabuf_surface_destroy_addon(struct vt_surface_addon_t *addon);
 
 static void _proto_linux_dmabuf_v1_bind(struct wl_client *client, void *data,
                                         uint32_t version, uint32_t id);
@@ -177,14 +177,14 @@ static const struct wl_buffer_interface _dmabuf_wl_buffer_impl = {
 };
 
 static void
-_linux_dmabuf_surface_destroy_addon(struct vt_surface_addon *addon) {
+_linux_dmabuf_surface_destroy_addon(struct vt_surface_addon_t *addon) {
   struct vt_linux_dmabuf_v1_surface_state_t *state =
       wl_container_of(addon, state, addon);
 
   vt_proto_linux_dmabuf_v1_surface_destroy(state->surf);
 }
 
-static const struct vt_surface_addon_impl dmabuf_surface_addon_impl = {
+static const struct vt_surface_addon_impl_t dmabuf_surface_addon_impl = {
     .name = "linux-dmabuf-v1",
     .destroy = _linux_dmabuf_surface_destroy_addon,
 };

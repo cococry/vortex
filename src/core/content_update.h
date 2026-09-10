@@ -51,3 +51,5 @@ bool vt_content_update_is_candidate(const struct vt_content_update_t *cu);
 bool vt_content_update_is_ready(const struct vt_content_update_t *cu);
 
 bool vt_content_update_apply_dag(struct vt_content_update_t *root);
+
+bool vt_content_update_reaches(struct vt_content_update_t *from, struct vt_content_update_t* target);

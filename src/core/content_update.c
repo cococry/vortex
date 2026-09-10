@@ -220,3 +220,20 @@ bool vt_content_update_apply_dag(struct vt_content_update_t *root) {
 
   return true;
 }
+
+bool vt_content_update_reaches(struct vt_content_update_t *from,
+                               struct vt_content_update_t *target) {
+  if (!from || !target)
+    return false;
+
+  if (from == target)
+    return true;
+
+  struct vt_content_update_dependency_t *it;
+  wl_list_for_each(it, &from->dependencies, dependency_link) {
+    if (vt_content_update_reaches(it->dependency, target))
+      return true;
+  }
+
+  return false;
+}

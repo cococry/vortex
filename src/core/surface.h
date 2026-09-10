@@ -74,7 +74,10 @@ enum vt_surface_type_t {
 struct vt_linux_dmabuf_v1_surface_t;
 
 struct vt_surface_role_impl_t {
-  void (*commit)(struct vt_surface_t *surf);
+  bool (*validate_commit)(struct vt_surface_addon_t *addon);
+
+  bool (*commit)(struct vt_surface_addon_t  *addon,
+                 struct vt_content_update_t *cu);
 };
 
 enum vt_surface_role_type_t {
@@ -109,7 +112,7 @@ struct vt_surface_t {
   struct wl_resource     *res;
   struct vt_compositor_t *comp;
 
-  struct vt_surface_role_t role;
+  struct vt_surface_role_t* role;
 
   struct vt_surface_state_pending_t pending;
   struct vt_surface_state_applied_t applied;
@@ -126,13 +129,14 @@ struct vt_surface_t {
 
   struct wl_list link, link_focus;
 
-  bool needs_frame_done;
   bool damaged;
   bool mapped;
 
-  uint32_t _mask_outputs_visible_on;
-  uint32_t _mask_outputs_presented_on;
+  uint32_t outputs_visible_on;
+  uint32_t outputs_presented_on;
 };
+
+bool vt_surface_init(struct vt_surface_t* surf);
 
 void vt_surface_mapped(struct vt_surface_t *surf);
 
@@ -142,8 +146,16 @@ bool vt_surface_apply_buffer(struct vt_surface_t* surf, struct vt_buffer_t* buf)
 
 void vt_surface_pending_state_init(struct vt_surface_state_pending_t *state);
 
+void vt_surface_pending_state_defaults(struct vt_surface_state_pending_t *state);
+
+void vt_surface_applied_state_init(struct vt_surface_state_applied_t *state);
+
+void vt_surface_applied_state_defaults(struct vt_surface_state_applied_t *state);
+
 void
 vt_surface_pending_state_move(struct vt_surface_state_pending_t *dst,
                               struct vt_surface_state_pending_t *src);
 
 void vt_surface_pending_state_fini(struct vt_surface_state_pending_t *state);
+
+bool vt_surface_validate_commit(struct vt_surface_t* surf);

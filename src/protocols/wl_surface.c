@@ -85,8 +85,6 @@ static struct vt_proto_wl_surface_t _proto;
 
 void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
                         struct wl_resource *buffer, int32_t x, int32_t y) {
-  /* 1. When a client attaches a buffer, we store the resource handle
-   * in the internal vt_surface_t struct. */
   struct vt_surface_t *surf =
       resource ? wl_resource_get_user_data(resource) : NULL;
   if (!surf) {
@@ -96,26 +94,47 @@ void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
 
   VT_TRACE(surf->comp->log, "Got compositor.surface_attach.");
 
-  /* Replace any previously pending buffer */
-  vt_buffer_unref(&surf->pending.buf);
+  bool legacy_offset = false;
 
-  if(buffer) {
-    struct vt_buffer_t* buf = vt_buffer_from_resource(surf->comp->renderer, buffer);
+  /* Offset handling */
+  if (wl_resource_get_version(resource) >= WL_SURFACE_OFFSET_SINCE_VERSION) {
+    if (x != 0 || y != 0) {
+      wl_resource_post_error(
+          resource, WL_SURFACE_ERROR_INVALID_OFFSET,
+          "wl_surface.attach x/y must be zero for wl_surface version >= %u",
+          WL_SURFACE_OFFSET_SINCE_VERSION);
+      return;
+    }
+  } else {
+    legacy_offset = true;
+  }
 
-    if(!buf) {
+  /* Buffer handling */
+  struct vt_buffer_t *new_buf = NULL;
+
+  if (buffer) {
+    /* Lazily allocate vt_buffer_t wrapper */
+    new_buf = vt_buffer_from_resource(surf->comp->renderer, buffer);
+
+    if (!new_buf) {
       VT_WL_OUT_OF_MEMORY(surf->comp, client);
       return;
     }
 
-    surf->pending.buf = vt_buffer_ref(buf); 
-  } else { 
-    /* attach(NULL) */
-    surf->pending.buf = NULL;
+    new_buf = vt_buffer_ref(new_buf);
   }
 
-  surf->pending.dx = x;
-  surf->pending.dy = y;
+  /* Modify pending state after everything succeeded */
+  if(legacy_offset) {
+    surf->pending.offset_set = true;
+    surf->pending.offset_x = x;
+    surf->pending.offset_y = y;
+  }
 
+  /* Replace any previously pending buffer */
+  vt_buffer_unref(&surf->pending.buf);
+
+  surf->pending.buf = new_buf;
   surf->pending.buffer_attached = true;
 }
 
@@ -140,12 +159,6 @@ _surface_drop_current_buffer(struct vt_surface_t *surf)
 
 void _wl_surface_commit(struct wl_client   *client,
                         struct wl_resource *resource) {
-  /*[0]: This function is the core of the wl_surface protocol.
-   * We use the buffer resource we got from the prior surface.attach
-   * event to import buffer data into the renderer.
-   *
-   * The handler implicitly handles damaging regions that got updated
-   * by the commit. */
   struct vt_surface_t *surf = wl_resource_get_user_data(resource);
   if (!surf) {
     VT_PARAM_CHECK_FAIL(_proto.comp);
