@@ -61,6 +61,18 @@ void vt_content_update_dependency_destroy(
   free(edge);
 }
 
+bool vt_content_update_prepare(struct vt_content_update_t *cu) {
+  if(!cu || !cu->surf) return false;
+
+  if(!cu->state.buffer_attached) return true;
+
+  if (!vt_buffer_import(cu->state.buf, &cu->surf->applied.damage)) {
+    return false;
+  }
+
+  return true;
+}
+
 bool vt_content_update_apply(struct vt_content_update_t *cu) {
   if (!cu || !cu->surf)
     return false;
@@ -69,11 +81,7 @@ bool vt_content_update_apply(struct vt_content_update_t *cu) {
   struct vt_surface_state_pending_t *s = &cu->state;
 
   if (s->buffer_attached) {
-    if (!vt_surface_apply_buffer(surf, s->buf)) {
-      // TODO: Atomic DAG applying should not stop halfway through due to failed
-      // a buffer import
-      return false;
-    }
+    vt_surface_apply_buffer(surf, s->buf);
   }
 
   if (s->buffer_scale_changed)
@@ -152,6 +160,29 @@ bool vt_content_update_is_ready(const struct vt_content_update_t *cu) {
 }
 
 static bool
+_vt_content_update_prepare_dag_recursive(struct vt_content_update_t *cu) {
+  if (!cu)
+    return false;
+
+  if (cu->prepared)
+    return true;
+
+  struct vt_content_update_dependency_t *edge;
+  wl_list_for_each(edge, &cu->dependencies, dependency_link) {
+    if (!_vt_content_update_prepare_dag_recursive(edge->dependency))
+      return false;
+  }
+
+  if (!vt_content_update_prepare(cu))
+    return false;
+
+  cu->prepared = true;
+
+  return true;
+}
+
+
+static bool
 _vt_content_update_apply_dag_recursive(struct vt_content_update_t *cu) {
   if (!cu)
     return false;
@@ -211,6 +242,9 @@ bool vt_content_update_apply_dag(struct vt_content_update_t *root) {
     return false;
 
   if (!vt_content_update_is_ready(root))
+    return false;
+  
+  if (!_vt_content_update_prepare_dag_recursive(root))
     return false;
 
   if (!_vt_content_update_apply_dag_recursive(root))

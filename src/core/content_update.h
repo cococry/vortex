@@ -20,7 +20,7 @@ struct vt_content_update_t {
   struct wl_list dependants;
   struct wl_list dependencies;
 
-  bool applied, queued;
+  bool applied, queued, prepared;
 };
 
 struct vt_content_update_dependency_t {
@@ -40,6 +40,9 @@ void vt_content_update_destroy(struct vt_content_update_t *edge);
 
 void vt_content_update_dependency_destroy(
     struct vt_content_update_dependency_t *dependency);
+
+
+bool vt_content_update_prepare(struct vt_content_update_t *cu);
 
 bool vt_content_update_apply(struct vt_content_update_t *cu);
 

@@ -142,7 +142,7 @@ void vt_surface_mapped(struct vt_surface_t *surf);
 
 void vt_surface_unmapped(struct vt_surface_t *surf);
 
-bool vt_surface_apply_buffer(struct vt_surface_t* surf, struct vt_buffer_t* buf);
+void vt_surface_apply_buffer(struct vt_surface_t* surf, struct vt_buffer_t* buf);
 
 void vt_surface_pending_state_init(struct vt_surface_state_pending_t *state);
 

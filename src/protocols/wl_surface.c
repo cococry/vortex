@@ -3,6 +3,7 @@
 #include "runara/runara.h"
 #include "src/core/buffer.h"
 #include "src/core/compositor.h"
+#include "src/core/content_update.h"
 #include "src/core/scene.h"
 #include "src/core/surface.h"
 #include "src/core/util.h"
@@ -180,6 +181,7 @@ void _wl_surface_commit(struct wl_client   *client,
 
   /* 2. Import attached buffer into the renderer */
   struct vt_renderer_t *r = surf->comp->renderer;
+
 
   bool had_buffer_attached = surf->pending.buffer_attached;
 
