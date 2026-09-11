@@ -1,9 +1,11 @@
 #include "surface.h"
 #include "../input/wl_seat.h"
 #include "src/core/compositor.h"
+#include "src/core/content_update.h"
 #include "src/core/core_types.h"
 #include "src/core/surface_addon.h"
 #include "src/core/util.h"
+#include "src/protocols/wl_subcompositor.h"
 #include "src/protocols/xdg_shell.h"
 #include <wayland-server-protocol.h>
 #include <wayland-util.h>
@@ -321,8 +323,8 @@ void vt_surface_pending_state_fini(struct vt_surface_state_pending_t *state) {
 bool vt_surface_validate_commit(struct vt_surface_t* surf) {
   if(!surf) return false;
 
-  if(surf->role.impl.validate_commit) {
-    if(!surf->role.impl.validate_commit(surf)) return false;
+  if(surf->role->impl.validate_commit) {
+    if(!surf->role->impl.validate_commit(surf)) return false;
   }
 
   const struct vt_surface_addon_t* it;
@@ -335,4 +337,45 @@ bool vt_surface_validate_commit(struct vt_surface_t* surf) {
   }
 
   return true;
+}
+
+bool vt_surface_effictively_synchronized(struct vt_surface_t* surf) {
+  if(!surf) return false;
+
+  while (surf) {
+    if (!surf->role || surf->role->type != VT_SURFACE_ROLE_SUBSURFACE)
+      return false;
+
+    const struct vt_subsurface_t *sub = surf->role->data;
+
+    if (!sub || !sub->parent)
+      return false;
+
+    if (sub->synchronized)
+      return true;
+
+    surf = sub->parent;
+  }
+  return false;
+}
+
+bool vt_surface_content_update(struct vt_surface_t* surf) {
+  if(!surf) return false;
+
+  bool effectively_sync = vt_surface_effictively_synchronized(surf);
+
+  struct vt_content_update_t *cu = vt_content_update_create(
+      surf, &surf->pending, effectively_sync ? VT_CU_SYNC : VT_CU_DESYNC);
+
+  if (!cu)
+    return false;
+
+  if (!vt_content_update_prepare(cu)) {
+    return false;
+  }
+
+  vt_content_update_enqueue(cu);
+
+  if (!vt_content_update_apply_dag(cu))
+    return false;
 }

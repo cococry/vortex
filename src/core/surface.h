@@ -159,3 +159,7 @@ vt_surface_pending_state_move(struct vt_surface_state_pending_t *dst,
 void vt_surface_pending_state_fini(struct vt_surface_state_pending_t *state);
 
 bool vt_surface_validate_commit(struct vt_surface_t* surf);
+
+bool vt_surface_effictively_synchronized(struct vt_surface_t* surf);
+
+bool vt_surface_content_update(struct vt_surface_t* surf);

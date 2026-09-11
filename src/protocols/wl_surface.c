@@ -139,21 +139,7 @@ void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
   surf->pending.buffer_attached = true;
 }
 
-static uint32_t _surface_effective_output_mask(struct vt_surface_t *surf) {
-  while (surf) {
-    if (surf->_mask_outputs_visible_on)
-      return surf->_mask_outputs_visible_on;
-
-    if (!surf->subsurface)
-      break;
-
-    surf = surf->subsurface->parent;
-  }
-
-  return 0;
-}
-
-static void
+  static void
 _surface_drop_current_buffer(struct vt_surface_t *surf)
 {
 }
@@ -173,182 +159,12 @@ void _wl_surface_commit(struct wl_client   *client,
     return;
   }
 
-  bool has_damage = !pixman_region32_empty(&surf->pending.damage);
-
-  /* 1. If the size of the surface changed, we need to
-   * recalculate the outputs that the surface is visible on */
-  // TODO: do this ^  
-
-  /* 2. Import attached buffer into the renderer */
-  struct vt_renderer_t *r = surf->comp->renderer;
-
-
-  bool had_buffer_attached = surf->pending.buffer_attached;
-
-  if (surf->pending.buffer_attached) {
-    struct vt_buffer_t *new_buffer = surf->pending.buf;
-
-    if (!new_buffer) {
-      VT_TRACE(surf->comp->log,
-               "Got wl_surface.attach(NULL), dropping buffer and unmapping "
-               "surface %p",
-               surf);
-      if (surf->buf != NULL) {
-        vt_comp_surf_mark_damaged(surf->comp, surf);
-      }
-
-      /* Drop ownership of current buffer */
-      vt_buffer_unref(&surf->buf);
-
-      vt_surface_unmapped(surf);
-    } else {
-      VT_TRACE(surf->comp->log,
-               "Importing new buffer (resource: %p) for surface %p", new_buffer,
-               surf);
-
-      /* import from the pending resource */
-      if (!vt_buffer_import(surf->pending.buf, &surf->damage)) {
-        vt_buffer_unref(&surf->buf);
-        return;
-      }
-
-      /* Drop ownership of current buffer */
-      vt_buffer_unref(&surf->buf);
-
-      surf->buf = new_buffer;
-    }
-
-    surf->pending.buf = NULL;
-    surf->pending.buffer_attached = false;
+  if(!vt_surface_validate_commit(surf)) {
+    VT_ERROR(surf->comp->log, "surface_commit: Commit validation failed");
+    return; 
   }
-
-  pixman_region32_clear(&surf->damage);
-
-  if (has_damage) {
-    pixman_region32_union(&surf->damage, &surf->damage,
-                          &surf->pending.damage);
-  }
-
-  pixman_region32_clear(&surf->pending.damage);
-
-  if (had_buffer_attached && surf->buf) {
-    // TODO: maybe not do this 
-    pixman_region32_union_rect(&surf->damage, &surf->damage, 0, 0,
-                               surf->buf->tex.width, surf->buf->tex.height);
-
-    pixman_region32_intersect_rect(&surf->damage, &surf->damage, 0, 0,
-                                   surf->buf->tex.width, surf->buf->tex.height);
-  }
-
-  if (surf->role_impl.commit)
-    surf->role_impl.commit(surf);
-
-  /* 4. Calculate current damage region  */
-  if (!surf->_mask_outputs_visible_on) {
-    /* Re-populate the output bitfield of the surface */
-    struct vt_output_t *output;
-    wl_list_for_each(output, &surf->comp->outputs, link_global) {
-      _wl_surface_associate_with_output(surf->comp, surf, output);
-      output->needs_damage_rebuild = true;
-    }
-  }
-
-  /* Apply committed surface offset. */
-  int32_t dx = surf->pending.dx;
-  int32_t dy = surf->pending.dy;
-
-  surf->dx = dx;
-  surf->dy = dy;
-
-  if (surf->type == VT_SURFACE_TYPE_CURSOR &&
-      surf->comp->seat->cursor.surf == surf) {
-
-    surf->comp->seat->cursor.hotspot_x -= dx;
-    surf->comp->seat->cursor.hotspot_y -= dy;
-  }
-
-  /* consumed */
-  surf->pending.dx = 0;
-  surf->pending.dy = 0;
-
-  bool is_valid_xdg_surf =
-      surf->xdg_surf &&
-      ((surf->xdg_surf->toplevel &&
-        surf->xdg_surf->toplevel->xdg_toplevel_res) ||
-       (surf->xdg_surf->popup && surf->xdg_surf->popup->xdg_popup_res));
-
-  /* 5. If the surface has not yet been mapped and has a
-   * valid XDG Surface and XDG Surface role, trigger a map request. */
-  if (!surf->mapped && surf->buf && is_valid_xdg_surf) {
-    vt_surface_mapped(surf);
-  }
-
-  if (surf->subsurface || surf->type == VT_SURFACE_TYPE_CURSOR) {
-    surf->mapped = surf->buf != NULL;
-  }
-
-  bool needs_repaint = surf->mapped && (has_damage || had_buffer_attached ||
-                                        surf->cb_pool.n_cbs > 0);
-
-  if (needs_repaint) {
-    pixman_region32_t global_damage;
-    pixman_region32_init(&global_damage);
-    pixman_region32_copy(&global_damage, &surf->damage);
-
-    pixman_region32_translate(&global_damage, surf->x, surf->y);
-
-    /* 6. Set damage regions and schedule a repaint for
-     * all outputs that the surface intersects with */
-    struct vt_output_t *output;
-
-    wl_list_for_each(output, &surf->comp->outputs, link_global) {
-      if (!(surf->_mask_outputs_visible_on & (1u << output->id)))
-        continue;
-
-      pixman_region32_union(&output->damage, &output->damage, &global_damage);
-
-      vt_comp_schedule_repaint(surf->comp, output);
-    }
-    pixman_region32_fini(&global_damage);
-  }
-
-  if (surf->pending.input_region_changed) {
-    surf->input_region_set = surf->pending.input_region_set;
-
-    pixman_region32_copy(&surf->input_region, &surf->pending.input_region);
-
-    pixman_region32_clear(&surf->pending.input_region);
-
-    surf->pending.input_region_changed = false;
-  }
-
-  if (surf->pending.opaque_region_changed) {
-    pixman_region32_copy(&surf->opaque_region, &surf->pending.opaque_region);
-
-    pixman_region32_clear(&surf->pending.opaque_region);
-
-    surf->pending.opaque_region_changed = false;
-  }
-
-  struct vt_surface_release_t *release = surf->pending.release;
-  surf->pending.release = NULL;
-  if (release) {
-    release->pending_surface = NULL;
-  }
-
-  surf->sync.release = release;
-
-  surf->sync.acquire_fence_fd = surf->pending.acquire_fence_fd;
-  surf->pending.acquire_fence_fd = -1;
 
   VT_TRACE(surf->comp->log, "surface.commit Finsihed commit.");
-
-  VT_TRACE(surf->comp->log,
-           "COMMIT surf=%p parent=%p mapped=%d "
-           "mask=0x%x buffer resource=%p",
-           surf, surf->subsurface ? surf->subsurface->parent : NULL,
-           surf->mapped, surf->_mask_outputs_visible_on,
-           surf->buf ? surf->buf->res : NULL);
 }
 
 void _wl_surface_frame(struct wl_client *client, struct wl_resource *resource,
@@ -370,7 +186,7 @@ void _wl_surface_frame(struct wl_client *client, struct wl_resource *resource,
   }
 
   /* Store the frame callback in the list of pending frame callbacks.
-   * wl_callback_send_done must be called for each of the pending callbacks
+   * wl_callback_send_done must be called for each of the pending callback
    * after the next "page flip" (next sink backend frame) event completes
    * in order to correctly handle frame pacing ( see send_frame_callbacks() ).
    */
