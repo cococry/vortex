@@ -15,12 +15,6 @@ struct vt_frame_cb_pool {
   uint32_t            n_cbs;
 };
 
-struct vt_surface_release_t {
-  struct wl_resource  *res;
-  struct vt_surface_t *pending_surface;
-  struct wl_list       link;
-};
-
 struct vt_surface_state_applied_t {
   pixman_region32_t input_region;
   bool              input_region_infinite;
@@ -63,7 +57,8 @@ struct vt_surface_state_pending_t {
   int32_t offset_y;
 
   struct wl_list frame_callbacks;
-  struct wl_list release_callbacks;
+
+  struct vt_buffer_release_t* buffer_release;
 };
 
 enum vt_surface_type_t {
@@ -125,6 +120,7 @@ struct vt_surface_t {
 
   struct {
     struct vt_linux_dmabuf_v1_surface_state_t *linux_dmabuf_v1;
+    struct vt_linux_explicit_sync_v1_surface_state_t *linux_explicit_sync_v1;
   } proto_state;
 
   struct wl_list link, link_focus;
@@ -164,6 +160,7 @@ void vt_surface_pending_state_move(struct vt_surface_state_pending_t *dst,
                                    struct vt_surface_state_pending_t *src);
 
 void vt_surface_pending_state_fini(struct vt_surface_state_pending_t *state);
+void vt_surface_applied_state_fini(struct vt_surface_state_applied_t *state);
 
 bool vt_surface_validate_commit(struct vt_surface_t *surf);
 
@@ -172,3 +169,6 @@ bool vt_surface_effictively_synchronized(struct vt_surface_t *surf);
 bool vt_surface_emit_content_update(struct vt_surface_t *surf);
 
 struct vt_content_update_t* vt_surface_last_scu(struct vt_surface_t *surf);
+
+struct vt_buffer_release_t *vt_surface_state_get_or_create_buffer_release(
+    struct vt_surface_state_pending_t *state);

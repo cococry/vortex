@@ -144,3 +144,22 @@ void vt_buffer_unref(struct vt_buffer_t **buf) {
 
   *buf = NULL;
 }
+
+struct vt_buffer_t *vt_buffer_release_ref(struct vt_buffer_release_t *release) {
+  if (release)
+    release->refcount++;
+
+  return release;
+}
+
+void vt_buffer_release_unref(struct vt_buffer_release_t **release) {
+  if(!release || !(*release)) return;
+
+  (*release)->refcount--;
+
+  if((*release)->refcount != 0) return;
+
+  vt_buffer_destroy(*release);
+
+  *release = NULL;
+}

@@ -1,5 +1,6 @@
 #include "surface.h"
 #include "../input/wl_seat.h"
+#include "src/core/buffer.h"
 #include "src/core/compositor.h"
 #include "src/core/content_update.h"
 #include "src/core/core_types.h"
@@ -296,6 +297,7 @@ void vt_surface_pending_state_fini(struct vt_surface_state_pending_t *state) {
     return;
 
   vt_buffer_unref(&state->buf);
+  vt_buffer_unref(&state->buffer_release);
 
   struct vt_surface_frame_callback_t *frame_cb, *frame_tmp;
   wl_list_for_each_safe(frame_cb, frame_tmp, &state->frame_callbacks, link) {
@@ -306,20 +308,21 @@ void vt_surface_pending_state_fini(struct vt_surface_state_pending_t *state) {
       wl_resource_destroy(frame_cb->res);
   }
 
-  struct vt_surface_release_t *release, *release_tmp;
-  wl_list_for_each_safe(release, release_tmp, &state->release_callbacks, link) {
-
-    wl_list_remove(&release->link);
-
-    if (release->res)
-      wl_resource_destroy(release->res);
-  }
-
   pixman_region32_fini(&state->input_region);
   pixman_region32_fini(&state->opaque_region);
 
   pixman_region32_fini(&state->damage_surface);
   pixman_region32_fini(&state->damage_buffer);
+}
+
+void vt_surface_applied_state_fini(struct vt_surface_state_applied_t *state)
+{
+  if(!state) return;
+
+  pixman_region32_fini(&state->input_region);
+  pixman_region32_fini(&state->opaque_region);
+
+  pixman_region32_fini(&state->damage);
 }
 
 bool vt_surface_validate_commit(struct vt_surface_t* surf) {
@@ -436,4 +439,23 @@ struct vt_content_update_t *vt_surface_last_scu(struct vt_surface_t *surf) {
     }
   }
   return NULL;
+}
+
+struct vt_buffer_release_t* vt_surface_state_get_or_create_buffer_release(struct vt_surface_state_pending_t *state) {
+  if(!state) return NULL;
+
+  struct vt_buffer_release_t *release = state->buffer_release;
+
+  if (release)
+    return release;
+
+  release = calloc(1, sizeof(*release));
+  if (!release) {
+    return NULL;
+  }
+
+  release->fence_fd = -1;
+  wl_list_init(&release->callbacks);
+
+  return vt_buffer_release_ref(release);
 }

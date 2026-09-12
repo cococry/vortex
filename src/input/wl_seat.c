@@ -763,6 +763,35 @@ vt_seat_set_pointer_focus(struct vt_seat_t *seat,
     }
 }
 
+void vt_seat_handle_surface_destroyed(struct vt_seat_t    *seat,
+                                      struct vt_surface_t *surf) {
+  if (!surf)
+    return;
+
+  if (seat) {
+    if (seat->kb_focus.surf == surf) {
+      seat->kb_focus.surf = NULL;
+      seat->kb_focus.client = NULL;
+    }
+
+    if (seat->ptr_focus.surf == surf) {
+      seat->ptr_focus.surf = NULL;
+      seat->ptr_focus.client = NULL;
+    }
+
+    if (seat->cursor.surf == surf) {
+      seat->cursor.surf = NULL;
+      seat->cursor.owner = NULL;
+    }
+  }
+
+  /* Focus stack must not retain the surface. */
+  if (!wl_list_empty(&surf->link_focus)) {
+    wl_list_remove(&surf->link_focus);
+    wl_list_init(&surf->link_focus);
+  }
+}
+
 void vt_seat_bind_global_keybinds(struct vt_seat_t *seat) {
   if (!seat)
     return;

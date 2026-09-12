@@ -1,3 +1,5 @@
+#include "src/core/surface_addon.h"
+#include <wayland-server-core.h>
 #define _GNU_SOURCE
 
 #include "linux_explicit_sync.h"
@@ -14,9 +16,6 @@
 
 #define _SUBSYS_NAME "VT_PROTO_LINUX_EXPLICIT_SYNC"
 
-/* ===================================================
- * ========== STATIC FUNCTION DECLARATIONS ===========
- * =================================================== */
 static void _linux_explicit_sync_v1_get_synchronization(
     struct wl_client *client, struct wl_resource *resource, uint32_t id,
     struct wl_resource *surface_resource);
@@ -38,8 +37,11 @@ static void _linux_surface_sync_v1_get_release(struct wl_client   *client,
                                                uint32_t            id);
 
 static void _linux_surface_sync_handle_destroy(struct wl_resource *resource);
+
+static void _handle_explict_release_destroy(struct wl_resource *resource);
+
 static void
-_linux_surface_res_release_handle_destroy(struct wl_resource *resource);
+_linux_explicit_sync_destroy_addon(struct vt_surface_addon_t *addon);
 
 static const struct zwp_linux_explicit_synchronization_v1_interface
     _linux_explicit_sync_v1_impl = {
@@ -58,13 +60,48 @@ struct vt_proto_linux_explicit_sync_v1_t {
   struct vt_compositor_t *comp;
 };
 
+static const struct vt_surface_addon_impl_t explicit_sync_surface_addon_impl = {
+    .name = "linux-explicit-synchronization-v1",
+    .destroy = _linux_explicit_sync_destroy_addon,
+};
+
 static struct vt_proto_linux_explicit_sync_v1_t _proto;
+
+struct vt_linux_explicit_sync_v1_surface_state_t *
+_linux_explicit_sync_v1_from_surf(struct vt_surface_t *surf) {
+  if (!surf) {
+    VT_PARAM_CHECK_FAIL(_proto.comp);
+    return NULL;
+  }
+
+  if (surf->proto_state.linux_explicit_sync_v1)
+    return NULL;
+
+  struct vt_linux_explicit_sync_v1_surface_state_t *state =
+      calloc(1, sizeof(*state));
+
+  if (!state)
+    return NULL;
+
+  state->acquire_fence_fd = -1;
+  state->surf = surf;
+
+  surf->proto_state.linux_explicit_sync_v1 = state;
+
+  state->addon.impl = explicit_sync_surface_addon_impl;
+  wl_list_insert(&surf->addons, &state->addon.link);
+
+  VT_TRACE(_proto.comp->log,
+           "Created linux-explicit-synchronization-v1 surface state %p for %p.",
+           state, surf);
+
+  return state;
+}
 
 void _linux_explicit_sync_v1_get_synchronization(
     struct wl_client *client, struct wl_resource *resource, uint32_t id,
     struct wl_resource *surface_resource) {
 
-  /* 1. Retrieve internal surface handle */
   struct vt_surface_t *surf =
       surface_resource ? wl_resource_get_user_data(surface_resource) : NULL;
 
@@ -73,8 +110,7 @@ void _linux_explicit_sync_v1_get_synchronization(
     return;
   }
 
-  /* 2. Check if surface already has a synchronization object */
-  if (surf->sync.res) {
+  if (surf->proto_state.linux_explicit_sync_v1) {
     wl_resource_post_error(
         resource,
         ZWP_LINUX_EXPLICIT_SYNCHRONIZATION_V1_ERROR_SYNCHRONIZATION_EXISTS,
@@ -83,7 +119,6 @@ void _linux_explicit_sync_v1_get_synchronization(
     return;
   }
 
-  /* 3. Allocate resource for synchronization object */
   struct wl_resource *res = wl_resource_create(
       client, &zwp_linux_surface_synchronization_v1_interface,
       wl_resource_get_version(resource), id);
@@ -93,11 +128,18 @@ void _linux_explicit_sync_v1_get_synchronization(
     return;
   }
 
-  /* 4. Initialize synchronization state */
-  surf->sync.res = res;
+  struct vt_linux_explicit_sync_v1_surface_state_t *state =
+      _linux_explicit_sync_v1_from_surf(surf);
 
-  /* 5. Set handler functions via the implementation */
-  wl_resource_set_implementation(res, &_linux_surface_sync_v1_impl, surf,
+  if (!state) {
+    wl_resource_destroy(res);
+    VT_WL_OUT_OF_MEMORY(surf->comp, client);
+    return;
+  }
+
+  state->res = res;
+
+  wl_resource_set_implementation(res, &_linux_surface_sync_v1_impl, state,
                                  _linux_surface_sync_handle_destroy);
 
   VT_TRACE(surf->comp->log,
@@ -114,7 +156,6 @@ void _linux_explicit_sync_v1_destroy(struct wl_client   *client,
 
 static void _linux_explicit_sync_v1_bind(struct wl_client *client, void *data,
                                          uint32_t version, uint32_t id) {
-  /* 1. Create global interface resource */
   struct vt_compositor_t *comp = (struct vt_compositor_t *)data;
   struct wl_resource     *res = wl_resource_create(
       client, &zwp_linux_explicit_synchronization_v1_interface, version, id);
@@ -124,7 +165,6 @@ static void _linux_explicit_sync_v1_bind(struct wl_client *client, void *data,
     return;
   }
 
-  /* 2. Set implementation and data */
   wl_resource_set_implementation(res, &_linux_explicit_sync_v1_impl, comp,
                                  NULL);
 
@@ -141,19 +181,25 @@ void _linux_surface_sync_v1_destroy(struct wl_client   *client,
 void _linux_surface_sync_v1_set_acquire_fence(struct wl_client   *client,
                                               struct wl_resource *resource,
                                               int32_t             fd) {
-  /* 1. Retrieve internal surface handle */
-  struct vt_surface_t *surf =
+  struct vt_linux_explicit_sync_v1_surface_state_t *state =
       resource ? wl_resource_get_user_data(resource) : NULL;
-  if (!surf) {
+  if (!state) {
     wl_resource_post_error(
         resource, ZWP_LINUX_SURFACE_SYNCHRONIZATION_V1_ERROR_NO_SURFACE,
-        "surface no longer exists");
+        "surface explicit sync state no longer exists");
     close(fd);
     return;
   }
 
-  /* 2. Check for duplicate fence */
-  if (surf->pending.acquire_fence_fd != -1) {
+  if (!state->surf) {
+    wl_resource_post_error(
+        resource, ZWP_LINUX_SURFACE_SYNCHRONIZATION_V1_ERROR_NO_SURFACE,
+        "surface longer exists");
+    close(fd);
+    return;
+  }
+
+  if (state->acquire_fence_fd >= 0) {
     wl_resource_post_error(
         resource, ZWP_LINUX_SURFACE_SYNCHRONIZATION_V1_ERROR_DUPLICATE_FENCE,
         "already have a fence fd");
@@ -161,21 +207,29 @@ void _linux_surface_sync_v1_set_acquire_fence(struct wl_client   *client,
     return;
   }
 
-  surf->pending.acquire_fence_fd = fd;
+  state->acquire_fence_fd = fd;
 
-  VT_TRACE(surf->comp->log,
+  VT_TRACE(state->surf->comp->log,
            "linux_surface_sync.set_acquire_fence: set acquire fence FD=%i for "
            "surface %p.",
-           fd, surf);
+           fd, state->surf);
 }
 
 void _linux_surface_sync_v1_get_release(struct wl_client   *client,
                                         struct wl_resource *resource,
                                         uint32_t            id) {
-  /* 1. Retrieve internal surface handle */
-  struct vt_surface_t *surf =
+  struct vt_linux_explicit_sync_v1_surface_state_t *state =
       resource ? wl_resource_get_user_data(resource) : NULL;
-  if (!surf) {
+
+  if (!state) {
+    VT_PARAM_CHECK_FAIL(_proto.comp);
+    wl_resource_post_error(
+        resource, ZWP_LINUX_SURFACE_SYNCHRONIZATION_V1_ERROR_NO_SURFACE,
+        "surface explicit sync state no longer exists");
+    return;
+  }
+
+  if (!state->surf) {
     VT_PARAM_CHECK_FAIL(_proto.comp);
     wl_resource_post_error(
         resource, ZWP_LINUX_SURFACE_SYNCHRONIZATION_V1_ERROR_NO_SURFACE,
@@ -183,84 +237,74 @@ void _linux_surface_sync_v1_get_release(struct wl_client   *client,
     return;
   }
 
-  /* 2. Check for existing pending release object */
-  if (surf->pending.release) {
+  struct vt_buffer_release_t *release =
+      vt_surface_state_get_or_create_buffer_release(&state->surf->pending);
+
+  if (!release) {
+    VT_WL_OUT_OF_MEMORY(state->surf->comp, client);
+    return;
+  }
+
+  if (release->explicit) {
     wl_resource_post_error(
         resource, ZWP_LINUX_SURFACE_SYNCHRONIZATION_V1_ERROR_DUPLICATE_RELEASE,
         "already has a buffer release");
     return;
   }
 
-  /* 3. Allocate resource for the buffer release interface */
-  struct wl_resource *res_release =
+  struct wl_resource *res =
       wl_resource_create(client, &zwp_linux_buffer_release_v1_interface,
                          wl_resource_get_version(resource), id);
 
-  if (!res_release) {
-    VT_WL_OUT_OF_MEMORY(surf->comp, client);
+  if (!res) {
+    VT_WL_OUT_OF_MEMORY(state->surf->comp, client);
     return;
   }
 
-  struct vt_surface_release_t *pending_release =
-      VT_ALLOC(surf->comp, sizeof(struct vt_surface_release_t));
+  struct vt_linux_explicit_sync_v1_buffer_release_t *explicit_release =
+      calloc(1, sizeof(*explicit_release));
 
-  pending_release->pending_surface = surf;
-  pending_release->res = res_release;
+  if (!explicit_release) {
+    wl_resource_destroy(res);
+    VT_WL_OUT_OF_MEMORY(state->surf->comp, client);
+    return;
+  }
 
-  surf->pending.release = pending_release;
+  explicit_release->release = release;
+  explicit_release->res = res;
+  release->explicit = explicit_release;
 
-  /* 5. Set destruction handler */
-  wl_resource_set_implementation(res_release, NULL, pending_release,
-                                 _linux_surface_res_release_handle_destroy);
-
-  VT_TRACE(
-      surf->comp->log,
-      "linux_surface_sync.get_release: created buffer release for surface %p.",
-      surf);
+  wl_resource_set_implementation(res, NULL, explicit_release,
+                                 _handle_explict_release_destroy);
 }
 
 void _linux_surface_sync_handle_destroy(struct wl_resource *resource) {
-  /* 1. Retrieve internal surface handle */
-  struct vt_surface_t *surf =
+  struct vt_linux_explicit_sync_v1_surface_state_t *state =
       resource ? wl_resource_get_user_data(resource) : NULL;
 
-  if (!surf) {
+  if (!state) {
     return;
   }
 
-  VT_TRACE(surf->comp->log,
-           "linux_surface_sync.resource_destroy: destroying sync resource %p.",
-           resource);
+  state->res = NULL;
 
-  /* 2. Clear synchronization handle */
-  surf->sync.res = NULL;
-
-  /* 3. Close acquire fence fd if valid */
-  if (surf->pending.acquire_fence_fd >= 0)
-    close(surf->pending.acquire_fence_fd);
-
-  surf->pending.acquire_fence_fd = -1;
+  vt_surface_addon_destroy(&state->addon);
 }
 
-void _linux_surface_res_release_handle_destroy(struct wl_resource *resource) {
-  /* 1. Retrieve internal surface handle */
-  struct vt_surface_release_t *release =
+void _handle_explict_release_destroy(struct wl_resource *resource) {
+  struct vt_linux_explicit_sync_v1_buffer_release_t *explicit =
       resource ? wl_resource_get_user_data(resource) : NULL;
 
-  if (!release) {
+  if (!explicit) {
     return;
   }
 
-  if (release->pending_surface &&
-      release->pending_surface->pending.release == release)
-    release->pending_surface->pending.release = NULL;
-
-  if (release->pending_surface) {
-    VT_TRACE(release->pending_surface->comp->log,
-             "linux_surface_release.resource_destroy: destroyed release "
-             "resource %p.",
-             resource);
+  if (explicit->release) {
+    explicit->release->explicit = NULL;
+    explicit->release = NULL;
   }
+
+  free(explicit);
 }
 
 /* ===================================================
@@ -289,10 +333,8 @@ void vt_proto_linux_explicit_sync_v1_err(struct wl_resource *resource,
   const char *class = wl_resource_get_class(resource);
   struct wl_client   *client = wl_resource_get_client(resource);
   struct wl_resource *dsp_res = client ? wl_client_get_object(client, 1) : NULL;
-  struct vt_surface_t *surf =
-      resource ? wl_resource_get_user_data(resource) : NULL;
 
-  if (!client || !surf || !dsp_res) {
+  if (!client || !dsp_res) {
     VT_PARAM_CHECK_FAIL(_proto.comp);
     return;
   }
@@ -304,7 +346,29 @@ void vt_proto_linux_explicit_sync_v1_err(struct wl_resource *resource,
       class, id, msg);
 
   /* 3. Log the protocol warning */
-  VT_WARN(surf->comp->log,
+  VT_WARN(_proto.comp->log,
           "linux_explicit_synchronization server error with %s@%" PRIu32 ": %s",
           class, id, msg);
+}
+
+static void
+_linux_explicit_sync_destroy_addon(struct vt_surface_addon_t *addon) {
+  struct vt_linux_explicit_sync_v1_surface_state_t *state =
+      wl_container_of(addon, state, addon);
+
+  if (state->acquire_fence_fd >= 0) {
+    close(state->acquire_fence_fd);
+    state->acquire_fence_fd = -1;
+  }
+
+  if (state->res) {
+    wl_resource_set_user_data(state->res, NULL);
+  }
+
+  if (state->surf) {
+    state->surf->proto_state.linux_explicit_sync_v1 = NULL;
+    state->surf = NULL;
+  }
+
+  free(state);
 }

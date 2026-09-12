@@ -1,9 +1,6 @@
 #include "wl_surface.h"
 #include "pixman.h"
-#include "runara/runara.h"
 #include "src/core/buffer.h"
-#include "src/core/compositor.h"
-#include "src/core/content_update.h"
 #include "src/core/scene.h"
 #include "src/core/surface.h"
 #include "src/core/util.h"
@@ -139,8 +136,6 @@ void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
   surf->pending.buf = new_buf;
   surf->pending.buffer_attached = true;
 }
-
-static void _surface_drop_current_buffer(struct vt_surface_t *surf) {}
 
 void _wl_surface_commit(struct wl_client   *client,
                         struct wl_resource *resource) {
@@ -323,8 +318,8 @@ void _wl_surface_set_input_region(struct wl_client   *client,
 void _wl_surface_set_buffer_transform(struct wl_client   *client,
                                       struct wl_resource *resource,
                                       int32_t             transform) {
-  /* [0]: Sets transform options for a surface which the compositor
-   * needs to apply in the renderer. */
+  /* [0]: Sets transform for a surface which the compositor
+   * needs to apply when rendering. */
   struct vt_surface_t *surf =
       resource ? wl_resource_get_user_data(resource) : NULL;
   if (!surf) {
@@ -342,17 +337,19 @@ void _wl_surface_set_buffer_transform(struct wl_client   *client,
   }
 
   /* 2. Set the transform */
-  surf->buffer_transform = transform;
+  surf->pending.buffer_transform = transform;
+
+  surf->pending.buffer_transform_changed = true;
 
   VT_TRACE(surf->comp->log,
-           "surface.set_buffer_transform: transform=%d for surface %p",
+           "wl_surface.set_buffer_transform: Set pending transform=%d for surface %p",
            transform, surf);
 }
 
 void _wl_surface_set_buffer_scale(struct wl_client   *client,
                                   struct wl_resource *resource, int32_t scale) {
   /* [0]: Sets buffer scale for HiDPi displays. This needs to be
-   * applied in the renderer. */
+   * applied when rendering. */
   struct vt_surface_t *surf =
       resource ? wl_resource_get_user_data(resource) : NULL;
   if (!surf) {
@@ -361,7 +358,7 @@ void _wl_surface_set_buffer_scale(struct wl_client   *client,
   }
 
   /* 1. Check for invalid input.
-   * According to spec, a scale < 1 is not valid. */
+   * According to the spec, a scale < 1 is not valid. */
   if (scale < 1) {
     wl_resource_post_error(resource, WL_SURFACE_ERROR_INVALID_SCALE,
                            "invalid buffer scale %d", scale);
@@ -369,27 +366,29 @@ void _wl_surface_set_buffer_scale(struct wl_client   *client,
   }
 
   /* 1. Set the buffer scale*/
-  surf->buffer_scale = scale;
+  surf->pending.buffer_scale = scale;
+  surf->pending.buffer_scale_changed = true;
 
-  VT_TRACE(surf->comp->log, "surface_set_buffer_scale: scale=%d for surface %p",
+  VT_TRACE(surf->comp->log,
+           "wl_surface.set_buffer_scale: Set pending scale=%d for surface %p",
            scale, surf);
 }
 
 void _wl_surface_offset(struct wl_client *client, struct wl_resource *resource,
                         int32_t x, int32_t y) {
-  /* [0]: Sets surface position (non-standard) */
   struct vt_surface_t *surf = wl_resource_get_user_data(resource);
-  if (!surf)
+  if (!surf) {
+    VT_PARAM_CHECK_FAIL(_proto.comp);
     return;
+  }
 
-  surf->x = x;
-  surf->y = y;
+  surf->pending.offset_x = x;
+  surf->pending.offset_y = y;
+  surf->pending.offset_set = true;
 
-  // Force re-evaluation on next commit
-  surf->_mask_outputs_visible_on = 0;
-
-  VT_TRACE(surf->comp->log, "surface_offset: moved surface %p to %d,%d", surf,
-           x, y);
+  VT_TRACE(surf->comp->log,
+           "wl_surface.offset: Set pending offset=[%d, %d] for surface %p", x,
+           y, surf);
 }
 
 void _wl_surface_destroy(struct wl_client   *client,
@@ -397,129 +396,45 @@ void _wl_surface_destroy(struct wl_client   *client,
   struct vt_surface_t *surf =
       ((struct vt_surface_t *)wl_resource_get_user_data(resource));
 
-  VT_TRACE(surf->comp->log, "Got surface.destroy: Destroying surface resource.")
+  VT_TRACE(surf->comp->log, "Got wl_surface.destroy: Destroying surface resource.")
   wl_resource_destroy(resource);
-}
-
-static void _explicit_sync_surface_destroy(struct vt_surface_t *surf) {
-  if (surf->pending.acquire_fence_fd >= 0) {
-    close(surf->pending.acquire_fence_fd);
-    surf->pending.acquire_fence_fd = -1;
-  }
-
-  if (surf->pending.release) {
-    surf->pending.release->pending_surface = NULL;
-    surf->pending.release = NULL;
-  }
-
-  surf->sync.release = NULL;
-
-  if (surf->sync.res) {
-    wl_resource_set_user_data(surf->sync.res, NULL);
-    surf->sync.res = NULL;
-  }
 }
 
 void _wl_surface_handle_resource_destroy(struct wl_resource *resource) {
   struct vt_surface_t *surf = wl_resource_get_user_data(resource);
 
-  const int32_t x = surf->x;
-  const int32_t y = surf->y;
-  const int32_t w = surf->buf ? surf->buf->tex.width : 0;
-  const int32_t h = surf->buf ? surf->buf->tex.height : 0;
+  if (!surf || !surf->comp) {
+    VT_PARAM_CHECK_FAIL(_proto.comp);
+    return;
+  }
 
-  VT_TRACE(surf->comp->log, "Got surface.destroy handler: Unmanaging client.")
+  VT_TRACE(surf->comp->log, "Got wl_surface.destroy")
 
   if (surf->mapped)
     vt_surface_unmapped(surf);
 
-  /* Unlink from lists */
+  /* Unlink from compositor list */
   wl_list_remove(&surf->link);
 
-  struct vt_seat_t *seat = surf->comp ? surf->comp->seat : NULL;
+  if (surf->comp->seat)
+    vt_seat_handle_surface_destroyed(surf->comp->seat, surf);
 
-  /* no seat field may retain this pointer past free(surf). */
-  if (seat) {
-    if (seat->kb_focus.surf == surf) {
-      seat->kb_focus.surf = NULL;
-      seat->kb_focus.client = NULL;
-    }
+  vt_surface_pending_state_fini(&surf->pending);
+  vt_surface_applied_state_fini(&surf->pending);
 
-    if (seat->ptr_focus.surf == surf) {
-      seat->ptr_focus.surf = NULL;
-      seat->ptr_focus.client = NULL;
-    }
-
-    if (seat->cursor.surf == surf) {
-      seat->cursor.surf = NULL;
-      seat->cursor.owner = NULL;
-    }
+  struct vt_surface_addon_t *addon;
+  wl_list_for_each(addon, &surf->addons, link) {
+    vt_surface_addon_destroy(addon);
   }
 
-  /* Focus stack must not retain the surface. */
-  if (!wl_list_empty(&surf->link_focus)) {
-    wl_list_remove(&surf->link_focus);
-    wl_list_init(&surf->link_focus);
-  }
-
-  /* Deallocate pixman regions */
-  pixman_region32_fini(&surf->pending.damage);
-  pixman_region32_fini(&surf->damage);
-
-  pixman_region32_init(&surf->pending.input_region);
-  pixman_region32_init(&surf->input_region);
-  
-  pixman_region32_init(&surf->pending.opaque_region);
-  pixman_region32_fini(&surf->opaque_region);
-
-  /* Destroy the attached render texture */
-  _surface_drop_current_buffer(surf);
-
-  /* destroy dmabuf resources of the surface */
-  if (surf->comp->have_proto_dmabuf)
-    vt_proto_linux_dmabuf_v1_surface_destroy(surf);
-
-  if (surf->scene_node)
+  if (surf->scene_node) {
+    vt_scene_node_damage_whole(surf->scene_node);
     vt_scene_node_destroy(surf->comp, surf->scene_node);
-
-  struct vt_output_t   *output;
-  wl_list_for_each(output, &surf->comp->outputs, link_global) {
-    if (!(surf->_mask_outputs_visible_on & (1u << output->id)))
-      continue;
-    // Damage the part of the screen where the surface was located
-    // and schedule a repaint
-    pixman_region32_union_rect(&output->damage, &output->damage, x, y, w, h);
-    vt_comp_schedule_repaint(surf->comp, output);
-
-    output->needs_damage_rebuild = true;
+    surf->scene_node = NULL;
   }
 
-  _explicit_sync_surface_destroy(surf);
-
-  /* Free surface handle */
   wl_resource_set_user_data(resource, NULL);
   free(surf);
-}
-
-void _wl_surface_associate_with_output(struct vt_compositor_t *c,
-                                       struct vt_surface_t    *surf,
-                                       struct vt_output_t     *output) {
-  if(!surf || !c || !output) 
-    return;
-
-  if(!surf->buf) {
-    surf->_mask_outputs_visible_on = 0;
-    return;
-  }
-
-  // TODO: Not use buffer width
-  RnTexture tex = surf->buf->tex;
-  if (surf->x + tex.width <= output->x ||
-      surf->x >= output->x + output->width ||
-      surf->y + tex.height <= output->y ||
-      surf->y >= output->y + output->height)
-    return;
-  surf->_mask_outputs_visible_on |= (1u << output->id);
 }
 
 bool vt_proto_wl_surface_init(struct vt_surface_t *surf,
@@ -539,7 +454,7 @@ bool vt_proto_wl_surface_init(struct vt_surface_t *surf,
   }
   wl_resource_set_implementation(res, &surface_impl, surf,
                                  _wl_surface_handle_resource_destroy);
-  surf->surf_res = res;
+  surf->res = res;
 
   _proto.comp = surf->comp;
 

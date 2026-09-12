@@ -35,6 +35,8 @@ struct vt_scene_node_t *vt_scene_node_create(struct vt_compositor_t *c,
 bool vt_scene_node_destroy(struct vt_compositor_t *c,
                            struct vt_scene_node_t *node);
 
+bool vt_scene_node_damage_whole(struct vt_scene_node_t *node);
+
 struct vt_scene_node_t *vt_scene_node_create_rect(struct vt_compositor_t *c,
                                                   float x, float y, float w,
                                                   float h, uint32_t color);

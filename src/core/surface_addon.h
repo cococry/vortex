@@ -3,6 +3,8 @@
 #include <stdbool.h>
 #include <wayland-util.h>
 
+struct vt_surface_addon_t;
+
 struct vt_surface_addon_impl_t {
   const char *name;
 
@@ -19,6 +21,7 @@ struct vt_surface_addon_impl_t {
 struct vt_surface_addon_t {
   struct wl_list link;
 
-  const struct vt_surface_addon_impl_t impl;
+  struct vt_surface_addon_impl_t impl;
 };
 
+void vt_surface_addon_destroy(struct vt_surface_addon_t* addon);

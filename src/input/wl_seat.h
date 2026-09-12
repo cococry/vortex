@@ -94,6 +94,9 @@ void vt_seat_set_keyboard_focus(struct vt_seat_t    *seat,
 void vt_seat_set_pointer_focus(struct vt_seat_t    *seat,
                                struct vt_surface_t *surf, double sx, double sy);
 
+void vt_seat_handle_surface_destroyed(struct vt_seat_t    *seat,
+                                      struct vt_surface_t *surf);
+
 void vt_seat_bind_global_keybinds(struct vt_seat_t *seat);
 
 bool vt_seat_terminate(struct vt_seat_t *seat);
