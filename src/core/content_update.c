@@ -271,10 +271,3 @@ bool vt_content_update_reaches(struct vt_content_update_t *from,
 
   return false;
 }
-
-void vt_content_update_enqueue(struct vt_content_update_t* cu) {
-  if(!cu || !cu->surf || cu->queued) return;
-
-  wl_list_insert(cu->surf->content_updates.prev, &cu->queue_link);
-  cu->queued = true;
-}

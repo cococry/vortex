@@ -21,6 +21,8 @@ bool vt_surface_init(struct vt_surface_t* surf) {
   vt_surface_applied_state_defaults(&surf->pending);
 
   wl_list_init(&surf->content_updates);
+  wl_list_init(&surf->subsurface.childs);
+  wl_list_init(&surf->subsurface.link_parent);
   wl_list_init(&surf->addons);
 
   wl_list_init(&surf->link);
@@ -359,8 +361,45 @@ bool vt_surface_effictively_synchronized(struct vt_surface_t* surf) {
   return false;
 }
 
-bool vt_surface_content_update(struct vt_surface_t* surf) {
-  if(!surf) return false;
+static bool _content_update_enqueue(struct vt_content_update_t *cu) {
+  if (!cu || !cu->surf || cu->queued)
+    return false;
+
+  struct vt_surface_t *surf = cu->surf;
+  if (!wl_list_empty(&surf->content_updates)) {
+    struct vt_content_update_t *prev =
+        wl_container_of(surf->content_updates.prev, prev, queue_link);
+
+    if (!vt_content_update_add_dependency(cu, prev)) {
+      return false;
+    }
+  }
+
+  wl_list_insert(cu->surf->content_updates.prev, &cu->queue_link);
+  cu->queued = true;
+
+  return true;
+}
+
+static bool _content_update_add_child_dependencies(struct vt_content_update_t* cu) {
+  if(!cu || !cu->surf) return false;
+
+  struct vt_surface_t* surf = cu->surf;
+  struct vt_surface_t* child;
+  wl_list_for_each(child, &surf->subsurface.childs, subsurface.link_parent) {
+    struct vt_content_update_t* last_scu = vt_surface_last_scu(child);
+    if(!last_scu) continue;
+
+    if (vt_content_update_reaches(cu, last_scu))
+      continue;
+
+    vt_content_update_add_dependency(cu, last_scu);
+  }
+}
+
+bool vt_surface_emit_content_update(struct vt_surface_t *surf) {
+  if (!surf)
+    return false;
 
   bool effectively_sync = vt_surface_effictively_synchronized(surf);
 
@@ -370,12 +409,31 @@ bool vt_surface_content_update(struct vt_surface_t* surf) {
   if (!cu)
     return false;
 
-  if (!vt_content_update_prepare(cu)) {
-    return false;
+  if (!_content_update_enqueue(cu)) {
+    goto fail;
   }
 
-  vt_content_update_enqueue(cu);
+  if (!_content_update_add_child_dependencies(cu)) {
+    goto fail;
+  }
 
-  if (!vt_content_update_apply_dag(cu))
-    return false;
+  vt_content_update_apply_dag(cu);
+
+  return true;
+fail:
+  vt_content_update_destroy(cu);
+  return false;
+}
+
+struct vt_content_update_t *vt_surface_last_scu(struct vt_surface_t *surf) {
+  if (!surf)
+    return NULL;
+
+  struct vt_content_update_t *cu;
+  wl_list_for_each_reverse(cu, &surf->content_updates, queue_link) {
+    if (cu->type == VT_CU_SYNC) {
+      return cu;
+    }
+  }
+  return NULL;
 }

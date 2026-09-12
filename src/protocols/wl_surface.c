@@ -13,6 +13,7 @@
 #include <unistd.h>
 #include <wayland-server-core.h>
 #include <wayland-server-protocol.h>
+#include <wayland-util.h>
 
 #define _SUBSYS_NAME "SURFACE"
 
@@ -139,10 +140,7 @@ void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
   surf->pending.buffer_attached = true;
 }
 
-  static void
-_surface_drop_current_buffer(struct vt_surface_t *surf)
-{
-}
+static void _surface_drop_current_buffer(struct vt_surface_t *surf) {}
 
 void _wl_surface_commit(struct wl_client   *client,
                         struct wl_resource *resource) {
@@ -152,19 +150,31 @@ void _wl_surface_commit(struct wl_client   *client,
     return;
   }
 
-  VT_TRACE(surf->comp->log, "Got surface.commit for surface %p.", surf)
+  VT_TRACE(surf->comp->log, "Got wl_surface.commit for surface %p.", surf)
 
-  if (!surf) {
-    VT_ERROR(surf->comp->log, "surface_commit: NULL user_data");
+  if (!vt_surface_validate_commit(surf)) {
+    VT_ERROR(surf->comp->log, "wl_surface.commit: Commit validation failed");
     return;
   }
 
-  if(!vt_surface_validate_commit(surf)) {
-    VT_ERROR(surf->comp->log, "surface_commit: Commit validation failed");
-    return; 
+  if (!vt_surface_emit_content_update(surf)) {
+    VT_ERROR(surf->comp->log,
+             "wl_surface.commit: Failed to emit content update");
+    return;
   }
 
   VT_TRACE(surf->comp->log, "surface.commit Finsihed commit.");
+}
+
+static void _surface_frame_callback_destroy(struct wl_resource* resource) {
+  struct vt_surface_frame_callback_t *cb = wl_resource_get_user_data(resource);
+
+  if(!cb) return;
+
+  wl_list_remove(&cb->link);
+  wl_list_init(&cb->link);
+
+  free(cb);
 }
 
 void _wl_surface_frame(struct wl_client *client, struct wl_resource *resource,
@@ -176,158 +186,138 @@ void _wl_surface_frame(struct wl_client *client, struct wl_resource *resource,
     return;
   }
 
-  VT_TRACE(surf->comp->log, "Got compositor.surface_frame.")
+  VT_TRACE(surf->comp->log, "Got wl_surface.frame");
 
   struct wl_resource *res =
       wl_resource_create(client, &wl_callback_interface, 1, callback);
+
   if (!res) {
     VT_WL_OUT_OF_MEMORY(_proto.comp, client);
     return;
   }
 
-  /* Store the frame callback in the list of pending frame callbacks.
-   * wl_callback_send_done must be called for each of the pending callback
-   * after the next "page flip" (next sink backend frame) event completes
-   * in order to correctly handle frame pacing ( see send_frame_callbacks() ).
-   */
-  if (surf->cb_pool.n_cbs >= VT_MAX_FRAME_CBS) {
-    VT_WARN(
-        surf->comp->log,
-        "Surface %p already has %i frame callbacks queued - dropping new one.",
-        surf->cb_pool.n_cbs);
+  struct vt_surface_frame_callback_t* cb = calloc(1, sizeof(*cb));
+  if(!cb) {
+    wl_resource_destroy(res);
+    VT_WL_OUT_OF_MEMORY(_proto.comp, client);
     return;
   }
-  surf->cb_pool.cbs[surf->cb_pool.n_cbs++] = res;
+  cb->res = res;
+  wl_list_init(&cb->link);
+
+  wl_resource_set_implementation(res, NULL, cb, _surface_frame_callback_destroy);
+
+  wl_list_insert(surf->pending.frame_callbacks.prev, &cb->link);
 
   VT_TRACE(surf->comp->log,
-           "surface.frame: Inserting frame callback into list of surface %p.",
-           surf);
-
-  surf->needs_frame_done = true;
-  surf->comp->any_frame_cb_pending = true;
+           "wl_surface.frame: Queued callback %p for surface %p.", cb, surf);
 }
-
 void _wl_surface_damage(struct wl_client *client, struct wl_resource *resource,
                         int32_t x, int32_t y, int32_t width, int32_t height) {
   struct vt_surface_t *surf =
       resource ? wl_resource_get_user_data(resource) : NULL;
+
   if (!surf) {
     VT_PARAM_CHECK_FAIL(_proto.comp);
     return;
   }
 
-  /* 1. Union the requested damage into the pending damage region
-   * of the surface. */
-  pixman_region32_union_rect(&surf->pending.damage, &surf->pending.damage, x, y,
-                             width, height);
+  VT_TRACE(surf->comp->log, "Got wl_surface.damage");
 
-  /* 2. Makr all outputs the surface intersects with for needing a damage
-   * rebuild. */
-  struct vt_output_t *output;
-  wl_list_for_each(output, &surf->comp->outputs, link_global) {
-    if (!(surf->_mask_outputs_visible_on & (1u << output->id)))
-      continue;
-    output->needs_damage_rebuild = true;
-  }
+  pixman_region32_union_rect(&surf->pending.damage_surface,
+                             &surf->pending.damage_surface, x, y, width,
+                             height);
 
-  /* 3. Set surface .damaged flag to avoid calling
-   * pixman_region32_empty(surf->damage) */
-  surf->damaged = true;
+  VT_TRACE(surf->comp->log,
+           "wl_surface.damage: Accumulated damage [x: %i, y: %i, w: %i, "
+           "h: %i] into pending surface damage of surface %p",
+           x, y, width, height, surf);
 }
+
 void _wl_surface_damage_buffer(struct wl_client   *client,
                                struct wl_resource *resource, int32_t x,
                                int32_t y, int32_t width, int32_t height) {
-  struct vt_surface_t *surf =
+   struct vt_surface_t *surf =
       resource ? wl_resource_get_user_data(resource) : NULL;
+
   if (!surf) {
     VT_PARAM_CHECK_FAIL(_proto.comp);
     return;
   }
 
-  /* 1. Union the requested damage into the pending damage region
-   * of the surface. */
-  pixman_region32_union_rect(&surf->pending.damage, &surf->pending.damage, x, y,
-                             width, height);
+  VT_TRACE(surf->comp->log, "Got wl_surface.damage_buffer");
 
-  /* 2. Makr all outputs the surface intersects with for needing a damage
-   * rebuild. */
-  struct vt_output_t *output;
-  wl_list_for_each(output, &surf->comp->outputs, link_global) {
-    if (!(surf->_mask_outputs_visible_on & (1u << output->id)))
-      continue;
+  pixman_region32_union_rect(&surf->pending.damage_buffer,
+                             &surf->pending.damage_surface, x, y, width,
+                             height);
 
-    output->needs_damage_rebuild = true;
-  }
-
-  /* 3. Set surface .damaged flag to avoid calling
-   * pixman_region32_empty(surf->damage) */
-  surf->damaged = true;
+  VT_TRACE(surf->comp->log,
+           "wl_surface.damage_buffer: Accumulated damage [x: %i, y: %i, w: %i, "
+           "h: %i] into pending buffer damage of surface %p",
+           x, y, width, height, surf);
 }
 
 void _wl_surface_set_opaque_region(struct wl_client   *client,
                                    struct wl_resource *resource,
                                    struct wl_resource *region) {
-  /* [0]: Sets the region in which the surface is opaque (not transparent).
-   * We can use this for occlusion tracking in the scene graph. */
   struct vt_surface_t *surf = wl_resource_get_user_data(resource);
   if (!surf) {
     VT_PARAM_CHECK_FAIL(_proto.comp);
     return;
   }
 
-  /* 1. A NULL region means there is no opaque region in the surface.
-   * If the region is set, we copy the internal handler of the given
-   * region resource (pixman_region32_t) into the opaque_region region
-   * of the surface. */
+  struct vt_region_t *r = NULL;
+
+  if (region) {
+    r = wl_resource_get_user_data(region);
+    if (!r)
+      return;
+  }
+
   pixman_region32_clear(&surf->pending.opaque_region);
 
   if (region) {
-    struct vt_region_t *r = wl_resource_get_user_data(region);
-
-    if (!r)
-      return;
-
     pixman_region32_copy(&surf->pending.opaque_region, &r->region);
   }
 
+  surf->pending.opaque_region_changed = true;
+
   VT_TRACE(surf->comp->log,
-           "surface.set_opaque_region: pending opaque region for surface %p",
-           (void *)surf);
+           "wl_surface.set_opaque_region: updated pending opaque region for "
+           "surface %p",
+           surf);
 }
 
 void _wl_surface_set_input_region(struct wl_client   *client,
                                   struct wl_resource *resource,
                                   struct wl_resource *region) {
-  /* [0]: Sets the region in which the surface accepts input
-   * events. */
-  struct vt_surface_t *surf =
-      resource ? wl_resource_get_user_data(resource) : NULL;
-
-  if (!surf)
+  struct vt_surface_t *surf = wl_resource_get_user_data(resource);
+  if (!surf) {
+    VT_PARAM_CHECK_FAIL(_proto.comp);
     return;
+  }
 
-  surf->pending.input_region_changed = true;
-  surf->pending.input_region_set = region != NULL;
+  struct vt_region_t *r = NULL;
 
-  /* 1. A NULL region means the entire surface accepts input events.
-   * If the region is not NULL, we copy the user data of the
-   * region resource (pixman_region32_t) into the pending input_region
-   * of the surface. By default we clear the pending input_region. */
+  if (region) {
+    r = wl_resource_get_user_data(region);
+    if (!r)
+      return;
+  }
 
   pixman_region32_clear(&surf->pending.input_region);
 
-  if (region) {
-    struct vt_region_t *r = wl_resource_get_user_data(region);
-
-    if (!r)
-      return;
-
+  surf->pending.input_region_infinite = r == NULL;
+  if (r) {
     pixman_region32_copy(&surf->pending.input_region, &r->region);
   }
 
+  surf->pending.input_region_changed = true;
+
   VT_TRACE(surf->comp->log,
-           "surface.set_input_region: pending input region for surface %p",
-           (void *)surf);
+           "wl_surface.set_input_region: updated pending input region for "
+           "surface %p",
+           surf);
 }
 
 void _wl_surface_set_buffer_transform(struct wl_client   *client,

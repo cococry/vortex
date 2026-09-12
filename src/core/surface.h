@@ -134,6 +134,11 @@ struct vt_surface_t {
 
   uint32_t outputs_visible_on;
   uint32_t outputs_presented_on;
+
+  struct {
+    struct wl_list childs;
+    struct wl_list link_parent;
+  } subsurface;
 };
 
 bool vt_surface_init(struct vt_surface_t* surf);
@@ -142,24 +147,28 @@ void vt_surface_mapped(struct vt_surface_t *surf);
 
 void vt_surface_unmapped(struct vt_surface_t *surf);
 
-void vt_surface_apply_buffer(struct vt_surface_t* surf, struct vt_buffer_t* buf);
+void vt_surface_apply_buffer(struct vt_surface_t *surf,
+                             struct vt_buffer_t  *buf);
 
 void vt_surface_pending_state_init(struct vt_surface_state_pending_t *state);
 
-void vt_surface_pending_state_defaults(struct vt_surface_state_pending_t *state);
+void vt_surface_pending_state_defaults(
+    struct vt_surface_state_pending_t *state);
 
 void vt_surface_applied_state_init(struct vt_surface_state_applied_t *state);
 
-void vt_surface_applied_state_defaults(struct vt_surface_state_applied_t *state);
+void vt_surface_applied_state_defaults(
+    struct vt_surface_state_applied_t *state);
 
-void
-vt_surface_pending_state_move(struct vt_surface_state_pending_t *dst,
-                              struct vt_surface_state_pending_t *src);
+void vt_surface_pending_state_move(struct vt_surface_state_pending_t *dst,
+                                   struct vt_surface_state_pending_t *src);
 
 void vt_surface_pending_state_fini(struct vt_surface_state_pending_t *state);
 
-bool vt_surface_validate_commit(struct vt_surface_t* surf);
+bool vt_surface_validate_commit(struct vt_surface_t *surf);
 
-bool vt_surface_effictively_synchronized(struct vt_surface_t* surf);
+bool vt_surface_effictively_synchronized(struct vt_surface_t *surf);
 
-bool vt_surface_content_update(struct vt_surface_t* surf);
+bool vt_surface_emit_content_update(struct vt_surface_t *surf);
+
+struct vt_content_update_t* vt_surface_last_scu(struct vt_surface_t *surf);

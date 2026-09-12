@@ -36,13 +36,10 @@ vt_content_update_create(struct vt_surface_t                     *surf,
                          struct vt_surface_state_pending_t *state,
                          enum vt_content_update_type_t            type);
 
-void vt_content_update_destroy(struct vt_content_update_t *edge);
+void vt_content_update_destroy(struct vt_content_update_t *cu);
 
 void vt_content_update_dependency_destroy(
     struct vt_content_update_dependency_t *dependency);
-
-
-bool vt_content_update_prepare(struct vt_content_update_t *cu);
 
 bool vt_content_update_apply(struct vt_content_update_t *cu);
 
@@ -56,5 +53,3 @@ bool vt_content_update_is_ready(const struct vt_content_update_t *cu);
 bool vt_content_update_apply_dag(struct vt_content_update_t *root);
 
 bool vt_content_update_reaches(struct vt_content_update_t *from, struct vt_content_update_t* target);
-
-void vt_content_update_enqueue(struct vt_content_update_t* cu);
