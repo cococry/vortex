@@ -1,9 +1,12 @@
 #pragma once
 
+#include <wayland-server-core.h>
+#include <runara/runara.h>
+
 #include "core_types.h"
 #include "pixman.h"
 #include "../render/renderer.h"
-#include <runara/runara.h>
+
 
 struct vt_buffer_t {
   struct wl_resource *res;

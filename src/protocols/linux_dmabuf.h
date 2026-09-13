@@ -1,6 +1,5 @@
 #pragma once
 
-#include "../core/core_types.h"
 #include "../core/surface_addon.h"
 #include "../render/dmabuf.h"
 

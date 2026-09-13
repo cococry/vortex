@@ -1,6 +1,7 @@
 #include "wl_surface.h"
 #include "pixman.h"
 #include "src/core/buffer.h"
+#include "src/core/content_update.h"
 #include "src/core/scene.h"
 #include "src/core/surface.h"
 #include "src/core/util.h"
@@ -124,7 +125,7 @@ void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
   }
 
   /* Modify pending state after everything succeeded */
-  if(legacy_offset) {
+  if (legacy_offset) {
     surf->pending.offset_set = true;
     surf->pending.offset_x = x;
     surf->pending.offset_y = y;
@@ -161,10 +162,11 @@ void _wl_surface_commit(struct wl_client   *client,
   VT_TRACE(surf->comp->log, "surface.commit Finsihed commit.");
 }
 
-static void _surface_frame_callback_destroy(struct wl_resource* resource) {
+static void _surface_frame_callback_destroy(struct wl_resource *resource) {
   struct vt_surface_frame_callback_t *cb = wl_resource_get_user_data(resource);
 
-  if(!cb) return;
+  if (!cb)
+    return;
 
   wl_list_remove(&cb->link);
   wl_list_init(&cb->link);
@@ -191,8 +193,8 @@ void _wl_surface_frame(struct wl_client *client, struct wl_resource *resource,
     return;
   }
 
-  struct vt_surface_frame_callback_t* cb = calloc(1, sizeof(*cb));
-  if(!cb) {
+  struct vt_surface_frame_callback_t *cb = calloc(1, sizeof(*cb));
+  if (!cb) {
     wl_resource_destroy(res);
     VT_WL_OUT_OF_MEMORY(_proto.comp, client);
     return;
@@ -200,7 +202,8 @@ void _wl_surface_frame(struct wl_client *client, struct wl_resource *resource,
   cb->res = res;
   wl_list_init(&cb->link);
 
-  wl_resource_set_implementation(res, NULL, cb, _surface_frame_callback_destroy);
+  wl_resource_set_implementation(res, NULL, cb,
+                                 _surface_frame_callback_destroy);
 
   wl_list_insert(surf->pending.frame_callbacks.prev, &cb->link);
 
@@ -232,7 +235,7 @@ void _wl_surface_damage(struct wl_client *client, struct wl_resource *resource,
 void _wl_surface_damage_buffer(struct wl_client   *client,
                                struct wl_resource *resource, int32_t x,
                                int32_t y, int32_t width, int32_t height) {
-   struct vt_surface_t *surf =
+  struct vt_surface_t *surf =
       resource ? wl_resource_get_user_data(resource) : NULL;
 
   if (!surf) {
@@ -243,8 +246,7 @@ void _wl_surface_damage_buffer(struct wl_client   *client,
   VT_TRACE(surf->comp->log, "Got wl_surface.damage_buffer");
 
   pixman_region32_union_rect(&surf->pending.damage_buffer,
-                             &surf->pending.damage_surface, x, y, width,
-                             height);
+                             &surf->pending.damage_buffer, x, y, width, height);
 
   VT_TRACE(surf->comp->log,
            "wl_surface.damage_buffer: Accumulated damage [x: %i, y: %i, w: %i, "
@@ -318,8 +320,6 @@ void _wl_surface_set_input_region(struct wl_client   *client,
 void _wl_surface_set_buffer_transform(struct wl_client   *client,
                                       struct wl_resource *resource,
                                       int32_t             transform) {
-  /* [0]: Sets transform for a surface which the compositor
-   * needs to apply when rendering. */
   struct vt_surface_t *surf =
       resource ? wl_resource_get_user_data(resource) : NULL;
   if (!surf) {
@@ -327,7 +327,6 @@ void _wl_surface_set_buffer_transform(struct wl_client   *client,
     return;
   }
 
-  /* 1. Check for invalid input */
   if (transform < WL_OUTPUT_TRANSFORM_NORMAL ||
       transform > WL_OUTPUT_TRANSFORM_FLIPPED_270) {
     wl_resource_post_error(resource, WL_SURFACE_ERROR_INVALID_TRANSFORM,
@@ -336,13 +335,13 @@ void _wl_surface_set_buffer_transform(struct wl_client   *client,
     return;
   }
 
-  /* 2. Set the transform */
   surf->pending.buffer_transform = transform;
 
   surf->pending.buffer_transform_changed = true;
 
   VT_TRACE(surf->comp->log,
-           "wl_surface.set_buffer_transform: Set pending transform=%d for surface %p",
+           "wl_surface.set_buffer_transform: Set pending transform=%d for "
+           "surface %p",
            transform, surf);
 }
 
@@ -396,7 +395,14 @@ void _wl_surface_destroy(struct wl_client   *client,
   struct vt_surface_t *surf =
       ((struct vt_surface_t *)wl_resource_get_user_data(resource));
 
-  VT_TRACE(surf->comp->log, "Got wl_surface.destroy: Destroying surface resource.")
+  if (!surf) {
+    VT_PARAM_CHECK_FAIL(_proto.comp);
+    return;
+  }
+
+  VT_TRACE(surf->comp->log,
+           "Got wl_surface.destroy: Destroying surface resource.")
+
   wl_resource_destroy(resource);
 }
 
@@ -419,18 +425,29 @@ void _wl_surface_handle_resource_destroy(struct wl_resource *resource) {
   if (surf->comp->seat)
     vt_seat_handle_surface_destroyed(surf->comp->seat, surf);
 
-  vt_surface_pending_state_fini(&surf->pending);
-  vt_surface_applied_state_fini(&surf->pending);
-
-  struct vt_surface_addon_t *addon;
-  wl_list_for_each(addon, &surf->addons, link) {
-    vt_surface_addon_destroy(addon);
-  }
-
   if (surf->scene_node) {
     vt_scene_node_damage_whole(surf->scene_node);
     vt_scene_node_destroy(surf->comp, surf->scene_node);
     surf->scene_node = NULL;
+  }
+
+  vt_surface_pending_state_fini(&surf->pending);
+  vt_surface_applied_state_fini(&surf->applied);
+
+  {
+    struct vt_content_update_t *cu, *tmp;
+
+    wl_list_for_each_safe(cu, tmp, &surf->content_updates, queue_link) {
+      vt_content_update_destroy(cu);
+    }
+  }
+
+  {
+    struct vt_surface_addon_t *addon, *tmp;
+
+    wl_list_for_each_safe(addon, tmp, &surf->addons, link) {
+      vt_surface_addon_destroy(addon);
+    }
   }
 
   wl_resource_set_user_data(resource, NULL);
@@ -441,13 +458,13 @@ bool vt_proto_wl_surface_init(struct vt_surface_t *surf,
                               struct wl_client *client, uint32_t id,
                               uint32_t version) {
   if (!surf) {
-    VT_PARAM_CHECK_FAIL(surf->comp);
     return false;
   }
 
   // Get the surface's wayland resource
   struct wl_resource *res =
-      wl_resource_create(client, &wl_surface_interface, 4, id);
+      wl_resource_create(client, &wl_surface_interface, version, id);
+
   if (!res) {
     VT_WL_OUT_OF_MEMORY(_proto.comp, client);
     return false;

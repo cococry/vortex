@@ -1,6 +1,8 @@
 
 #pragma once
 
+#include <wayland-server-core.h>
+
 #include "../core/core_types.h"
 
 #include "../input/wl_seat.h"

@@ -13,8 +13,9 @@
 
 #define _SUBSYS_NAME "SURFACE"
 
-bool vt_surface_init(struct vt_surface_t* surf) {
-  if(!surf) return false;
+bool vt_surface_init(struct vt_surface_t *surf) {
+  if (!surf)
+    return false;
 
   vt_surface_pending_state_init(&surf->pending);
   vt_surface_pending_state_defaults(&surf->pending);
@@ -53,9 +54,12 @@ void vt_surface_mapped(struct vt_surface_t *surf) {
   if (surf->mapped)
     return;
 
+  if (!surf->role)
+    return;
+
   surf->mapped = true;
 
-  if (surf->xdg_surf && surf->xdg_surf->toplevel) {
+  if (surf->role->type == VT_SURFACE_ROLE_XDG_TOPLEVEL) {
     vt_seat_set_keyboard_focus(seat, surf);
 
     if (wl_list_empty(&surf->link_focus)) {
@@ -101,6 +105,9 @@ void vt_surface_unmapped(struct vt_surface_t *surf) {
   if (!surf->mapped)
     return;
 
+  if (!surf->role || !surf->role->data)
+    return;
+
   struct vt_seat_t *seat = surf->comp->seat;
 
   bool had_keyboard_focus = seat->kb_focus.surf == surf;
@@ -135,25 +142,29 @@ void vt_surface_unmapped(struct vt_surface_t *surf) {
 
   struct vt_surface_t *new_focus = NULL;
 
-  if (surf->xdg_surf && surf->xdg_surf->toplevel &&
-      surf->xdg_surf->toplevel->parent) {
+  struct vt_xdg_surface_t *xdg_surf = surf->role->data;
 
-    struct vt_xdg_toplevel_t *parent = surf->xdg_surf->toplevel->parent;
+  if (surf->role->type == VT_SURFACE_ROLE_XDG_TOPLEVEL) {
+    if (xdg_surf->toplevel->parent) {
+      struct vt_xdg_toplevel_t *toplevel_parent = xdg_surf->toplevel->parent;
 
-    if (parent->xdg_surf && parent->xdg_surf->surf &&
-        parent->xdg_surf->surf->mapped) {
-
-      new_focus = parent->xdg_surf->surf;
+      bool valid_mapped_parent = toplevel_parent && toplevel_parent->xdg_surf &&
+                                 toplevel_parent->xdg_surf->surf &&
+                                 toplevel_parent->xdg_surf->surf->mapped;
+      if (valid_mapped_parent) {
+        new_focus = toplevel_parent->xdg_surf->surf;
+      }
     }
   }
 
-  if (!new_focus && surf->xdg_surf && surf->xdg_surf->popup) {
+  if (surf->role->type == VT_SURFACE_ROLE_XDG_POPUP) {
+    if (xdg_surf->popup->parent_xdg_surf) {
+      struct vt_xdg_surface_t *parent = xdg_surf->popup->parent_xdg_surf;
 
-    struct vt_xdg_surface_t *parent = surf->xdg_surf->popup->parent_xdg_surf;
+      if (parent && parent->surf && parent->surf->mapped) {
 
-    if (parent && parent->surf && parent->surf->mapped) {
-
-      new_focus = parent->surf;
+        new_focus = parent->surf;
+      }
     }
   }
 
@@ -185,7 +196,8 @@ void vt_surface_apply_buffer(struct vt_surface_t *surf,
 }
 
 void vt_surface_pending_state_init(struct vt_surface_state_pending_t *state) {
-  if(!state) return;
+  if (!state)
+    return;
 
   memset(state, 0, sizeof(*state));
 
@@ -196,7 +208,6 @@ void vt_surface_pending_state_init(struct vt_surface_state_pending_t *state) {
   pixman_region32_init(&state->damage_buffer);
 
   wl_list_init(&state->frame_callbacks);
-  wl_list_init(&state->release_callbacks);
 
   state->buffer_scale = 1;
   state->buffer_transform = WL_OUTPUT_TRANSFORM_NORMAL;
@@ -204,30 +215,34 @@ void vt_surface_pending_state_init(struct vt_surface_state_pending_t *state) {
   state->input_region_infinite = true;
 }
 
-void vt_surface_pending_state_defaults(struct vt_surface_state_pending_t *state) {
-  if(!state) return;
-  
+void vt_surface_pending_state_defaults(
+    struct vt_surface_state_pending_t *state) {
+  if (!state)
+    return;
+
   state->buffer_scale = 1;
   state->buffer_transform = WL_OUTPUT_TRANSFORM_NORMAL;
 
   state->input_region_infinite = true;
 }
-
 
 void vt_surface_applied_state_init(struct vt_surface_state_applied_t *state) {
-  if(!state) return;
+  if (!state)
+    return;
 
   memset(state, 0, sizeof(*state));
 
   pixman_region32_init(&state->input_region);
   pixman_region32_init(&state->opaque_region);
-  
+
   pixman_region32_init(&state->damage);
 }
 
-void vt_surface_applied_state_defaults(struct vt_surface_state_applied_t *state) {
-  if(!state) return;
-  
+void vt_surface_applied_state_defaults(
+    struct vt_surface_state_applied_t *state) {
+  if (!state)
+    return;
+
   state->buffer_scale = 1;
   state->buffer_transform = WL_OUTPUT_TRANSFORM_NORMAL;
 
@@ -268,9 +283,6 @@ void vt_surface_pending_state_move(struct vt_surface_state_pending_t *dst,
 
   wl_list_insert_list(&dst->frame_callbacks, &src->frame_callbacks);
   wl_list_init(&src->frame_callbacks);
-
-  wl_list_insert_list(&dst->release_callbacks, &src->release_callbacks);
-  wl_list_init(&src->release_callbacks);
 
   src->input_region_changed = false;
   src->input_region_infinite = false;
@@ -315,9 +327,9 @@ void vt_surface_pending_state_fini(struct vt_surface_state_pending_t *state) {
   pixman_region32_fini(&state->damage_buffer);
 }
 
-void vt_surface_applied_state_fini(struct vt_surface_state_applied_t *state)
-{
-  if(!state) return;
+void vt_surface_applied_state_fini(struct vt_surface_state_applied_t *state) {
+  if (!state)
+    return;
 
   pixman_region32_fini(&state->input_region);
   pixman_region32_fini(&state->opaque_region);
@@ -325,27 +337,30 @@ void vt_surface_applied_state_fini(struct vt_surface_state_applied_t *state)
   pixman_region32_fini(&state->damage);
 }
 
-bool vt_surface_validate_commit(struct vt_surface_t* surf) {
-  if(!surf) return false;
+bool vt_surface_validate_commit(struct vt_surface_t *surf) {
+  if (!surf)
+    return false;
 
-  if(surf->role->impl.validate_commit) {
-    if(!surf->role->impl.validate_commit(surf)) return false;
+  if (surf->role->impl.validate_commit) {
+    if (!surf->role->impl.validate_commit(surf))
+      return false;
   }
 
-  const struct vt_surface_addon_t* it;
+  const struct vt_surface_addon_t *it;
   wl_list_for_each(it, &surf->addons, link) {
-    if(it->impl.validate_commit) {
-      if(!it->impl.validate_commit(it)) {
+    if (it->impl.validate_commit) {
+      if (!it->impl.validate_commit(it)) {
         return false;
       }
-    } 
+    }
   }
 
   return true;
 }
 
-bool vt_surface_effictively_synchronized(struct vt_surface_t* surf) {
-  if(!surf) return false;
+bool vt_surface_effictively_synchronized(struct vt_surface_t *surf) {
+  if (!surf)
+    return false;
 
   while (surf) {
     if (!surf->role || surf->role->type != VT_SURFACE_ROLE_SUBSURFACE)
@@ -384,14 +399,17 @@ static bool _content_update_enqueue(struct vt_content_update_t *cu) {
   return true;
 }
 
-static bool _content_update_add_child_dependencies(struct vt_content_update_t* cu) {
-  if(!cu || !cu->surf) return false;
+static bool
+_content_update_add_child_dependencies(struct vt_content_update_t *cu) {
+  if (!cu || !cu->surf)
+    return false;
 
-  struct vt_surface_t* surf = cu->surf;
-  struct vt_surface_t* child;
+  struct vt_surface_t *surf = cu->surf;
+  struct vt_surface_t *child;
   wl_list_for_each(child, &surf->subsurface.childs, subsurface.link_parent) {
-    struct vt_content_update_t* last_scu = vt_surface_last_scu(child);
-    if(!last_scu) continue;
+    struct vt_content_update_t *last_scu = vt_surface_last_scu(child);
+    if (!last_scu)
+      continue;
 
     if (vt_content_update_reaches(cu, last_scu))
       continue;
@@ -441,8 +459,10 @@ struct vt_content_update_t *vt_surface_last_scu(struct vt_surface_t *surf) {
   return NULL;
 }
 
-struct vt_buffer_release_t* vt_surface_state_get_or_create_buffer_release(struct vt_surface_state_pending_t *state) {
-  if(!state) return NULL;
+struct vt_buffer_release_t *vt_surface_state_get_or_create_buffer_release(
+    struct vt_surface_state_pending_t *state) {
+  if (!state)
+    return NULL;
 
   struct vt_buffer_release_t *release = state->buffer_release;
 

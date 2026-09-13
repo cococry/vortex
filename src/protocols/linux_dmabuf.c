@@ -1203,7 +1203,7 @@ _linux_dmabuf_surface_from_surf(struct vt_surface_t *surf) {
 
   wl_list_init(&dmabuf_surf->res_feedback);
 
-  dmabuf_surf->addon.impl = &dmabuf_surface_addon_impl;
+  dmabuf_surf->addon.impl = dmabuf_surface_addon_impl;
   wl_list_insert(&surf->addons, &dmabuf_surf->addon.link);
 
   wl_list_insert(&_proto->dmabuf_surface_states, &dmabuf_surf->link);
