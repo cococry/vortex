@@ -7,9 +7,6 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv);
 
 void vt_comp_run(struct vt_compositor_t *c);
 
-uint32_t vt_comp_merge_damaged_regions(pixman_box32_t    *merged,
-                                       pixman_region32_t *region);
-
 bool vt_comp_terminate(struct vt_compositor_t *c);
 
 void vt_comp_frame_done(struct vt_compositor_t *c, struct vt_output_t *output,
@@ -25,12 +22,3 @@ void vt_comp_repaint_scene(struct vt_compositor_t *c,
 
 struct vt_surface_t *vt_comp_pick_surface(struct vt_compositor_t *comp,
                                           double x, double y);
-
-void vt_comp_damage_entire_surface(struct vt_compositor_t *comp,
-                                   struct vt_surface_t *surf, int32_t x,
-                                   int32_t y);
-
-void vt_comp_surf_mark_damaged(struct vt_compositor_t *comp,
-                               struct vt_surface_t    *surf);
-
-bool vt_comp_surface_is_effectively_mapped(struct vt_surface_t *surf);

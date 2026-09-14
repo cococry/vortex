@@ -379,6 +379,27 @@ bool vt_surface_effictively_synchronized(struct vt_surface_t *surf) {
   return false;
 }
 
+bool vt_surface_effectively_mapped(struct vt_surface_t *surf) {
+  if (!surf || !surf->mapped)
+    return false;
+
+  while (surf->role->type == VT_SURFACE_ROLE_SUBSURFACE) {
+    struct vt_subsurface_t *sub = surf->role->data;
+    if (!sub) {
+      VT_ERROR(surf->comp->log,
+               "Surface with subsurface role has NULL role->data");
+      return false;
+    }
+
+    surf = sub->parent;
+
+    if (!surf || !surf->mapped)
+      return false;
+  }
+
+  return true;
+}
+
 static bool _content_update_enqueue(struct vt_content_update_t *cu) {
   if (!cu || !cu->surf || cu->queued)
     return false;
@@ -478,4 +499,20 @@ struct vt_buffer_release_t *vt_surface_state_get_or_create_buffer_release(
   wl_list_init(&release->callbacks);
 
   return vt_buffer_release_ref(release);
+}
+
+void vt_surface_frame_done(struct vt_surface_t *surf,
+                           uint32_t             frame_time_msec) {
+  if (!surf)
+    return;
+
+  struct vt_surface_frame_callback_t *cb;
+  wl_list_for_each(cb, &surf->pending.frame_callbacks, link) {
+    wl_callback_send_done(cb, frame_time_msec);
+
+    VT_TRACE(surf->comp->log, "Sent wl_callback done for surf=%p callback=%p",
+             surf, cb);
+
+    wl_resource_destroy(cb);
+  }
 }

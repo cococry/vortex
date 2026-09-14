@@ -1,14 +1,13 @@
 #define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
+#include "src/core/buffer.h"
 #include "src/input/input.h"
 #include "src/input/wl_seat.h"
-#include "src/protocols/linux_dmabuf.h"
 #include "src/protocols/wl_data_device.h"
 #include "src/protocols/wl_subcompositor.h"
 #include "src/protocols/wl_surface.h"
 #include "src/protocols/xdg_shell.h"
-#include "src/core/buffer.h"
 #include "src/render/renderer.h"
 
 #include <dirent.h>
@@ -113,68 +112,31 @@ void _vt_comp_frame_handler(void *data) {
 /* Heed my words struggeler... */
 void vt_comp_frame_done(struct vt_compositor_t *c, struct vt_output_t *output,
                         uint32_t t) {
-  // Basically iterate each surface on a specific output and for each surface
-  // iterate each frame pending callback (since the last page flip on that
-  // output) and let the client know we're done rendering their frames by
-  // calling wl_callback_send_done.
-  //
-  // [!] This is the mechanism by which we achieve vblank frame pacing.
   struct vt_surface_t *surf;
   wl_list_for_each(surf, &c->surfaces, link) {
-    if (!surf->needs_frame_done)
+    if (!(surf->outputs_visible_on & (1u << output->id)))
       continue;
 
-    if (!(surf->_mask_outputs_visible_on & (1u << output->id)))
-      continue;
+    bool was_displayed = (surf->outputs_presented_on &
+                          surf->outputs_visible_on) == surf->outputs_visible_on;
 
-    if ((surf->_mask_outputs_presented_on & surf->_mask_outputs_visible_on) ==
-        surf->_mask_outputs_visible_on) {
-      for (uint32_t i = 0; i < surf->cb_pool.n_cbs; i++) {
-        if (!surf->cb_pool.cbs[i])
-          continue;
-        wl_callback_send_done(surf->cb_pool.cbs[i], t);
-        wl_resource_destroy(surf->cb_pool.cbs[i]);
-        if (!c->sent_frame_cbs)
-          c->sent_frame_cbs = true;
-
-        VT_TRACE(surf->comp->log, "FRAME DONE surf=%p callback=%p output=%p",
-                 surf, surf->cb_pool.cbs[i], output);
-      }
-      surf->needs_frame_done = false;
-      surf->cb_pool.n_cbs = 0;
-      surf->_mask_outputs_presented_on = 0;
-      VT_TRACE(surf->comp->log,
-               "Sent wl_callback.done() for all pending frame callbacks on "
-               "output %p.",
-               output);
+    if (was_displayed) {
+      vt_surface_frame_done(surf, t);
     }
   }
-  c->any_frame_cb_pending = false;
+
+  VT_TRACE(surf->comp->log,
+           "Sent wl_callback.done() for all pending frame callbacks on "
+           "output %p.",
+           output);
 }
 
 void vt_comp_frame_done_all(struct vt_compositor_t *c, uint32_t t) {
-  // Basically iterate each surface and for each surface iterate
-  // each frame pending callback (since the last page flip) and
-  // let the client know we're done rendering their frames by calling
-  // wl_callback_send_done
   struct vt_surface_t *surf;
-  wl_list_for_each(surf, &c->surfaces, link) {
-    if (!surf->needs_frame_done)
-      continue;
+  wl_list_for_each(surf, &c->surfaces, link) { vt_surface_frame_done(surf, t); }
 
-    for (uint32_t i = 0; i < surf->cb_pool.n_cbs; i++) {
-      // if(!surf->cb_pool.cbs[i]) continue;
-      wl_callback_send_done(surf->cb_pool.cbs[i], t);
-      wl_resource_destroy(surf->cb_pool.cbs[i]);
-      if (!c->sent_frame_cbs)
-        c->sent_frame_cbs = true;
-    }
-    surf->needs_frame_done = false;
-    surf->cb_pool.n_cbs = 0;
-    VT_TRACE(surf->comp->log,
-             "Sent wl_callback.done() for all pending frame callbacks.");
-  }
-  c->any_frame_cb_pending = false;
+  VT_TRACE(surf->comp->log, "Sent wl_callback.done() for all pending frame "
+                            "callbacks of all surfaces.");
 }
 
 bool _vt_comp_render_output(struct vt_compositor_t *c,
@@ -426,28 +388,6 @@ void _vt_comp_load_backend(struct vt_compositor_t *c, const char *backend_name,
            backend_name);
 }
 
-void _vt_comp_associate_surface_with_output(struct vt_compositor_t *c,
-                                            struct vt_surface_t    *surf,
-                                            struct vt_output_t     *output) {
-  // TODO: Do not rely on buffer size
-  // Skip if surface and output don’t intersect
-  if(!surf || !surf->buf) return;
-  if (surf->x + surf->buf->tex.width <= output->x ||
-      surf->x >= output->x + output->width ||
-      surf->y + surf->buf->tex.height <= output->y ||
-      surf->y >= output->y + output->height)
-    return;
-
-  bool visibility_updated =
-      !(surf->_mask_outputs_visible_on & (1u << output->id));
-
-  surf->_mask_outputs_visible_on |= (1u << output->id);
-
-  if (visibility_updated) {
-    output->needs_damage_rebuild = true;
-  }
-}
-
 void _vt_comp_wl_surface_create(struct wl_client   *client,
                                 struct wl_resource *resource, uint32_t id) {
   struct vt_compositor_t *c =
@@ -455,35 +395,25 @@ void _vt_comp_wl_surface_create(struct wl_client   *client,
   if (!c)
     return;
 
-  VT_TRACE(c->log, "Got compositor.surface_create: Started managing surface.");
-  // Allocate the struct to store protocol information about the surface
-  struct vt_surface_t *surf = calloc(1, sizeof(*surf));
-  surf->comp = c;
-  wl_list_init(&surf->link_focus);
-
-  // Init the regions
-  pixman_region32_init(&surf->pending.damage);
-  pixman_region32_init(&surf->current.damage);
-
-  pixman_region32_init(&surf->pending.opaque_region);
-  pixman_region32_init(&surf->current.opaque_region);
-
-  pixman_region32_init(&surf->pending.input_region);
-  pixman_region32_init(&surf->current.input_region);
-
-  // Add the surface to list of surfaces in the compositor
-  wl_list_insert(&c->surfaces, &surf->link);
-  VT_TRACE(c->log, "compositor.surface_create: Inserted surface into list.");
-
   VT_TRACE(c->log,
-           "compositor.surface_create: Setting surface implementation.");
+           "Got wl_compositor.surface_create: Started managing surface.");
 
-  if (!vt_proto_wl_surface_init(surf, client, id, 4)) {
-    VT_ERROR(c->log, "compositor.surface_create: Failed to create surface.");
+  struct vt_surface_t *surf = calloc(1, sizeof(*surf));
+  if (!surf) {
+    VT_WL_OUT_OF_MEMORY(c, client);
     return;
   }
 
-  wl_list_init(&surf->addons);
+  if (!vt_surface_init(surf)) {
+    VT_ERROR(c->log,
+             "wl_compositor.surface_create: Failed to initialize surface.");
+    return;
+  }
+
+  if (!vt_proto_wl_surface_init(surf, client, id, 4)) {
+    VT_ERROR(c->log, "wl_compositor.surface_create: Failed to create surface.");
+    return;
+  }
 
   vt_scene_node_add_child(c, c->root_node, vt_scene_node_create(c, surf));
 }
@@ -575,29 +505,6 @@ static void _wl_region_handle_destroy(struct wl_resource *resource) {
   pixman_region32_fini(&r->region);
   free(r);
 }
-
-uint32_t vt_comp_merge_damaged_regions(pixman_box32_t    *merged,
-                                       pixman_region32_t *region) {
-  pixman_box32_t extents = *pixman_region32_extents(region);
-  if ((extents.x2 - extents.x1 <= 0 || extents.y2 - extents.y1 <= 0) &&
-      pixman_region32_empty(region)) {
-    return 0;
-  }
-
-  uint32_t        n_rects = 0;
-  pixman_box32_t *rects = pixman_region32_rectangles(region, &n_rects);
-  if (!n_rects) {
-    pixman_box32_t extents = *pixman_region32_extents(region);
-    merged[0] =
-        (pixman_box32_t){extents.x1, extents.y1, extents.x2, extents.y2};
-    return 1;
-  }
-
-  memcpy(merged, rects, sizeof(pixman_box32_t) * n_rects);
-
-  return n_rects;
-}
-
 bool _vt_comp_wl_init(struct vt_compositor_t *c) {
   if (!(c->wl.dsp = wl_display_create())) {
     VT_ERROR(c->log, "cannot create wayland display.");
@@ -778,31 +685,6 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
 
   c->root_node->type = VT_SCENE_NODE_ROOT;
 
-  // Allocate the struct to store protocol information about the surface
-  c->root_cursor = calloc(1, sizeof(*c->root_cursor));
-  c->root_cursor->comp = c;
-  c->root_cursor->x = 0;
-  c->root_cursor->y = 0;
-  c->root_cursor->type = VT_SURFACE_TYPE_CURSOR;
-  struct vt_buffer_t* fake_cursor_buf = calloc(1, sizeof(*c->root_cursor->buf));
-  fake_cursor_buf->tex.width = 20;
-  fake_cursor_buf->tex.height= 20;
-  c->root_cursor->buf = fake_cursor_buf;
-  c->root_cursor->buffer_scale = 1;
-  wl_list_init(&c->root_cursor->link_focus);
-
-  // Init the damage regions
-  pixman_region32_init(&c->root_cursor->pending.damage);
-  pixman_region32_init(&c->root_cursor->damage);
-
-  pixman_region32_init(&c->root_cursor->pending.opaque_region);
-  pixman_region32_init(&c->root_cursor->opaque_region);
-
-  pixman_region32_init(&c->root_cursor->pending.input_region);
-  pixman_region32_init(&c->root_cursor->input_region);
-
-  // wl_list_insert(&c->surfaces, &c->root_cursor->link);
-
   if (!c->have_proto_dmabuf) {
     VT_WARN(c->log, "Running vortex without support for linux-dmabuf protocol");
   }
@@ -897,14 +779,17 @@ void vt_comp_repaint_scene(struct vt_compositor_t *c,
 
 static bool _surface_accepts_input(struct vt_surface_t *surf, double sx,
                                    double sy) {
-  // TODO: Do not rely on buffer size
-  if(!surf || !surf->buf) return false;
-  if (!surf->input_region_set) {
-    return sx >= 0 && sy >= 0 && sx < surf->buf->tex.width && sy < surf->buf->tex.height;
+  if (!surf || !surf->applied.buf)
+    return false;
+
+  if (surf->applied.input_region_infinite) {
+    // TODO: Do not rely on buffer size
+    return sx >= 0 && sy >= 0 && sx < surf->applied.buf->tex.width &&
+           sy < surf->applied.buf->tex.height;
   }
 
-  return pixman_region32_contains_point(&surf->input_region, (int32_t)sx,
-                                        (int32_t)sy, NULL);
+  return pixman_region32_contains_point(&surf->applied.input_region,
+                                        (int32_t)sx, (int32_t)sy, NULL);
 }
 
 static struct vt_surface_t *_scene_pick_surface(struct vt_scene_node_t *node,
@@ -921,10 +806,6 @@ static struct vt_surface_t *_scene_pick_surface(struct vt_scene_node_t *node,
     struct vt_surface_t *surf =
         _scene_pick_surface(node->childs[i], x, y, px, py);
 
-    if(surf && surf->xdg_surf && surf->xdg_surf->popup) {
-      VT_TRACE(surf->comp->log, "PICKED A POPUP: %p\n", surf);
-    }
-
     if (surf)
       return surf;
   }
@@ -934,17 +815,14 @@ static struct vt_surface_t *_scene_pick_surface(struct vt_scene_node_t *node,
 
   struct vt_surface_t *surf = node->surf;
 
-  if (!vt_comp_surface_is_effectively_mapped(surf))
+  if (!vt_surface_effictively_mapped(surf))
     return NULL;
 
-  if (surf->type != VT_SURFACE_TYPE_NORMAL)
+  if (!surf->applied.buf)
     return NULL;
 
-  if(!surf->buf) return NULL;
-
-  // TODO: Do not rely on buffer size
-  double w = surf->buf->tex.width;
-  double h = surf->buf->tex.height;
+  double w = node->rect.width;
+  double h = node->rect.height;
 
   if (px < x || py < y || px >= x + w || py >= y + h) {
     return NULL;
@@ -962,64 +840,4 @@ struct vt_surface_t *vt_comp_pick_surface(struct vt_compositor_t *comp,
   struct vt_surface_t *surf = _scene_pick_surface(comp->root_node, 0, 0, x, y);
 
   return surf;
-}
-
-void vt_comp_damage_entire_surface(struct vt_compositor_t *comp,
-                                   struct vt_surface_t *surf, int32_t x,
-                                   int32_t y) {
-  if (!surf || !surf->buf)
-    return;
-
-  surf->damaged = true;
-  struct vt_output_t *output;
-  wl_list_for_each(output, &comp->outputs, link_global) {
-    if (surf != comp->root_cursor &&
-        !(surf->_mask_outputs_visible_on & (1u << output->id)))
-      continue;
-
-    if (x == surf->x && y == surf->y) {
-      pixman_region32_union_rect(&output->damage, &output->damage, 0, 0,
-                                 output->width, output->height);
-    } else {
-      pixman_region32_union_rect(&output->damage, &output->damage, surf->x,
-                                 surf->y, surf->buf->tex.width * surf->buffer_scale,
-                                 surf->buf->tex.height * surf->buffer_scale);
-      pixman_region32_union_rect(&output->damage, &output->damage, x, y,
-                                 surf->buf->tex.width * surf->buffer_scale,
-                                 surf->buf->tex.height * surf->buffer_scale);
-      surf->x = x;
-      surf->y = y;
-    }
-
-    output->needs_damage_rebuild = true;
-
-    vt_comp_schedule_repaint(comp, output);
-  }
-}
-
-void vt_comp_surf_mark_damaged(struct vt_compositor_t *comp,
-                               struct vt_surface_t    *surf) {
-  surf->damaged = true;
-  struct vt_output_t *output;
-  wl_list_for_each(output, &comp->outputs, link_global) {
-    if (surf != comp->root_cursor &&
-        !(surf->_mask_outputs_visible_on & (1u << output->id)))
-      continue;
-    output->needs_damage_rebuild = true;
-    vt_comp_schedule_repaint(comp, output);
-  }
-}
-
-bool vt_comp_surface_is_effectively_mapped(struct vt_surface_t *surf) {
-  if (!surf || !surf->mapped)
-    return false;
-
-  while (surf->subsurface) {
-    surf = surf->subsurface->parent;
-
-    if (!surf || !surf->mapped)
-      return false;
-  }
-
-  return true;
 }
