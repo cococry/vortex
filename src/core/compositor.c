@@ -815,7 +815,7 @@ static struct vt_surface_t *_scene_pick_surface(struct vt_scene_node_t *node,
 
   struct vt_surface_t *surf = node->surf;
 
-  if (!vt_surface_effictively_mapped(surf))
+  if (!vt_surface_effectively_mapped(surf))
     return NULL;
 
   if (!surf->applied.buf)

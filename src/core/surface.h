@@ -21,10 +21,10 @@ struct vt_surface_state_applied_t {
 
   pixman_region32_t opaque_region;
 
+  struct vt_buffer_t *buf;
+  
   int32_t buffer_transform;
   int32_t buffer_scale;
-
-  struct vt_buffer_t *buf;
 
   int32_t width;
   int32_t height;
@@ -164,9 +164,9 @@ void vt_surface_applied_state_fini(struct vt_surface_state_applied_t *state);
 
 bool vt_surface_validate_commit(struct vt_surface_t *surf);
 
-bool vt_surface_effictively_synchronized(struct vt_surface_t *surf);
+bool vt_surface_effectively_synchronized(struct vt_surface_t *surf);
 
-bool vt_surface_effictively_mapped(struct vt_surface_t *surf);
+bool vt_surface_effectively_mapped(struct vt_surface_t *surf);
 
 bool vt_surface_emit_content_update(struct vt_surface_t *surf);
 
@@ -176,3 +176,5 @@ struct vt_buffer_release_t *vt_surface_state_get_or_create_buffer_release(
     struct vt_surface_state_pending_t *state);
 
 void vt_surface_frame_done(struct vt_surface_t *surf, uint32_t frame_time_msec);
+
+bool vt_surface_compute_applied_size(const struct vt_surface_state_applied_t *state, uint32_t* o_w, uint32_t* o_h);

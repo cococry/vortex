@@ -181,7 +181,7 @@ void vt_surface_apply_buffer(struct vt_surface_t *surf,
     return;
 
   if (surf->applied.buf) {
-    vt_comp_surf_mark_damaged(surf->comp, surf);
+    //vt_comp_surf_mark_damaged(surf->comp, surf);
   }
 
   if (!buf) {
@@ -243,8 +243,8 @@ void vt_surface_applied_state_defaults(
   if (!state)
     return;
 
-  state->buffer_scale = 1;
-  state->buffer_transform = WL_OUTPUT_TRANSFORM_NORMAL;
+  state->geom.buffer_scale = 1;
+  state->geom.buffer_transform = WL_OUTPUT_TRANSFORM_NORMAL;
 
   state->input_region_infinite = true;
 }
@@ -358,7 +358,7 @@ bool vt_surface_validate_commit(struct vt_surface_t *surf) {
   return true;
 }
 
-bool vt_surface_effictively_synchronized(struct vt_surface_t *surf) {
+bool vt_surface_effectively_synchronized(struct vt_surface_t *surf) {
   if (!surf)
     return false;
 
@@ -443,7 +443,7 @@ bool vt_surface_emit_content_update(struct vt_surface_t *surf) {
   if (!surf)
     return false;
 
-  bool effectively_sync = vt_surface_effictively_synchronized(surf);
+  bool effectively_sync = vt_surface_effectively_synchronized(surf);
 
   struct vt_content_update_t *cu = vt_content_update_create(
       surf, &surf->pending, effectively_sync ? VT_CU_SYNC : VT_CU_DESYNC);
@@ -515,4 +515,48 @@ void vt_surface_frame_done(struct vt_surface_t *surf,
 
     wl_resource_destroy(cb);
   }
+}
+
+bool vt_surface_compute_applied_size(
+    const struct vt_surface_state_applied_t *state, uint32_t *o_w,
+    uint32_t *o_h) {
+  if (!state || !o_w || !o_h)
+    return false;
+
+  if (!state->buf) {
+    *o_w = 0;
+    *o_h = 0;
+    return true;
+  }
+
+  uint32_t buffer_scale = (uint32_t)state->buffer_scale;
+  uint32_t buffer_w = state->buf->tex.width;
+  uint32_t buffer_h = state->buf->tex.height;
+
+  switch (state->buffer_transform) {
+  case WL_OUTPUT_TRANSFORM_90:
+  case WL_OUTPUT_TRANSFORM_270:
+  case WL_OUTPUT_TRANSFORM_FLIPPED_90:
+  case WL_OUTPUT_TRANSFORM_FLIPPED_270: {
+    int32_t tmp = buffer_w;
+    buffer_w = buffer_h;
+    buffer_h = tmp;
+    break;
+  }
+
+  default:
+    break;
+  }
+
+  if (buffer_w % buffer_scale != 0 || buffer_h % buffer_scale != 0) {
+    return false;
+  }
+
+  buffer_w /= buffer_scale;
+  buffer_h /= buffer_scale;
+
+  *o_w = buffer_w;
+  *o_h = buffer_h;
+
+  return true;
 }
