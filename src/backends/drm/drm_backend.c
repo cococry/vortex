@@ -851,6 +851,7 @@ bool _drm_create_output_for_device(struct drm_backend_state_t *drm,
 
   wl_list_init(&output->physical.modes);
   wl_list_init(&output->proto.resources);
+  wl_list_init(&output->rendered_surfaces);
 
   drmModeConnector *conn = (drmModeConnector *)data;
 

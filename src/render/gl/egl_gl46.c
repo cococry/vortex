@@ -3,8 +3,8 @@
 #include <unistd.h>
 #include <wayland-util.h>
 
-#include "linux-explicit-synchronization-v1-server-protocol.h"
 #include "pixman.h"
+#include "src/core/buffer.h"
 #include "src/core/compositor.h"
 #include "src/core/core_types.h"
 #include "src/core/surface.h"
@@ -73,12 +73,10 @@ struct egl_backend_state_t {
   RnState *render;
 
   struct wl_array formats;
-  bool            need_fence;
 };
 
 struct egl_output_state_t {
   GLint      fbo_id, fbo_tex_id, rbo_tex_depth;
-  EGLSyncKHR end_sync;
 };
 
 static const char *_egl_err_str(EGLint error);
@@ -92,9 +90,7 @@ static bool        _egl_pick_config_from_format(struct vt_compositor_t     *c,
 static bool        _egl_pick_config(struct vt_compositor_t     *comp,
                                     struct egl_backend_state_t *egl,
                                     struct vt_backend_t        *backend);
-static bool        _egl_surface_is_ready(struct vt_renderer_t *renderer,
-                                         struct vt_surface_t  *surf);
-static bool _egl_send_surface_release_fences(struct vt_renderer_t *renderer,
+static bool _egl_record_surface_release_fences(struct vt_renderer_t *renderer,
                                              struct vt_output_t   *output);
 static bool _egl_gl_create_output_fbo(struct vt_output_t *output);
 static bool _egl_create_renderer(struct vt_renderer_t      *renderer,
@@ -450,61 +446,94 @@ bool _egl_pick_config(struct vt_compositor_t     *comp,
   }
 }
 
-bool _egl_surface_is_ready(struct vt_renderer_t *renderer,
-                           struct vt_surface_t  *surf) {
-  if (!surf || !surf->sync.res)
-    return true;
-  if (!renderer->comp->have_proto_dmabuf_explicit_sync)
+bool _egl_buffer_use_is_ready(struct vt_renderer_t   *renderer,
+                              struct vt_buffer_use_t *use) {
+  if (!renderer || !use)
+    return false;
+
+  if (use->acquire_fence_fd < 0)
     return true;
 
   struct egl_backend_state_t *egl =
       BACKEND_DATA(renderer, struct egl_backend_state_t);
-  if (!egl->has_explicit_sync_support)
+
+  if (!renderer->comp->have_proto_dmabuf_explicit_sync ||
+      !egl->has_explicit_sync_support)
     return true;
 
-  if (surf->sync.acquire_fence_fd >= 0) {
-    EGLint attribs[] = {EGL_SYNC_NATIVE_FENCE_FD_ANDROID,
-                        surf->sync.acquire_fence_fd, EGL_NONE};
+  EGLint attribs[] = {
+      EGL_SYNC_NATIVE_FENCE_FD_ANDROID,
+      use->acquire_fence_fd,
+      EGL_NONE,
+  };
 
-    egl->need_fence = true;
+  EGLSyncKHR egl_sync = eglCreateSyncKHR_ptr(
+      egl->egl_dsp, EGL_SYNC_NATIVE_FENCE_ANDROID, attribs);
 
-    EGLSyncKHR sync = eglCreateSyncKHR_ptr(
-        egl->egl_dsp, EGL_SYNC_NATIVE_FENCE_ANDROID, attribs);
+  /* eglCreateSyncKHR takes ownership of the supplied native fence FD. */
+  use->acquire_fence_fd = -1;
 
-    surf->sync.acquire_fence_fd = -1;
+  if (egl_sync == EGL_NO_SYNC_KHR)
+    return false;
 
-    if (sync == EGL_NO_SYNC_KHR)
-      return false;
+  EGLint ret = eglWaitSyncKHR_ptr(egl->egl_dsp, egl_sync, 0);
 
-    eglWaitSyncKHR_ptr(egl->egl_dsp, sync, EGL_SYNC_FLUSH_COMMANDS_BIT_KHR);
+  eglDestroySyncKHR_ptr(egl->egl_dsp, egl_sync);
 
-    eglDestroySyncKHR_ptr(egl->egl_dsp, sync);
-  }
-
-  return true;
+  return ret == EGL_TRUE;
 }
 
-bool _egl_send_surface_release_fences(struct vt_renderer_t *renderer,
-                                      struct vt_output_t   *output) {
+static bool
+_output_needs_release_fence(struct vt_output_t *output)
+{
+    struct vt_rendered_surface_t *entry;
+
+    wl_list_for_each(entry, &output->rendered_surfaces, link) {
+      struct vt_buffer_use_t *use = entry->buffer_use;
+
+      if (!use)
+        continue;
+
+      if (use->release && use->release->explicit && use->release->explicit->res)
+        return true;
+    }
+
+    return false;
+}
+
+bool _egl_record_surface_release_fences(struct vt_renderer_t *renderer,
+                                        struct vt_output_t   *output) {
   if (!renderer || !output)
     return false;
 
   struct egl_backend_state_t *egl =
       BACKEND_DATA(output->backend->comp->renderer, struct egl_backend_state_t);
-  if (!renderer->comp->have_proto_dmabuf_explicit_sync ||
-      !egl->has_explicit_sync_support)
-    return true;
+
+  bool explicit_sync = renderer->comp->have_proto_dmabuf_explicit_sync &&
+                       egl->has_explicit_sync_support;
 
   struct egl_output_state_t *egl_output =
       (struct egl_output_state_t *)output->user_data_render;
 
-  // Get a single end-of-frame fence FD for this output repaint
-  int fence_fd = -1;
-  if (egl->need_fence) {
-    fence_fd =
-        eglDupNativeFenceFDANDROID_ptr(egl->egl_dsp, egl_output->end_sync);
+  bool need_fence = explicit_sync && _output_needs_release_fence(output);
 
-    if (fence_fd == -1) {
+  int fence_fd = -1;
+  if (need_fence) {
+    EGLSyncKHR end_sync = eglCreateSyncKHR_ptr(
+        egl->egl_dsp, EGL_SYNC_NATIVE_FENCE_ANDROID, (EGLint[]){EGL_NONE});
+
+    if (end_sync == EGL_NO_SYNC_KHR)
+      return false;
+
+    glFlush();
+
+    // Get a single end-of-frame fence FD for this output's GPU commands
+    fence_fd = eglDupNativeFenceFDANDROID_ptr(egl->egl_dsp, end_sync);
+
+    eglDestroySyncKHR_ptr(egl->egl_dsp, end_sync);
+
+    if (fence_fd < 0) {
+
       log_fatal(renderer->comp->log,
                 "A catastrophic scenario happend:"
                 "We were able to create an EGL Sync and now need a fence but"
@@ -514,33 +543,27 @@ bool _egl_send_surface_release_fences(struct vt_renderer_t *renderer,
     }
   }
 
-  eglDestroySyncKHR_ptr(egl->egl_dsp, egl_output->end_sync);
-  egl_output->end_sync = EGL_NO_SYNC_KHR;
+  struct vt_rendered_surface_t *entry;
 
-  if (fence_fd != -1) {
-    struct vt_compositor_t *comp = renderer->comp;
-    struct vt_surface_t    *surf;
+  wl_list_for_each(entry, &output->rendered_surfaces, link) {
+    struct vt_buffer_use_t *use = entry->buffer_use;
 
-    wl_list_for_each_reverse(surf, &comp->surfaces, link) {
-      if (!(surf->_mask_outputs_presented_on & (1u << output->id)))
-        continue;
-      // TODO: maybe weird
-      if (!surf->buf)
-        continue;
+    if (!use)
+      continue;
 
-      struct vt_surface_release_t *release = surf->sync.release;
+    if (fence_fd >= 0 && use->release && use->release->explicit &&
+        use->release->explicit->res) {
 
-      if (!release)
-        continue;
-
-      surf->sync.release = NULL;
-
-      zwp_linux_buffer_release_v1_send_fenced_release(release->res, fence_fd);
+      if (!vt_buffer_use_set_release_fence_fd(use, fence_fd)) {
+        // TODO: handle dup failure
+      }
     }
 
-    // clean up the dup'ed native fence
-    close(fence_fd);
+    vt_buffer_use_unref(&entry->buffer_use);
   }
+
+  if (fence_fd >= 0)
+    close(fence_fd);
 
   return true;
 }
@@ -1305,36 +1328,47 @@ void renderer_begin_frame_egl(struct vt_renderer_t *r,
   rn_resize_display_ex(egl->render, output->width, output->height, output->x,
                        output->y);
 
-  egl->need_fence = false;
-
   glBindFramebuffer(GL_FRAMEBUFFER, egl_output->fbo_id);
 }
 
 void renderer_draw_surface_egl(struct vt_renderer_t *r,
                                struct vt_output_t   *output,
                                struct vt_surface_t *surface, float x, float y) {
-  if (!surface || !surface->buf)
+  if (!surface || !surface->current_buf_use)
     return;
 
-  if (!surface->buf->tex.id)
-    return;
   if (!r || !r->impl.draw_surface || !r->user_data) {
     VT_ERROR(r->comp->log,
              "Renderer backend not initialized before rendering surface.");
     return;
   }
-  struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
 
-  if (!_egl_surface_is_ready(r, surface))
+  struct vt_buffer_use_t* use = surface->current_buf_use;
+  if (!use)
     return;
 
-  rn_image_render(
-      egl->render, (vec2s){x, y}, RN_WHITE,
-      (RnTexture){.id = surface->buf->tex.id,
-                  .width = surface->buf->tex.width * surface->buffer_scale,
-                  .height = surface->buf->tex.height * surface->buffer_scale});
+  struct vt_buffer_t *buf = use->buf;
+  if (!buf || buf->tex.id == 0)
+    return;
 
-  surface->_mask_outputs_presented_on |= (1u << output->id);
+  struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
+
+  if (!_egl_buffer_use_is_ready(r, use))
+    return;
+
+  rn_image_render(egl->render, (vec2s){x, y}, RN_WHITE,
+                  (RnTexture){.id = buf->tex.id,
+                              .width = surface->applied.width,
+                              .height = surface->applied.height});
+
+  struct vt_rendered_surface_t *entry = calloc(1, sizeof(*entry));
+  if (!entry)
+    return;
+
+  entry->surf = surface;
+  entry->buffer_use = vt_buffer_use_ref(use);
+
+  wl_list_insert(output->rendered_surfaces.prev, &entry->link);
 
   surface->damaged = false;
 
@@ -1398,12 +1432,6 @@ void renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,
   if (!egl || !egl_output || !output->render_surface)
     return;
 
-  if (r->backend->comp->have_proto_dmabuf_explicit_sync &&
-      egl->has_explicit_sync_support) {
-    egl_output->end_sync = eglCreateSyncKHR_ptr(
-        egl->egl_dsp, EGL_SYNC_NATIVE_FENCE_ANDROID, &(EGLint){EGL_NONE});
-  }
-
   glBindFramebuffer(GL_READ_FRAMEBUFFER, egl_output->fbo_id);
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
 
@@ -1418,17 +1446,17 @@ void renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,
     return;
   }
 
+  if (!_egl_record_surface_release_fences(r, output)) {
+    VT_ERROR(r->comp->log,
+             "Cannot record surface release fences after render for output %p.",
+             output);
+  }
+
   if (!eglSwapBuffers(egl->egl_dsp, output->render_surface)) {
     VT_ERROR(r->comp->log,
              "eglSwapBuffers failed for output %p: EGL error 0x%x", output,
              eglGetError());
     return;
-  }
-
-  if (!_egl_send_surface_release_fences(r, output)) {
-    VT_ERROR(r->comp->log,
-             "Cannot release surface fences after render for output %p.",
-             output);
   }
 
   egl->render->drawcalls = 0;

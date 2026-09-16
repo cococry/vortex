@@ -122,6 +122,11 @@ void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
     }
 
     new_buf = vt_buffer_ref(new_buf);
+
+    VT_TRACE(surf->comp->log,
+             "attach: res=%p id=%u wrapper=%p refs=%u active_uses=%u", resource,
+             wl_resource_get_id(resource), new_buf, new_buf->refcount,
+             new_buf->uses);
   }
 
   /* Modify pending state after everything succeeded */
@@ -426,7 +431,7 @@ void _wl_surface_handle_resource_destroy(struct wl_resource *resource) {
     vt_seat_handle_surface_destroyed(surf->comp->seat, surf);
 
   if (surf->scene_node) {
-    vt_scene_node_damage_whole(surf->scene_node);
+    vt_scene_node_damage_whole(surf->comp, surf->scene_node);
     vt_scene_node_destroy(surf->comp, surf->scene_node);
     surf->scene_node = NULL;
   }

@@ -4,6 +4,7 @@
 #include "src/core/compositor.h"
 #include "src/core/content_update.h"
 #include "src/core/core_types.h"
+#include "src/core/scene.h"
 #include "src/core/surface_addon.h"
 #include "src/core/util.h"
 #include "src/protocols/wl_subcompositor.h"
@@ -20,17 +21,17 @@ bool vt_surface_init(struct vt_surface_t *surf) {
   vt_surface_pending_state_init(&surf->pending);
   vt_surface_pending_state_defaults(&surf->pending);
   vt_surface_applied_state_init(&surf->applied);
-  vt_surface_applied_state_defaults(&surf->pending);
+  vt_surface_applied_state_defaults(&surf->applied);
 
   wl_list_init(&surf->content_updates);
   wl_list_init(&surf->subsurface.childs);
-  wl_list_init(&surf->subsurface.link_parent);
   wl_list_init(&surf->addons);
 
   wl_list_init(&surf->link);
   wl_list_init(&surf->link_focus);
+  wl_list_init(&surf->frame_callbacks);
 
-  surf->role = NULL;
+  surf->role.impl = NULL;
 
   surf->scene_node = NULL;
 
@@ -39,13 +40,13 @@ bool vt_surface_init(struct vt_surface_t *surf) {
   surf->damaged = false;
   surf->mapped = false;
 
-  surf->outputs_visible_on = 0;
-  surf->outputs_presented_on = 0;
-
   return true;
 }
 
 void vt_surface_mapped(struct vt_surface_t *surf) {
+  surf->mapped = true;
+  return;
+  /* TODO: FIX */
   if (!surf)
     return;
 
@@ -54,12 +55,12 @@ void vt_surface_mapped(struct vt_surface_t *surf) {
   if (surf->mapped)
     return;
 
-  if (!surf->role)
+  if (!surf->role.impl)
     return;
 
   surf->mapped = true;
 
-  if (surf->role->type == VT_SURFACE_ROLE_XDG_TOPLEVEL) {
+  if (vt_surface_has_role(surf, VT_SURFACE_ROLE_XDG_TOPLEVEL)) {
     vt_seat_set_keyboard_focus(seat, surf);
 
     if (wl_list_empty(&surf->link_focus)) {
@@ -71,12 +72,13 @@ void vt_surface_mapped(struct vt_surface_t *surf) {
       vt_comp_pick_surface(surf->comp, seat->pointer_x, seat->pointer_y);
 
   if (under_cursor) {
-    double gx, gy;
+    struct vt_rect_t *global_bounds =
+        vt_scene_node_get_global_bounds(under_cursor->scene_node);
+    if (!global_bounds)
+      return;
 
-    vt_scene_node_get_global_position(under_cursor->scene_node, &gx, &gy);
-
-    double sx = seat->pointer_x - gx;
-    double sy = seat->pointer_y - gy;
+    double sx = seat->pointer_x - global_bounds->x;
+    double sy = seat->pointer_y - global_bounds->y;
 
     vt_seat_set_pointer_focus(seat, under_cursor, sx, sy);
   } else {
@@ -99,13 +101,16 @@ struct vt_surface_t *focus_stack_pop(struct vt_compositor_t *comp) {
 }
 
 void vt_surface_unmapped(struct vt_surface_t *surf) {
+  surf->mapped = false;
+  return;
+  /* TODO: FIX */
   if (!surf || !surf->comp || !surf->comp->seat)
     return;
 
   if (!surf->mapped)
     return;
 
-  if (!surf->role || !surf->role->data)
+  if (!surf->role.impl)
     return;
 
   struct vt_seat_t *seat = surf->comp->seat;
@@ -126,12 +131,15 @@ void vt_surface_unmapped(struct vt_surface_t *surf) {
         vt_comp_pick_surface(surf->comp, seat->pointer_x, seat->pointer_y);
 
     if (under_cursor) {
-      double gx, gy;
 
-      vt_scene_node_get_global_position(under_cursor->scene_node, &gx, &gy);
+      struct vt_rect_t *global_bounds =
+          vt_scene_node_get_global_bounds(under_cursor->scene_node);
+      if (!global_bounds)
+        return;
 
-      vt_seat_set_pointer_focus(seat, under_cursor, seat->pointer_x - gx,
-                                seat->pointer_y - gy);
+      vt_seat_set_pointer_focus(seat, under_cursor,
+                                seat->pointer_x - global_bounds->x,
+                                seat->pointer_y - global_bounds->y);
     } else {
       vt_seat_set_pointer_focus(seat, NULL, 0.0, 0.0);
     }
@@ -142,9 +150,9 @@ void vt_surface_unmapped(struct vt_surface_t *surf) {
 
   struct vt_surface_t *new_focus = NULL;
 
-  struct vt_xdg_surface_t *xdg_surf = surf->role->data;
+  if (vt_surface_has_role(surf, VT_SURFACE_ROLE_XDG_TOPLEVEL)) {
+    struct vt_xdg_surface_t *xdg_surf = surf->role.data;
 
-  if (surf->role->type == VT_SURFACE_ROLE_XDG_TOPLEVEL) {
     if (xdg_surf->toplevel->parent) {
       struct vt_xdg_toplevel_t *toplevel_parent = xdg_surf->toplevel->parent;
 
@@ -155,9 +163,12 @@ void vt_surface_unmapped(struct vt_surface_t *surf) {
         new_focus = toplevel_parent->xdg_surf->surf;
       }
     }
+
   }
 
-  if (surf->role->type == VT_SURFACE_ROLE_XDG_POPUP) {
+  else if (vt_surface_has_role(surf, VT_SURFACE_ROLE_XDG_POPUP)) {
+    struct vt_xdg_surface_t *xdg_surf = surf->role.data;
+
     if (xdg_surf->popup->parent_xdg_surf) {
       struct vt_xdg_surface_t *parent = xdg_surf->popup->parent_xdg_surf;
 
@@ -175,24 +186,21 @@ void vt_surface_unmapped(struct vt_surface_t *surf) {
   vt_seat_set_keyboard_focus(seat, new_focus);
 }
 
-void vt_surface_apply_buffer(struct vt_surface_t *surf,
-                             struct vt_buffer_t  *buf) {
-  if (!surf || !surf->comp || !buf)
+void vt_surface_apply_buffer_use(struct vt_surface_t    *surf,
+                                 struct vt_buffer_use_t *new_use) {
+  if (!surf)
     return;
+  struct vt_buffer_use_t *old = surf->current_buf_use;
 
-  if (surf->applied.buf) {
-    //vt_comp_surf_mark_damaged(surf->comp, surf);
+  surf->current_buf_use = new_use;
+  if (old) {
+    vt_buffer_use_unref(&old);
   }
 
-  if (!buf) {
-    vt_buffer_unref(&surf->applied.buf);
-    vt_surface_unmapped(surf);
+  surf->mapped = surf->current_buf_use != NULL;
 
-    return;
-  }
-
-  vt_buffer_unref(&surf->applied.buf);
-  surf->applied.buf = buf;
+  // TODO: Temporary
+  vt_scene_node_damage_whole(surf->comp, surf->scene_node);
 }
 
 void vt_surface_pending_state_init(struct vt_surface_state_pending_t *state) {
@@ -243,8 +251,8 @@ void vt_surface_applied_state_defaults(
   if (!state)
     return;
 
-  state->geom.buffer_scale = 1;
-  state->geom.buffer_transform = WL_OUTPUT_TRANSFORM_NORMAL;
+  state->buffer_scale = 1;
+  state->buffer_transform = WL_OUTPUT_TRANSFORM_NORMAL;
 
   state->input_region_infinite = true;
 }
@@ -309,12 +317,10 @@ void vt_surface_pending_state_fini(struct vt_surface_state_pending_t *state) {
     return;
 
   vt_buffer_unref(&state->buf);
-  vt_buffer_unref(&state->buffer_release);
+  vt_buffer_release_unref(&state->buffer_release);
 
   struct vt_surface_frame_callback_t *frame_cb, *frame_tmp;
   wl_list_for_each_safe(frame_cb, frame_tmp, &state->frame_callbacks, link) {
-
-    wl_list_remove(&frame_cb->link);
 
     if (frame_cb->res)
       wl_resource_destroy(frame_cb->res);
@@ -341,15 +347,15 @@ bool vt_surface_validate_commit(struct vt_surface_t *surf) {
   if (!surf)
     return false;
 
-  if (surf->role->impl.validate_commit) {
-    if (!surf->role->impl.validate_commit(surf))
+  if (surf->role.impl && surf->role.impl->validate_commit) {
+    if (!surf->role.impl->validate_commit(surf))
       return false;
   }
 
   const struct vt_surface_addon_t *it;
   wl_list_for_each(it, &surf->addons, link) {
     if (it->impl.validate_commit) {
-      if (!it->impl.validate_commit(it)) {
+      if (!it->impl.validate_commit(surf)) {
         return false;
       }
     }
@@ -363,10 +369,10 @@ bool vt_surface_effectively_synchronized(struct vt_surface_t *surf) {
     return false;
 
   while (surf) {
-    if (!surf->role || surf->role->type != VT_SURFACE_ROLE_SUBSURFACE)
+    if (!surf->role.impl || !vt_surface_has_role(surf, VT_SURFACE_ROLE_SUBSURFACE)) 
       return false;
 
-    const struct vt_subsurface_t *sub = surf->role->data;
+    const struct vt_subsurface_t *sub = surf->role.data;
 
     if (!sub || !sub->parent)
       return false;
@@ -383,13 +389,8 @@ bool vt_surface_effectively_mapped(struct vt_surface_t *surf) {
   if (!surf || !surf->mapped)
     return false;
 
-  while (surf->role->type == VT_SURFACE_ROLE_SUBSURFACE) {
-    struct vt_subsurface_t *sub = surf->role->data;
-    if (!sub) {
-      VT_ERROR(surf->comp->log,
-               "Surface with subsurface role has NULL role->data");
-      return false;
-    }
+  while (vt_surface_has_role(surf, VT_SURFACE_ROLE_SUBSURFACE)) {
+    struct vt_subsurface_t *sub = surf->role.data;
 
     surf = sub->parent;
 
@@ -427,7 +428,7 @@ _content_update_add_child_dependencies(struct vt_content_update_t *cu) {
 
   struct vt_surface_t *surf = cu->surf;
   struct vt_surface_t *child;
-  wl_list_for_each(child, &surf->subsurface.childs, subsurface.link_parent) {
+  wl_list_for_each(child, &surf->subsurface.childs, link) {
     struct vt_content_update_t *last_scu = vt_surface_last_scu(child);
     if (!last_scu)
       continue;
@@ -437,6 +438,7 @@ _content_update_add_child_dependencies(struct vt_content_update_t *cu) {
 
     vt_content_update_add_dependency(cu, last_scu);
   }
+  return true;
 }
 
 bool vt_surface_emit_content_update(struct vt_surface_t *surf) {
@@ -448,18 +450,39 @@ bool vt_surface_emit_content_update(struct vt_surface_t *surf) {
   struct vt_content_update_t *cu = vt_content_update_create(
       surf, &surf->pending, effectively_sync ? VT_CU_SYNC : VT_CU_DESYNC);
 
-  if (!cu)
+  if (!cu) {
+    VT_ERROR(surf->comp->log, "Failed to create content update for surface %p",
+             surf);
     return false;
+  }
+
+  struct vt_surface_addon_t *it;
+  wl_list_for_each(it, &surf->addons, link) {
+    if (it->impl.commit) {
+      if (!it->impl.commit(surf, cu)) {
+        VT_ERROR(surf->comp->log,
+                 "Failed to run commit for addon %p of surface %p for CU %p",
+                 it, surf, cu);
+      }
+    }
+  }
 
   if (!_content_update_enqueue(cu)) {
+    VT_ERROR(surf->comp->log,
+             "Failed to enqueue content %p update for surface %p", cu, surf);
     goto fail;
   }
 
   if (!_content_update_add_child_dependencies(cu)) {
+    VT_ERROR(surf->comp->log,
+             "Failed to add child dependencies for content update %p", cu);
     goto fail;
   }
 
-  vt_content_update_apply_dag(cu);
+  bool applied = vt_content_update_apply_dag(cu);
+
+  VT_TRACE(surf->comp->log, "EMIT CU: apply_dag cu=%p returned %d type=%d", cu,
+           applied, cu->type);
 
   return true;
 fail:
@@ -506,32 +529,35 @@ void vt_surface_frame_done(struct vt_surface_t *surf,
   if (!surf)
     return;
 
-  struct vt_surface_frame_callback_t *cb;
-  wl_list_for_each(cb, &surf->pending.frame_callbacks, link) {
-    wl_callback_send_done(cb, frame_time_msec);
+  struct vt_surface_frame_callback_t *cb, *tmp;
+  wl_list_for_each_safe(cb, tmp, &surf->frame_callbacks, link) {
+    wl_callback_send_done(cb->res, frame_time_msec);
 
     VT_TRACE(surf->comp->log, "Sent wl_callback done for surf=%p callback=%p",
              surf, cb);
 
-    wl_resource_destroy(cb);
+    wl_resource_destroy(cb->res);
   }
 }
 
 bool vt_surface_compute_applied_size(
-    const struct vt_surface_state_applied_t *state, uint32_t *o_w,
+    const struct vt_surface_t*surf, uint32_t *o_w,
     uint32_t *o_h) {
-  if (!state || !o_w || !o_h)
+  if (!surf || !o_w || !o_h)
     return false;
 
-  if (!state->buf) {
+  struct vt_buffer_t* buf = vt_surface_get_buffer(surf);
+  struct vt_surface_state_applied_t *state = &surf->applied;
+
+  if (!buf) {
     *o_w = 0;
     *o_h = 0;
     return true;
   }
 
   uint32_t buffer_scale = (uint32_t)state->buffer_scale;
-  uint32_t buffer_w = state->buf->tex.width;
-  uint32_t buffer_h = state->buf->tex.height;
+  uint32_t buffer_w = buf->tex.width; 
+  uint32_t buffer_h = buf->tex.height; 
 
   switch (state->buffer_transform) {
   case WL_OUTPUT_TRANSFORM_90:
@@ -559,4 +585,38 @@ bool vt_surface_compute_applied_size(
   *o_h = buffer_h;
 
   return true;
+}
+
+bool vt_surface_set_role(struct vt_surface_t                 *surf,
+                         const struct vt_surface_role_impl_t *impl,
+                         void *data) {
+  if (!surf || !impl)
+    return false;
+
+  /* Surface has never had a role. */
+  if (!surf->role.impl) {
+    surf->role.impl = impl;
+    surf->role.data = data;
+    return true;
+  }
+
+  if (surf->role.impl->type == impl->type) {
+    surf->role.data = data;
+    return true;
+  }
+
+  /* A wl_surface can never change role. */
+  return false;
+}
+
+bool vt_surface_has_role(struct vt_surface_t        *surf,
+                         enum vt_surface_role_type_t type) {
+  if(!surf) return false;
+  return surf->role.impl && surf->role.impl->type == type;
+}
+
+struct vt_buffer_t *vt_surface_get_buffer(struct vt_surface_t *surf) {
+  if (!surf)
+    return NULL;
+  return surf->current_buf_use ? surf->current_buf_use->buf : NULL;
 }

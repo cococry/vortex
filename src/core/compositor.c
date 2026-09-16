@@ -1,7 +1,6 @@
 #define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
-#include "src/core/buffer.h"
 #include "src/input/input.h"
 #include "src/input/wl_seat.h"
 #include "src/protocols/wl_data_device.h"
@@ -112,23 +111,21 @@ void _vt_comp_frame_handler(void *data) {
 /* Heed my words struggeler... */
 void vt_comp_frame_done(struct vt_compositor_t *c, struct vt_output_t *output,
                         uint32_t t) {
-  struct vt_surface_t *surf;
-  wl_list_for_each(surf, &c->surfaces, link) {
-    if (!(surf->outputs_visible_on & (1u << output->id)))
-      continue;
+  if (!c || !output)
+    return;
 
-    bool was_displayed = (surf->outputs_presented_on &
-                          surf->outputs_visible_on) == surf->outputs_visible_on;
+  struct vt_rendered_surface_t *entry, *tmp;
 
-    if (was_displayed) {
-      vt_surface_frame_done(surf, t);
-    }
+  wl_list_for_each_safe(entry, tmp, &output->rendered_surfaces, link) {
+    if (entry->surf)
+      vt_surface_frame_done(entry->surf, t);
+
+    wl_list_remove(&entry->link);
+    free(entry);
   }
 
-  VT_TRACE(surf->comp->log,
-           "Sent wl_callback.done() for all pending frame callbacks on "
-           "output %p.",
-           output);
+  wl_list_init(&output->rendered_surfaces);
+  VT_TRACE(c->log, "Sent frame callbacks for output %p.", output);
 }
 
 void vt_comp_frame_done_all(struct vt_compositor_t *c, uint32_t t) {
@@ -404,6 +401,8 @@ void _vt_comp_wl_surface_create(struct wl_client   *client,
     return;
   }
 
+  surf->comp = c;
+
   if (!vt_surface_init(surf)) {
     VT_ERROR(c->log,
              "wl_compositor.surface_create: Failed to initialize surface.");
@@ -414,6 +413,7 @@ void _vt_comp_wl_surface_create(struct wl_client   *client,
     VT_ERROR(c->log, "wl_compositor.surface_create: Failed to create surface.");
     return;
   }
+
 
   vt_scene_node_add_child(c, c->root_node, vt_scene_node_create(c, surf));
 }
@@ -580,8 +580,10 @@ static void _handle_output_changed_backend(struct vt_backend_t *backend,
       root_w += output->width;
       root_h += output->height;
     }
-    backend->comp->root_node->rect.width = root_w;
-    backend->comp->root_node->rect.height = root_h;
+
+    backend->comp->root_node->rect_w = root_w;
+    backend->comp->root_node->rect_h = root_h;
+    vt_scene_node_update_global_bounds(backend->comp->root_node);
   }
 }
 
@@ -779,13 +781,12 @@ void vt_comp_repaint_scene(struct vt_compositor_t *c,
 
 static bool _surface_accepts_input(struct vt_surface_t *surf, double sx,
                                    double sy) {
-  if (!surf || !surf->applied.buf)
+  if (!surf || !vt_surface_get_buffer(surf))
     return false;
 
   if (surf->applied.input_region_infinite) {
-    // TODO: Do not rely on buffer size
-    return sx >= 0 && sy >= 0 && sx < surf->applied.buf->tex.width &&
-           sy < surf->applied.buf->tex.height;
+    return sx >= 0 && sy >= 0 && sx < surf->applied.width &&
+           sy < surf->applied.height;
   }
 
   return pixman_region32_contains_point(&surf->applied.input_region,
@@ -799,12 +800,17 @@ static struct vt_surface_t *_scene_pick_surface(struct vt_scene_node_t *node,
   if (!node)
     return NULL;
 
-  double x = parent_x + node->rect.x;
-  double y = parent_y + node->rect.y;
+  struct vt_rect_t *global_bounds = vt_scene_node_get_global_bounds(node);
+  double            x = parent_x + (double)global_bounds->x;
+  double            y = parent_y + (double)global_bounds->y;
 
   for (int i = (int)node->child_count - 1; i >= 0; i--) {
+    struct vt_scene_node_t* it = node->childs[i];
+    if(vt_surface_has_role(it->surf, VT_SURFACE_ROLE_CURSOR)) {
+      continue;
+    }
     struct vt_surface_t *surf =
-        _scene_pick_surface(node->childs[i], x, y, px, py);
+        _scene_pick_surface(it, x, y, px, py);
 
     if (surf)
       return surf;
@@ -818,11 +824,11 @@ static struct vt_surface_t *_scene_pick_surface(struct vt_scene_node_t *node,
   if (!vt_surface_effectively_mapped(surf))
     return NULL;
 
-  if (!surf->applied.buf)
+  if (!vt_surface_get_buffer(surf))
     return NULL;
 
-  double w = node->rect.width;
-  double h = node->rect.height;
+  double w = (double)global_bounds->width; 
+  double h = (double)global_bounds->height; 
 
   if (px < x || py < y || px >= x + w || py >= y + h) {
     return NULL;

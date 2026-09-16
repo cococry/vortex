@@ -86,7 +86,15 @@ struct vt_output_mode_t {
   struct wl_list                     link;
 };
 
+struct vt_rendered_surface_t {
+  struct wl_list link;
+  struct vt_surface_t *surf;
+
+  struct vt_buffer_use_t *buffer_use;
+};
+
 struct vt_output_t {
+  struct wl_list       rendered_surfaces;
   struct wl_list       link_local, link_global;
   struct vt_backend_t *backend;
   void                *native_window;

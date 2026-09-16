@@ -9,6 +9,11 @@ enum vt_scene_node_type_t {
   VT_SCENE_NODE_INVISIBLE_GEOMETRY
 };
 
+struct vt_rect_t {
+    uint32_t width, height;
+    int32_t x, y;
+};
+
 struct vt_scene_node_t {
 
   struct vt_scene_node_t  *parent;
@@ -16,11 +21,16 @@ struct vt_scene_node_t {
   uint32_t                 child_count;
   uint32_t                 _child_cap;
 
-  struct {
-    uint32_t color;
-    float    width, height;
-    float    x, y;
-  } rect;
+  uint32_t color;
+
+  /* position relative to parent */
+  int32_t x, y;
+  uint32_t rect_w, rect_h;
+
+  /* resolved global bounds */
+  struct vt_rect_t cached_bounds;
+
+  bool geom_dirty;
 
   struct vt_surface_t *surf;
 
@@ -35,7 +45,8 @@ struct vt_scene_node_t *vt_scene_node_create(struct vt_compositor_t *c,
 bool vt_scene_node_destroy(struct vt_compositor_t *c,
                            struct vt_scene_node_t *node);
 
-bool vt_scene_node_damage_whole(struct vt_scene_node_t *node);
+bool vt_scene_node_damage_whole(struct vt_compositor_t *comp,
+                                struct vt_scene_node_t *node);
 
 struct vt_scene_node_t *vt_scene_node_create_rect(struct vt_compositor_t *c,
                                                   float x, float y, float w,
@@ -69,5 +80,10 @@ void vt_scene_render(struct vt_renderer_t *renderer, struct vt_output_t *output,
 void vt_scene_node_set_position(struct vt_scene_node_t *node, int32_t x,
                                 int32_t y);
 
-void vt_scene_node_get_global_position(struct vt_scene_node_t *node, double *x,
-                                       double *y);
+void vt_scene_node_mark_geometry_dirty(struct vt_scene_node_t *node); 
+
+void vt_scene_node_update_global_bounds(struct vt_scene_node_t *node); 
+
+struct vt_rect_t* vt_scene_node_get_global_bounds(struct vt_scene_node_t *node);
+
+struct vt_output_t * vt_scene_node_primary_output(struct vt_compositor_t* comp, struct vt_scene_node_t *node);

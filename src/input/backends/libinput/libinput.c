@@ -136,13 +136,12 @@ bool _vt_li_input_handle_pointer_motion_event(
     uint32_t             output_width = 0, output_height = 0;
     struct vt_surface_t *ptr_focus = li->comp->seat->ptr_focus.surf;
     if (ptr_focus) {
-      struct vt_output_t *output;
-      wl_list_for_each(output, &li->comp->outputs, link_global) {
-        if (!(ptr_focus->_mask_outputs_visible_on & (1u << output->id)))
-          continue;
+      struct vt_output_t *output =
+          vt_scene_node_primary_output(li->comp, ptr_focus->scene_node);
+
+      if (output) {
         output_width = output->width;
         output_height = output->height;
-        break;
       }
     } else {
       struct vt_output_t *output;

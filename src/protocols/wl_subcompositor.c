@@ -1,6 +1,8 @@
 #include "wl_subcompositor.h"
 #include "src/core/core_types.h"
 #include "src/core/scene.h"
+#include "src/core/surface.h"
+#include "src/protocols/xdg_shell.h"
 #include <wayland-server-core.h>
 #include <wayland-util.h>
 
@@ -44,6 +46,12 @@ static const struct wl_subsurface_interface subsurface_impl = {
     _subsurface_destroy,     _subsurface_set_position, _subsurface_place_above,
     _subsurface_place_below, _subsurface_set_sync,     _subsurface_set_desync};
 
+static const struct vt_surface_role_impl_t subsurface_role_impl = {
+    .type = VT_SURFACE_ROLE_SUBSURFACE,
+    .validate_commit = NULL,
+    .commit = NULL,
+};
+
 static void _subcompositor_bind(struct wl_client *client, void *data,
                                 uint32_t version, uint32_t id) {
 
@@ -66,8 +74,9 @@ static void _subcompositor_destroy(struct wl_client   *client,
 
 static bool _surface_has_ancestor(struct vt_surface_t *surf,
                                   struct vt_surface_t *ancestor) {
-  while (surf && surf->subsurface) {
-    surf = surf->subsurface->parent;
+  while (surf && vt_surface_has_role(surf, VT_SURFACE_ROLE_SUBSURFACE)) {
+    struct vt_subsurface_t* sub = surf->role.data;
+    surf = sub->parent;
 
     if (surf == ancestor) {
       return true;
@@ -80,10 +89,8 @@ static void _destroy_subsurface(struct vt_subsurface_t *sub) {
   if (!sub)
     return;
 
-  if (sub->surf && sub->surf->subsurface == sub) {
-    sub->surf->subsurface = NULL;
-  }
-  wl_list_remove(&sub->parent_link);
+  sub->surf->role.data = NULL;
+  wl_list_remove(&sub->link);
   free(sub);
 }
 
@@ -100,27 +107,40 @@ static void _subcompositor_get_subsurface(struct wl_client   *client,
                                           struct wl_resource *surface_resource,
                                           struct wl_resource *parent_resource) {
   struct vt_surface_t *surf = wl_resource_get_user_data(surface_resource);
+
   struct vt_surface_t *parent = wl_resource_get_user_data(parent_resource);
 
-  if (!surf || !parent) {
+  if (!surf || !parent)
     return;
-  }
 
   if (surf == parent) {
-    wl_resource_post_error(resource, WL_SUBCOMPOSITOR_ERROR_BAD_SURFACE,
+    wl_resource_post_error(resource, WL_SUBCOMPOSITOR_ERROR_BAD_PARENT,
                            "surface cannot be its own parent");
     return;
   }
 
-  if (surf->subsurface) {
-    wl_resource_post_error(resource, WL_SUBCOMPOSITOR_ERROR_BAD_SURFACE,
-                           "surface is already a subsurface");
+  if (_surface_has_ancestor(parent, surf)) {
+    wl_resource_post_error(resource, WL_SUBCOMPOSITOR_ERROR_BAD_PARENT,
+                           "subsurface relationship would create a cycle");
     return;
   }
 
-  if (_surface_has_ancestor(parent, surf)) {
+  if (surf->role.impl && surf->role.impl->type != VT_SURFACE_ROLE_SUBSURFACE) {
     wl_resource_post_error(resource, WL_SUBCOMPOSITOR_ERROR_BAD_SURFACE,
-                           "subsurface relationship would create a cycle");
+                           "surface already has another role");
+    return;
+  }
+
+  if (surf->role.impl && surf->role.impl->type == VT_SURFACE_ROLE_SUBSURFACE &&
+      surf->role.data) {
+    wl_resource_post_error(resource, WL_SUBCOMPOSITOR_ERROR_BAD_SURFACE,
+                           "surface already has a wl_subsurface object");
+    return;
+  }
+
+  if (!surf->scene_node || !parent->scene_node) {
+    wl_resource_post_error(resource, WL_SUBCOMPOSITOR_ERROR_BAD_SURFACE,
+                           "surface or parent has no scene representation");
     return;
   }
 
@@ -133,33 +153,35 @@ static void _subcompositor_get_subsurface(struct wl_client   *client,
   sub->resource = wl_resource_create(client, &wl_subsurface_interface, 1, id);
 
   if (!sub->resource) {
-    wl_resource_post_no_memory(resource);
+    free(sub);
+    wl_client_post_no_memory(client);
     return;
   }
 
   sub->surf = surf;
   sub->parent = parent;
   sub->synchronized = true;
-
   sub->scene_node = surf->scene_node;
-
-  if (!sub->scene_node || !parent->scene_node) {
-    wl_resource_post_error(resource, WL_SUBCOMPOSITOR_ERROR_BAD_SURFACE,
-                           "surface or parent are invalid");
-    return;
-  }
 
   struct vt_scene_node_t *parent_node = parent->scene_node;
 
-  if (parent->xdg_surf && parent->xdg_surf->subsurface_layer) {
-    parent_node = parent->xdg_surf->subsurface_layer;
+  if (vt_surface_has_role(parent, VT_SURFACE_ROLE_XDG_TOPLEVEL) ||
+      vt_surface_has_role(parent, VT_SURFACE_ROLE_XDG_POPUP)) {
+    struct vt_xdg_surface_t *xdg = parent->role.data;
+
+    if (xdg && xdg->subsurface_layer)
+      parent_node = xdg->subsurface_layer;
+  }
+
+  if (!vt_surface_set_role(surf, &subsurface_role_impl, sub)) {
+    wl_resource_destroy(sub->resource);
+    free(sub);
+    return;
   }
 
   vt_scene_node_reparent(surf->comp, sub->scene_node, parent_node);
 
-  wl_list_insert(&parent->subsurfaces, &sub->parent_link);
-
-  surf->subsurface = sub;
+  wl_list_insert(&parent->subsurface.childs, &sub->link);
 
   wl_resource_set_implementation(sub->resource, &subsurface_impl, sub,
                                  _subsurface_resource_destroy);
@@ -177,9 +199,12 @@ static void _subsurface_set_position(struct wl_client   *client,
   (void)client;
 
   struct vt_subsurface_t *sub = wl_resource_get_user_data(resource);
+  if (!sub)
+    return;
 
-  sub->scene_node->rect.x = x;
-  sub->scene_node->rect.y = y;
+  if (sub->surf && sub->surf->scene_node) {
+    vt_scene_node_set_position(sub->surf->scene_node, x, y);
+  }
 }
 
 static void _subsurface_place_above(struct wl_client   *client,

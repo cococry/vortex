@@ -4,6 +4,7 @@
 #include "src/core/util.h"
 
 #include "src/core/core_types.h"
+#include "src/core/content_update.h"
 #include "src/core/scene.h"
 #include "src/core/surface.h"
 #include "xdg-shell-protocol.h"
@@ -158,6 +159,8 @@ static void _xdg_popup_reposition(struct wl_client   *client,
 static bool _xdg_toplevel_send_state(struct vt_xdg_toplevel_t *top,
                                      uint32_t state, bool activated);
 
+static bool _xdg_surface_commit(struct vt_surface_t *surf, struct vt_content_update_t* cu);
+
 struct vt_xdg_positioner_t {
   struct wl_resource *res;
   int32_t             width;
@@ -230,6 +233,18 @@ static const struct xdg_wm_base_interface xdg_wm_base_impl = {
     .create_positioner = _xdg_wm_base_create_positioner,
     .get_xdg_surface = _xdg_wm_base_get_xdg_surface,
     .pong = _xdg_wm_base_pong,
+};
+
+static const struct vt_surface_role_impl_t xdg_toplevel_role_impl = {
+  .type = VT_SURFACE_ROLE_XDG_TOPLEVEL,
+  .commit = _xdg_surface_commit,
+  .validate_commit = NULL,
+};
+
+static const struct vt_surface_role_impl_t xdg_popup_role_impl = {
+  .type = VT_SURFACE_ROLE_XDG_POPUP,
+  .commit = _xdg_surface_commit,
+  .validate_commit = NULL,
 };
 
 static struct vt_proto_xdg_shell_t _proto;
@@ -341,15 +356,12 @@ void _xdg_toplevel_handle_resource_destroy(struct wl_resource *resource) {
     /* Unmap child */
     child->parent = NULL;
     if (child->xdg_surf && child->xdg_surf->surf) {
-      printf("Unmapping child.\n");
       vt_surface_unmapped(child->xdg_surf->surf);
     }
   }
 
-      printf("top->xdg_surf: %p\n", top->xdg_surf);
   /* 2. Unmap the toplevel surface itself. */
   if (top->xdg_surf && top->xdg_surf->surf) {
-      printf("Unmapping surface: %p.\n", top->xdg_surf->surf);
     vt_surface_unmapped(top->xdg_surf->surf);
   }
 
@@ -382,7 +394,6 @@ void _xdg_surface_handle_resource_destroy(struct wl_resource *resource) {
 
   struct vt_surface_t *surf = xdg->surf;
   if (surf && surf->mapped) {
-    printf("Called unmapped.\n");
     vt_surface_unmapped(surf);
   }
 
@@ -400,12 +411,7 @@ void _xdg_surface_handle_resource_destroy(struct wl_resource *resource) {
     xdg->popup = NULL;
   }
 
-  if (xdg->surf) {
-    if (xdg->surf->xdg_surf == xdg)
-      xdg->surf->xdg_surf = NULL;
-
-    xdg->surf = NULL;
-  }
+  xdg->surf = NULL;
 
   xdg->xdg_surf_res = NULL;
 
@@ -436,11 +442,11 @@ void _xdg_popup_handle_resource_destroy(struct wl_resource *resource) {
   free(popup);
 }
 
-static void _xdg_surface_commit(struct vt_surface_t *surf) {
-  struct vt_xdg_surface_t *xdg = surf->xdg_surf;
+static bool _xdg_surface_commit(struct vt_surface_t *surf, struct vt_content_update_t* cu) {
+  struct vt_xdg_surface_t *xdg = surf->role.data;
 
   if (!xdg)
-    return;
+    return false;
 
   if (xdg->have_pending_geom) {
     xdg->geom = xdg->pending_geom;
@@ -448,9 +454,9 @@ static void _xdg_surface_commit(struct vt_surface_t *surf) {
 
     vt_scene_node_set_position(xdg->geom_node, xdg->geom.x, xdg->geom.y);
 
-    xdg->geom_node->rect.width = (float)xdg->geom.w;
-
-    xdg->geom_node->rect.height = (float)xdg->geom.h;
+    xdg->geom_node->rect_w = (float)xdg->geom.w;
+    xdg->geom_node->rect_h = (float)xdg->geom.h;
+    vt_scene_node_update_global_bounds(xdg->geom_node);
   }
 
   struct vt_xdg_popup_t *popup = xdg->popup;
@@ -491,8 +497,6 @@ void _xdg_wm_base_get_xdg_surface(struct wl_client   *client,
     return;
   }
 
-  surf->role_impl.commit = _xdg_surface_commit;
-
   xdg_surf->geom_node =
       vt_scene_node_create_container(surf->comp); 
   
@@ -512,7 +516,6 @@ void _xdg_wm_base_get_xdg_surface(struct wl_client   *client,
 
   xdg_surf->surf = surf;
   xdg_surf->xdg_surf_res = res;
-  surf->xdg_surf = xdg_surf;
 
   /* 3. Set handler functions via the implementation */
   wl_resource_set_implementation(res, &xdg_surface_impl, xdg_surf,
@@ -889,6 +892,9 @@ void _xdg_surface_get_popup(struct wl_client   *client,
 
   vt_scene_node_reparent(popup_xdg_surf->surf->comp,
                          popup_xdg_surf->surf->scene_node, parent_node);
+
+  vt_surface_set_role(popup_xdg_surf->surf, &xdg_popup_role_impl,
+                      popup_xdg_surf);
 }
 
 void _xdg_surface_ack_configure(struct wl_client   *client,
@@ -1338,20 +1344,6 @@ static bool _xdg_positioner_calculate_geometry(
   return true;
 }
 
-static struct vt_output_t *
-_xdg_popup_choose_output(struct vt_xdg_surface_t *parent) {
-  struct vt_surface_t *surf = parent->surf;
-
-  struct vt_output_t *output;
-
-  wl_list_for_each(output, &surf->comp->outputs, link_global) {
-    if (surf->_mask_outputs_visible_on & (1u << output->id))
-      return output;
-  }
-
-  return NULL;
-}
-
 static bool _popup_resolve_pos(struct vt_xdg_popup_t       *popup,
                                struct vt_xdg_positioner_t  *pos,
                                struct vt_xdg_window_geom_t *out_geom) {
@@ -1359,19 +1351,18 @@ static bool _popup_resolve_pos(struct vt_xdg_popup_t       *popup,
       !popup->parent_xdg_surf->geom_node)
     return false;
 
-  struct vt_output_t *output = _xdg_popup_choose_output(popup->parent_xdg_surf);
+  struct vt_output_t *output = vt_scene_node_primary_output(
+      popup->xdg_surf->surf->comp, popup->parent_xdg_surf->geom_node);
 
   if (!output)
     return false;
 
-  double parent_geom_gx, parent_geom_gy;
-
-  vt_scene_node_get_global_position(popup->parent_xdg_surf->geom_node,
-                                    &parent_geom_gx, &parent_geom_gy);
+  struct vt_rect_t *rect =
+      vt_scene_node_get_global_bounds(popup->parent_xdg_surf->geom_node);
 
   struct vt_xdg_window_geom_t constraint = {
-      .x = output->x - (int32_t)parent_geom_gx,
-      .y = output->y - (int32_t)parent_geom_gy,
+      .x = output->x - rect->x,
+      .y = output->y - rect->y,
       .w = output->width,
       .h = output->height,
   };

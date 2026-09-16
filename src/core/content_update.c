@@ -2,6 +2,8 @@
 #include "src/core/surface.h"
 #include <wayland-util.h>
 
+#define _SUBSYS_NAME "CONTENT-UPDATE"
+
 struct vt_content_update_t *
 vt_content_update_create(struct vt_surface_t               *surf,
                          struct vt_surface_state_pending_t *state,
@@ -24,6 +26,17 @@ vt_content_update_create(struct vt_surface_t               *surf,
   wl_list_init(&update->dependants);
   wl_list_init(&update->queue_link);
   wl_list_init(&update->retire_link);
+
+  update->acquire_fence_fd = -1;
+
+  if (update->state.buffer_attached && update->state.buf) {
+    update->buffer_use = vt_buffer_use_create_take(
+        &update->state.buf, &update->state.buffer_release,
+        &update->acquire_fence_fd);
+
+    if (!update->buffer_use)
+      return false;
+  }
 
   return update;
 }
@@ -62,15 +75,31 @@ void vt_content_update_dependency_destroy(
 }
 
 bool vt_content_update_prepare(struct vt_content_update_t *cu) {
-  if(!cu || !cu->surf) return false;
+  if (!cu || !cu->surf)
+    return false;
 
-  if(!cu->state.buffer_attached) return true;
+  if (!cu->state.buffer_attached)
+    return true;
 
-  if (!vt_buffer_import(cu->state.buf, &cu->surf->applied.damage)) {
+  /* wl_surface.attach(NULL) */
+  if (!cu->buffer_use)
+    return true;
+
+  if (!vt_buffer_import(cu->buffer_use->buf, &cu->state.damage_surface)) {
     return false;
   }
 
   return true;
+}
+
+static void _apply_frame_callbacks(struct vt_surface_t               *surf,
+                                   struct vt_surface_state_pending_t *state) {
+  if (wl_list_empty(&state->frame_callbacks))
+    return;
+
+  wl_list_insert_list(surf->frame_callbacks.prev, &state->frame_callbacks);
+
+  wl_list_init(&state->frame_callbacks);
 }
 
 bool vt_content_update_apply(struct vt_content_update_t *cu) {
@@ -78,26 +107,32 @@ bool vt_content_update_apply(struct vt_content_update_t *cu) {
     return false;
 
   struct vt_surface_t               *surf = cu->surf;
-  struct vt_surface_state_pending_t *s = &cu->state;
+  struct vt_surface_state_pending_t *pending = &cu->state;
 
-  if (s->buffer_attached) {
-    vt_surface_apply_buffer(surf, s->buf);
+  if (pending->buffer_attached) {
+    vt_surface_apply_buffer_use(surf, cu->buffer_use);
+    cu->buffer_use = NULL;
   }
 
-  if (s->buffer_scale_changed)
-    surf->applied.buffer_scale = s->buffer_scale;
+  _apply_frame_callbacks(surf, pending);
 
-  if (s->buffer_transform_changed)
-    surf->applied.buffer_transform = s->buffer_transform;
+  if (pending->buffer_scale_changed)
+    surf->applied.buffer_scale = pending->buffer_scale;
 
-  if (s->input_region_changed) {
-    pixman_region32_copy(&surf->applied.input_region, &s->input_region);
+  if (pending->buffer_transform_changed)
+    surf->applied.buffer_transform = pending->buffer_transform;
 
-    surf->applied.input_region_infinite = s->input_region_infinite;
+  vt_surface_compute_applied_size(surf, &surf->applied.width,
+                                  &surf->applied.height);
+
+  if (pending->input_region_changed) {
+    pixman_region32_copy(&surf->applied.input_region, &pending->input_region);
+
+    surf->applied.input_region_infinite = pending->input_region_infinite;
   }
 
-  if (s->opaque_region_changed) {
-    pixman_region32_copy(&surf->applied.opaque_region, &s->opaque_region);
+  if (pending->opaque_region_changed) {
+    pixman_region32_copy(&surf->applied.opaque_region, &pending->opaque_region);
   }
 
   return true;
@@ -233,22 +268,48 @@ static void _retire_applied_dag(struct vt_content_update_t *root) {
     vt_content_update_destroy(retired);
   }
 }
-
 bool vt_content_update_apply_dag(struct vt_content_update_t *root) {
   if (!root)
     return false;
 
-  if (!vt_content_update_is_candidate(root))
-    return false;
+  VT_TRACE(root->surf->comp->log,
+           "APPLY DAG: root=%p type=%d", root, root->type);
 
-  if (!vt_content_update_is_ready(root))
+  if (!vt_content_update_is_candidate(root)) {
+    VT_TRACE(root->surf->comp->log,
+             "APPLY DAG: root=%p NOT CANDIDATE", root);
     return false;
-  
-  if (!_vt_content_update_prepare_dag_recursive(root))
-    return false;
+  }
 
-  if (!_vt_content_update_apply_dag_recursive(root))
+  VT_TRACE(root->surf->comp->log,
+           "APPLY DAG: root=%p is candidate", root);
+
+  if (!vt_content_update_is_ready(root)) {
+    VT_TRACE(root->surf->comp->log,
+             "APPLY DAG: root=%p NOT READY", root);
     return false;
+  }
+
+  VT_TRACE(root->surf->comp->log,
+           "APPLY DAG: root=%p is ready", root);
+
+  if (!_vt_content_update_prepare_dag_recursive(root)) {
+    VT_TRACE(root->surf->comp->log,
+             "APPLY DAG: root=%p PREPARE FAILED", root);
+    return false;
+  }
+
+  VT_TRACE(root->surf->comp->log,
+           "APPLY DAG: root=%p prepared", root);
+
+  if (!_vt_content_update_apply_dag_recursive(root)) {
+    VT_TRACE(root->surf->comp->log,
+             "APPLY DAG: root=%p APPLY FAILED", root);
+    return false;
+  }
+
+  VT_TRACE(root->surf->comp->log,
+           "APPLY DAG: root=%p applied, retiring", root);
 
   _retire_applied_dag(root);
 

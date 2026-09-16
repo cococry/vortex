@@ -11,7 +11,7 @@ struct vt_subsurface_t {
 
   bool synchronized;
 
-  struct wl_list parent_link;
+  struct wl_list link;
 
   struct vt_scene_node_t *scene_node;
 };

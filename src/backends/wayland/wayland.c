@@ -479,6 +479,7 @@ bool _wl_backend_create_output(struct vt_backend_t *backend,
   pixman_region32_init(&output->damage);
   output->backend = backend;
   wl_list_init(&output->physical.modes);
+  wl_list_init(&output->rendered_surfaces);
   wl_list_init(&output->proto.resources);
 
   _wl_set_fake_output_mode(output, _WL_DEFAULT_OUTPUT_WIDTH,

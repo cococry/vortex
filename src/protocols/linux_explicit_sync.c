@@ -1,12 +1,13 @@
-#include "src/core/surface_addon.h"
-#include <wayland-server-core.h>
 #define _GNU_SOURCE
 
 #include "linux_explicit_sync.h"
 #include "src/core/core_types.h"
 #include "src/core/surface.h"
+#include "src/core/content_update.h"
 #include "src/core/util.h"
 #include <sys/stat.h>
+#include "src/core/surface_addon.h"
+#include <wayland-server-core.h>
 
 #include <assert.h>
 #include <linux-explicit-synchronization-v1-server-protocol.h>
@@ -60,9 +61,26 @@ struct vt_proto_linux_explicit_sync_v1_t {
   struct vt_compositor_t *comp;
 };
 
+static bool
+_linux_explicit_sync_addon_commit(struct vt_surface_t *surf,
+                                    struct vt_content_update_t *cu)
+{
+  struct vt_linux_explicit_sync_v1_surface_state_t *sync =
+      surf->proto_state.linux_explicit_sync_v1;
+
+  if (!sync)
+    return true;
+
+  cu->acquire_fence_fd = sync->acquire_fence_fd;
+  sync->acquire_fence_fd = -1;
+
+  return true;
+}
+
 static const struct vt_surface_addon_impl_t explicit_sync_surface_addon_impl = {
     .name = "linux-explicit-synchronization-v1",
     .destroy = _linux_explicit_sync_destroy_addon,
+    .commit = _linux_explicit_sync_addon_commit
 };
 
 static struct vt_proto_linux_explicit_sync_v1_t _proto;
@@ -276,6 +294,10 @@ void _linux_surface_sync_v1_get_release(struct wl_client   *client,
 
   wl_resource_set_implementation(res, NULL, explicit_release,
                                  _handle_explict_release_destroy);
+
+  VT_TRACE(state->surf->comp->log,
+           "GET RELEASE: pending=%p release=%p explicit=%p res=%p",
+           &state->surf->pending, release, release->explicit, res);
 }
 
 void _linux_surface_sync_handle_destroy(struct wl_resource *resource) {

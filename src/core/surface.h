@@ -1,8 +1,9 @@
 #pragma once
 
-#include "../protocols/linux_dmabuf.h"
-#include "scene.h"
 #include "../core/buffer.h"
+#include "../protocols/linux_dmabuf.h"
+#include "../protocols/linux_explicit_sync.h"
+#include "scene.h"
 #include <wayland-server.h>
 #define VT_MAX_FRAME_CBS 8
 
@@ -21,8 +22,6 @@ struct vt_surface_state_applied_t {
 
   pixman_region32_t opaque_region;
 
-  struct vt_buffer_t *buf;
-  
   int32_t buffer_transform;
   int32_t buffer_scale;
 
@@ -58,7 +57,7 @@ struct vt_surface_state_pending_t {
 
   struct wl_list frame_callbacks;
 
-  struct vt_buffer_release_t* buffer_release;
+  struct vt_buffer_release_t *buffer_release;
 };
 
 enum vt_surface_type_t {
@@ -67,13 +66,6 @@ enum vt_surface_type_t {
 };
 
 struct vt_linux_dmabuf_v1_surface_t;
-
-struct vt_surface_role_impl_t {
-  bool (*validate_commit)(struct vt_surface_addon_t *addon);
-
-  bool (*commit)(struct vt_surface_addon_t  *addon,
-                 struct vt_content_update_t *cu);
-};
 
 enum vt_surface_role_type_t {
   VT_SURFACE_ROLE_NONE = 0,
@@ -92,10 +84,19 @@ enum vt_surface_role_type_t {
   VT_SURFACE_ROLE_XWAYLAND,
 };
 
+struct vt_content_update_t;
+
+struct vt_surface_role_impl_t {
+  enum vt_surface_role_type_t type;
+
+  bool (*validate_commit)(struct vt_surface_t *surface);
+
+  bool (*commit)(struct vt_surface_t *surface, struct vt_content_update_t *cu);
+};
+
 struct vt_surface_role_t {
-  enum vt_surface_role_type_t   type;
-  struct vt_surface_role_impl_t impl;
-  void                         *data;
+  struct vt_surface_role_impl_t *impl;
+  void                          *data;
 };
 
 struct vt_surface_frame_callback_t {
@@ -107,10 +108,12 @@ struct vt_surface_t {
   struct wl_resource     *res;
   struct vt_compositor_t *comp;
 
-  struct vt_surface_role_t* role;
+  struct vt_surface_role_t role;
 
   struct vt_surface_state_pending_t pending;
   struct vt_surface_state_applied_t applied;
+
+  struct vt_buffer_use_t *current_buf_use;
 
   struct wl_list content_updates;
 
@@ -119,32 +122,30 @@ struct vt_surface_t {
   struct wl_list addons;
 
   struct {
-    struct vt_linux_dmabuf_v1_surface_state_t *linux_dmabuf_v1;
+    struct vt_linux_dmabuf_v1_surface_state_t        *linux_dmabuf_v1;
     struct vt_linux_explicit_sync_v1_surface_state_t *linux_explicit_sync_v1;
   } proto_state;
 
-  struct wl_list link, link_focus;
+  struct wl_list link, link_focus; 
 
   bool damaged;
   bool mapped;
 
-  uint32_t outputs_visible_on;
-  uint32_t outputs_presented_on;
-
   struct {
     struct wl_list childs;
-    struct wl_list link_parent;
   } subsurface;
+
+  struct wl_list frame_callbacks;
 };
 
-bool vt_surface_init(struct vt_surface_t* surf);
+bool vt_surface_init(struct vt_surface_t *surf);
 
 void vt_surface_mapped(struct vt_surface_t *surf);
 
 void vt_surface_unmapped(struct vt_surface_t *surf);
 
-void vt_surface_apply_buffer(struct vt_surface_t *surf,
-                             struct vt_buffer_t  *buf);
+void vt_surface_apply_buffer_use(struct vt_surface_t    *surf,
+                                 struct vt_buffer_use_t *new_use);
 
 void vt_surface_pending_state_init(struct vt_surface_state_pending_t *state);
 
@@ -170,11 +171,20 @@ bool vt_surface_effectively_mapped(struct vt_surface_t *surf);
 
 bool vt_surface_emit_content_update(struct vt_surface_t *surf);
 
-struct vt_content_update_t* vt_surface_last_scu(struct vt_surface_t *surf);
+struct vt_content_update_t *vt_surface_last_scu(struct vt_surface_t *surf);
 
 struct vt_buffer_release_t *vt_surface_state_get_or_create_buffer_release(
     struct vt_surface_state_pending_t *state);
 
 void vt_surface_frame_done(struct vt_surface_t *surf, uint32_t frame_time_msec);
 
-bool vt_surface_compute_applied_size(const struct vt_surface_state_applied_t *state, uint32_t* o_w, uint32_t* o_h);
+bool vt_surface_compute_applied_size(const struct vt_surface_t *surf,
+                                     uint32_t *o_w, uint32_t *o_h);
+
+bool vt_surface_set_role(struct vt_surface_t                 *surf,
+                         const struct vt_surface_role_impl_t *impl, void *data);
+
+bool vt_surface_has_role(struct vt_surface_t        *surf,
+                         enum vt_surface_role_type_t type);
+
+struct vt_buffer_t *vt_surface_get_buffer(struct vt_surface_t *surf);

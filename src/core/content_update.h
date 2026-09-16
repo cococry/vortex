@@ -21,6 +21,9 @@ struct vt_content_update_t {
   struct wl_list dependencies;
 
   bool applied, queued, prepared;
+
+  struct vt_buffer_use_t *buffer_use;
+  int                     acquire_fence_fd;
 };
 
 struct vt_content_update_dependency_t {
