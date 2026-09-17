@@ -182,12 +182,12 @@ _linux_dmabuf_surface_destroy_addon(struct vt_surface_addon_t *addon) {
   struct vt_linux_dmabuf_v1_surface_state_t *state =
       wl_container_of(addon, state, addon);
 
+  vt_proto_linux_dmabuf_v1_surface_destroy(state->surf);
+
   if (state->surf) {
     state->surf->proto_state.linux_dmabuf_v1 = NULL;
     state->surf = NULL;
   }
-
-  vt_proto_linux_dmabuf_v1_surface_destroy(state->surf);
 }
 
 static const struct vt_surface_addon_impl_t dmabuf_surface_addon_impl = {

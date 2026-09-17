@@ -303,11 +303,12 @@ vt_buffer_use_create_take(struct vt_buffer_t         **buf,
 
   use->release_fence_fd = -1;
 
-  if(use->buf) {
+  if (use->buf) {
     struct vt_compositor_t *comp = use->buf->renderer->comp;
-    VT_TRACE(comp->log, "USE CREATE: use=%p taking release=%p explicit=%p", use,
-             release ? *release : NULL,
-             release && *release ? (*release)->explicit : NULL);
+    VT_TRACE(comp->log,
+             "USE CREATE: use=%p taking buf=%p release=%p explicit release=%p",
+             use, use->buf, use->release,
+             use->release ? use->release->explicit : NULL);
   }
 
   return use;

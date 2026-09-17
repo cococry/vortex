@@ -65,6 +65,8 @@ static bool
 _linux_explicit_sync_addon_commit(struct vt_surface_t *surf,
                                     struct vt_content_update_t *cu)
 {
+  if (!surf || !cu)
+    return false;
   struct vt_linux_explicit_sync_v1_surface_state_t *sync =
       surf->proto_state.linux_explicit_sync_v1;
 
@@ -73,6 +75,11 @@ _linux_explicit_sync_addon_commit(struct vt_surface_t *surf,
 
   cu->acquire_fence_fd = sync->acquire_fence_fd;
   sync->acquire_fence_fd = -1;
+
+  VT_TRACE(
+      surf->comp->log,
+      "Moved acquire_fence_fd=%i owned by explicit sync to content update %p",
+      cu->acquire_fence_fd, cu);
 
   return true;
 }
@@ -296,8 +303,9 @@ void _linux_surface_sync_v1_get_release(struct wl_client   *client,
                                  _handle_explict_release_destroy);
 
   VT_TRACE(state->surf->comp->log,
-           "GET RELEASE: pending=%p release=%p explicit=%p res=%p",
-           &state->surf->pending, release, release->explicit, res);
+           "get_release: Pending release=%p explicit=%p res=%p",
+           &state->surf->pending.buffer_release,
+           state->surf->pending.buffer_release->explicit, res);
 }
 
 void _linux_surface_sync_handle_destroy(struct wl_resource *resource) {

@@ -30,6 +30,10 @@ struct vt_scene_node_t *vt_scene_node_create(struct vt_compositor_t *c,
   if (surf)
     surf->scene_node = n;
 
+  VT_TRACE(c->log,
+           "Created scene node %p for surface %p at (%d,%d), geom_dirty=%d", n,
+           surf, n->x, n->y, n->geom_dirty);
+
   return n;
 }
 
@@ -200,6 +204,11 @@ static void _scene_node_render_at(struct vt_renderer_t   *renderer,
       renderer->impl.draw_rect(renderer, x, y, node->cached_bounds.width,
                                node->cached_bounds.height, node->color);
     }
+  } else if (node->surf) {
+    VT_TRACE(renderer->comp->log,
+             "Filtered out surface scene node=%p with surface=%p; Will not be "
+             "rendered.",
+             node, node->surf);
   }
 
   for (uint32_t i = 0; i < node->child_count; i++) {

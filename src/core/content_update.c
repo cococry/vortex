@@ -1,5 +1,6 @@
 #include "content_update.h"
 #include "src/core/surface.h"
+#include "src/core/util.h"
 #include <wayland-util.h>
 
 #define _SUBSYS_NAME "CONTENT-UPDATE"
@@ -19,7 +20,15 @@ vt_content_update_create(struct vt_surface_t               *surf,
   update->surf = surf;
   update->type = type;
 
+  VT_TRACE(surf->comp->log,
+           "Creating content update for surface %p with pending buffer=%p, "
+           "buffer_release=%p, buffer_attached=%s",
+           surf, state->buf, state->buffer_release,
+           state->buffer_attached ? "true" : "false");
+
   vt_surface_pending_state_move(&update->state, state);
+
+  update->acquire_fence_fd = -1;
 
   wl_list_init(&update->constraints);
   wl_list_init(&update->dependencies);
@@ -27,18 +36,30 @@ vt_content_update_create(struct vt_surface_t               *surf,
   wl_list_init(&update->queue_link);
   wl_list_init(&update->retire_link);
 
-  update->acquire_fence_fd = -1;
+  return update;
+}
 
-  if (update->state.buffer_attached && update->state.buf) {
-    update->buffer_use = vt_buffer_use_create_take(
-        &update->state.buf, &update->state.buffer_release,
-        &update->acquire_fence_fd);
+bool vt_content_update_finish_create(struct vt_content_update_t *cu) {
+  if (!cu)
+    return false;
 
-    if (!update->buffer_use)
+  if (cu->state.buffer_attached && cu->state.buf) {
+    cu->buffer_use = vt_buffer_use_create_take(
+        &cu->state.buf, &cu->state.buffer_release, &cu->acquire_fence_fd);
+
+    if (!cu->buffer_use)
       return false;
   }
 
-  return update;
+  if (cu->surf) {
+    VT_TRACE(cu->surf->comp->log,
+             "Finished creating content update cu=%p for "
+             "surface=%p with "
+             "buffer use=%p",
+             cu, cu->surf, cu->buffer_use);
+  }
+
+  return true;
 }
 
 void vt_content_update_destroy(struct vt_content_update_t *cu) {
@@ -74,7 +95,7 @@ void vt_content_update_dependency_destroy(
   free(edge);
 }
 
-bool vt_content_update_prepare(struct vt_content_update_t *cu) {
+static bool _content_update_prepare_buffer(struct vt_content_update_t *cu) {
   if (!cu || !cu->surf)
     return false;
 
@@ -208,7 +229,7 @@ _vt_content_update_prepare_dag_recursive(struct vt_content_update_t *cu) {
       return false;
   }
 
-  if (!vt_content_update_prepare(cu))
+  if (!_content_update_prepare_buffer(cu))
     return false;
 
   cu->prepared = true;

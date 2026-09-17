@@ -282,6 +282,9 @@ void vt_surface_pending_state_move(struct vt_surface_state_pending_t *dst,
   dst->buf = src->buf;
   src->buf = NULL;
 
+  dst->buffer_release = src->buffer_release;
+  src->buffer_release = NULL;
+
   pixman_region32_copy(&dst->damage_surface, &src->damage_surface);
   pixman_region32_copy(&dst->damage_buffer, &src->damage_buffer);
 
@@ -310,6 +313,8 @@ void vt_surface_pending_state_move(struct vt_surface_state_pending_t *dst,
   src->offset_set = false;
   src->offset_x = 0;
   src->offset_y = 0;
+
+  src->buffer_release = NULL;
 }
 
 void vt_surface_pending_state_fini(struct vt_surface_state_pending_t *state) {
@@ -427,9 +432,17 @@ _content_update_add_child_dependencies(struct vt_content_update_t *cu) {
     return false;
 
   struct vt_surface_t *surf = cu->surf;
-  struct vt_surface_t *child;
-  wl_list_for_each(child, &surf->subsurface.childs, link) {
+
+  struct vt_subsurface_t *sub;
+
+  wl_list_for_each(sub, &surf->subsurface.childs, link) {
+    struct vt_surface_t *child = sub->surf;
+
+    if (!child)
+      continue;
+
     struct vt_content_update_t *last_scu = vt_surface_last_scu(child);
+
     if (!last_scu)
       continue;
 
@@ -438,6 +451,7 @@ _content_update_add_child_dependencies(struct vt_content_update_t *cu) {
 
     vt_content_update_add_dependency(cu, last_scu);
   }
+
   return true;
 }
 
@@ -467,9 +481,16 @@ bool vt_surface_emit_content_update(struct vt_surface_t *surf) {
     }
   }
 
+  if (!vt_content_update_finish_create(cu)) {
+    VT_ERROR(surf->comp->log,
+             "Failed to finish creation of content update %p for surface %p",
+             cu, surf);
+    goto fail;
+  }
+
   if (!_content_update_enqueue(cu)) {
     VT_ERROR(surf->comp->log,
-             "Failed to enqueue content %p update for surface %p", cu, surf);
+             "Failed to enqueue content update %p for surface %p", cu, surf);
     goto fail;
   }
 
@@ -481,8 +502,15 @@ bool vt_surface_emit_content_update(struct vt_surface_t *surf) {
 
   bool applied = vt_content_update_apply_dag(cu);
 
-  VT_TRACE(surf->comp->log, "EMIT CU: apply_dag cu=%p returned %d type=%d", cu,
-           applied, cu->type);
+  if (applied) {
+    VT_TRACE(surf->comp->log,
+             "Successfully applied DAG of %s content update=%p",
+             cu->type == VT_CU_SYNC ? "synchronized" : "desynchronized", cu);
+  } else {
+    VT_TRACE(surf->comp->log, "Failed to apply DAG of %s content update=%p",
+             cu->type == VT_CU_SYNC ? "synchronized" : "desynchronized", cu);
+    goto fail;
+  }
 
   return true;
 fail:
@@ -508,20 +536,21 @@ struct vt_buffer_release_t *vt_surface_state_get_or_create_buffer_release(
   if (!state)
     return NULL;
 
-  struct vt_buffer_release_t *release = state->buffer_release;
+  if (state->buffer_release)
+    return state->buffer_release;
 
-  if (release)
-    return release;
+  struct vt_buffer_release_t *release = calloc(1, sizeof(*release));
 
-  release = calloc(1, sizeof(*release));
-  if (!release) {
+  if (!release)
     return NULL;
-  }
 
+  release->refcount = 1;
   release->fence_fd = -1;
   wl_list_init(&release->callbacks);
 
-  return vt_buffer_release_ref(release);
+  state->buffer_release = release;
+
+  return release;
 }
 
 void vt_surface_frame_done(struct vt_surface_t *surf,

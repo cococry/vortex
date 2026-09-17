@@ -192,10 +192,12 @@ bool _egl_gl_import_buffer_shm(struct vt_renderer_t *r,
   glPixelStorei(GL_UNPACK_ROW_LENGTH, stride / 4);
 
   if (!need_buf_regen) {
-    pixman_box32_t ext = *pixman_region32_extents(damage);
+    /*pixman_box32_t ext = *pixman_region32_extents(damage);
     glTexSubImage2D(GL_TEXTURE_2D, 0, ext.x1, ext.y1, ext.x2 - ext.x1,
                     ext.y2 - ext.y1, format, type,
-                    data + ext.y1 * stride + ext.x1 * 4);
+                    data + ext.y1 * stride + ext.x1 * 4);*/
+
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, format, type, data);
   }
 
   glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
@@ -535,9 +537,9 @@ bool _egl_record_surface_release_fences(struct vt_renderer_t *renderer,
     if (fence_fd < 0) {
 
       log_fatal(renderer->comp->log,
-                "A catastrophic scenario happend:"
-                "We were able to create an EGL Sync and now need a fence but"
-                "for some reason eglDupNativeFenceFDANDROID()"
+                "A catastrophic scenario happend: "
+                "We were able to create an EGL Sync and now need a fence buti "
+                "for some reason eglDupNativeFenceFDANDROID() "
                 "failed. you're cooked.");
       return false;
     }
@@ -1334,8 +1336,20 @@ void renderer_begin_frame_egl(struct vt_renderer_t *r,
 void renderer_draw_surface_egl(struct vt_renderer_t *r,
                                struct vt_output_t   *output,
                                struct vt_surface_t *surface, float x, float y) {
-  if (!surface || !surface->current_buf_use)
+  VT_TRACE(r->comp->log,
+           "DRAW ENTER: surf=%p current_use=%p mapped=%d effective_mapped=%d",
+           surface, surface ? surface->current_buf_use : NULL,
+           surface ? surface->mapped : 0,
+           surface ? vt_surface_effectively_mapped(surface) : 0);
+  
+  if (!surface)
     return;
+
+  if(!surface->current_buf_use) {
+    VT_TRACE(r->comp->log,
+             "Not rendering surface %p, no active buffer use on surface.",
+             surface);
+  }
 
   if (!r || !r->impl.draw_surface || !r->user_data) {
     VT_ERROR(r->comp->log,
@@ -1344,8 +1358,6 @@ void renderer_draw_surface_egl(struct vt_renderer_t *r,
   }
 
   struct vt_buffer_use_t* use = surface->current_buf_use;
-  if (!use)
-    return;
 
   struct vt_buffer_t *buf = use->buf;
   if (!buf || buf->tex.id == 0)

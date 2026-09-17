@@ -39,6 +39,8 @@ vt_content_update_create(struct vt_surface_t                     *surf,
                          struct vt_surface_state_pending_t *state,
                          enum vt_content_update_type_t            type);
 
+bool vt_content_update_finish_create(struct vt_content_update_t *cu);
+
 void vt_content_update_destroy(struct vt_content_update_t *cu);
 
 void vt_content_update_dependency_destroy(
