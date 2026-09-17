@@ -484,22 +484,42 @@ void vt_seat_handle_pointer_motion(struct vt_seat_t *seat, double x, double y,
   seat->pointer_x = x;
   seat->pointer_y = y;
 
-  struct vt_rect_t* global_bounds = vt_scene_node_get_global_bounds(surf ? surf->scene_node : NULL);
+  if (!surf) {
+    if (seat->ptr_focus.surf) {
+      VT_TRACE(seat->comp->log,
+               "PTR FOCUS CHANGE old_surf=%p new_surf=NULL "
+               "old_client=%p new_client=NULL",
+               seat->ptr_focus.surf, seat->ptr_focus.client);
+
+      vt_seat_set_pointer_focus(seat, NULL, 0.0, 0.0);
+    }
+
+    return;
+  }
+
+  struct vt_rect_t *global_bounds =
+      vt_scene_node_get_global_bounds(surf->scene_node);
+
+  if (!global_bounds) {
+    VT_ERROR(seat->comp->log,
+             "Cannot handle pointer motion for surface %p: "
+             "surface has no valid scene bounds.",
+             surf);
+    return;
+  }
+
+  double sx = x - global_bounds->x;
+  double sy = y - global_bounds->y;
 
   if (surf != seat->ptr_focus.surf) {
     VT_TRACE(seat->comp->log,
              "PTR FOCUS CHANGE old_surf=%p new_surf=%p "
              "old_client=%p new_client=%p",
              seat->ptr_focus.surf, surf, seat->ptr_focus.client,
-             surf ? wl_resource_get_client(surf->res) : NULL);
-    vt_seat_set_pointer_focus(seat, surf, x - global_bounds->x, y - global_bounds->y);
+             surf->res ? wl_resource_get_client(surf->res) : NULL);
+
+    vt_seat_set_pointer_focus(seat, surf, sx, sy);
   }
-
-  if (!surf)
-    return;
-
-  double sx = x - global_bounds->x;
-  double sy = y - global_bounds->y;
 
   _send_pointer_motion(seat, time, sx, sy);
 }
