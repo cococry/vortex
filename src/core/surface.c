@@ -464,6 +464,9 @@ bool vt_surface_emit_content_update(struct vt_surface_t *surf) {
     return false;
   }
 
+  /* --- CU injection --- */
+
+  /* Addons commit */
   struct vt_surface_addon_t *it;
   wl_list_for_each(it, &surf->addons, link) {
     if (it->impl.commit) {
@@ -474,6 +477,19 @@ bool vt_surface_emit_content_update(struct vt_surface_t *surf) {
       }
     }
   }
+
+  /* Role commit */
+  if (surf->role.impl && surf->role.impl->commit) {
+    if (!surf->role.impl->commit(surf, cu)) {
+      VT_ERROR(
+          surf->comp->log,
+          "Failed to run role-specific commit for CU %p of surface %p",
+          cu, surf);
+      return false;
+    }
+  }
+  
+  /* --- End of CU injection --- */
 
   if (!vt_content_update_finish_create(cu)) {
     VT_ERROR(surf->comp->log,
@@ -509,6 +525,11 @@ bool vt_surface_emit_content_update(struct vt_surface_t *surf) {
     VT_TRACE(surf->comp->log,
              "Successfully applied DAG of %s content update=%p",
              cu->type == VT_CU_SYNC ? "synchronized" : "desynchronized", cu);
+
+    if (surf->role.impl && surf->role.impl->apply) {
+      if (!surf->role.impl->apply(surf, cu))
+        return false;
+    }
   } else {
     VT_TRACE(surf->comp->log, "Failed to apply DAG of %s content update=%p",
              cu->type == VT_CU_SYNC ? "synchronized" : "desynchronized", cu);

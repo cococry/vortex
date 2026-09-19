@@ -50,6 +50,7 @@ static const struct vt_surface_role_impl_t subsurface_role_impl = {
     .type = VT_SURFACE_ROLE_SUBSURFACE,
     .validate_commit = NULL,
     .commit = NULL,
+    .apply = NULL,
 };
 
 static void _subcompositor_bind(struct wl_client *client, void *data,

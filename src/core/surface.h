@@ -92,6 +92,7 @@ struct vt_surface_role_impl_t {
   bool (*validate_commit)(struct vt_surface_t *surface);
 
   bool (*commit)(struct vt_surface_t *surface, struct vt_content_update_t *cu);
+  bool (*apply)(struct vt_surface_t *surface, struct vt_content_update_t *cu);
 };
 
 struct vt_surface_role_t {

@@ -265,8 +265,8 @@ static void  _composite_pass(struct vt_renderer_t   *renderer,
 
   if (cursor && cursor->mapped) {
     renderer->impl.draw_surface(renderer, output, cursor,
-                                 seat->pointer_x, 
-                                 seat->pointer_y);
+                                 seat->pointer_x - seat->cursor.hotspot_x, 
+                                 seat->pointer_y - seat->cursor.hotspot_y);
   }
 
   r->impl.end_scene(r, output);

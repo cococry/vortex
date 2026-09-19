@@ -16,6 +16,7 @@
 #include "src/core/scene.h"
 #include "src/protocols/xdg_shell.h"
 #include "src/protocols/wl_subcompositor.h"
+#include "src/core/content_update.h"
 
 #define _SUBSYS_NAME "SEAT"
 
@@ -52,6 +53,8 @@ static void _wl_seat_release_pointer(struct wl_client   *client,
 static void _wl_keyboard_handle_resource_destroy(struct wl_resource *res);
 static void _wl_pointer_handle_resource_destroy(struct wl_resource *res);
 
+static bool _surface_role_cursor_apply(struct vt_surface_t* surf, struct vt_content_update_t* cu);
+
 static struct vt_kb_modifier_states_t
 _wl_kb_get_mod_states(struct xkb_state *state);
 
@@ -76,9 +79,10 @@ static const struct wl_pointer_interface pointer_impl = {
 };
 
 static const struct vt_surface_role_impl_t surface_role_cursor_impl = {
-  .type = VT_SURFACE_ROLE_CURSOR,
-  .validate_commit = NULL,
-  .commit = NULL
+    .type = VT_SURFACE_ROLE_CURSOR,
+    .validate_commit = NULL,
+    .commit = NULL,
+    .apply = _surface_role_cursor_apply
 };
 
 void _wl_seat_bind(struct wl_client *client, void *data, uint32_t version,
@@ -248,6 +252,8 @@ static void _wl_seat_pointer_set_cursor(struct wl_client   *client,
     if(!vt_surface_set_role(surf, &surface_role_cursor_impl, NULL)) {
       wl_resource_post_error(resource, WL_POINTER_ERROR_ROLE,
                              "wl_surface already has another role");
+      VT_ERROR(surf->comp->log, "Failed to set cursor role for surface %p",
+               surf);
       return;
     }
   }
@@ -338,6 +344,28 @@ void _wl_pointer_handle_resource_destroy(struct wl_resource *res) {
 
   wl_resource_set_user_data(res, NULL);
 }
+
+static bool _surface_role_cursor_apply(struct vt_surface_t* surf, struct vt_content_update_t* cu) {
+  if(!surf || !cu || !surf->comp || !surf->comp->seat)
+    return false;
+
+  struct vt_seat_t *seat = surf->comp->seat;
+
+  if (surf != seat->cursor.surf) 
+    return true;
+
+  if(cu->state.offset_set) {
+    seat->cursor.hotspot_x -= cu->state.offset_x;
+    seat->cursor.hotspot_y -= cu->state.offset_y;
+
+    VT_ERROR(surf->comp->log,
+             "Cursor role commit of seat cursor, offsetting pointer by [x: %i, "
+             "y: %i]",
+             cu->state.offset_x, cu->state.offset_y);
+  }
+
+  return true;
+} 
 
 struct vt_kb_modifier_states_t _wl_kb_get_mod_states(struct xkb_state *state) {
   uint32_t depressed =

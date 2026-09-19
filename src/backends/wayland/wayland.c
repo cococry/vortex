@@ -345,7 +345,7 @@ bool _wl_backend_init_active_outputs(struct vt_backend_t *backend) {
         VT_ALLOC(backend->comp, sizeof(struct vt_output_t));
     if (!_wl_backend_create_output(backend, output, NULL)) {
       VT_ERROR(backend->comp->log, "Failed to setup internal WL output.");
-      continue;
+      return false;
     }
 
     if (!backend->comp->renderer->impl.setup_renderable_output(
@@ -354,7 +354,7 @@ bool _wl_backend_init_active_outputs(struct vt_backend_t *backend) {
                "Failed to setup renderable output for WL output (%ix%i@%.2f)",
                output->width, output->height, output->refresh_rate);
       _wl_backend_destroy_output(backend, output);
-      continue;
+      return false;
     }
     vt_comp_schedule_repaint(backend->comp, output);
   }
