@@ -44,9 +44,6 @@ bool vt_surface_init(struct vt_surface_t *surf) {
 }
 
 void vt_surface_mapped(struct vt_surface_t *surf) {
-  surf->mapped = true;
-  return;
-  /* TODO: FIX */
   if (!surf)
     return;
 
@@ -101,9 +98,6 @@ struct vt_surface_t *focus_stack_pop(struct vt_compositor_t *comp) {
 }
 
 void vt_surface_unmapped(struct vt_surface_t *surf) {
-  surf->mapped = false;
-  return;
-  /* TODO: FIX */
   if (!surf || !surf->comp || !surf->comp->seat)
     return;
 
@@ -498,6 +492,15 @@ bool vt_surface_emit_content_update(struct vt_surface_t *surf) {
     VT_ERROR(surf->comp->log,
              "Failed to add child dependencies for content update %p", cu);
     goto fail;
+  }
+
+  if (cu->type == VT_CU_SYNC) {
+    VT_TRACE(surf->comp->log,
+             "Queued synchronized content update=%p for surface=%p; "
+             "waiting for parent commit",
+             cu, surf);
+
+    return true;
   }
 
   bool applied = vt_content_update_apply_dag(cu);
