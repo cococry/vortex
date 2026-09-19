@@ -11,12 +11,12 @@
 #include <wayland-server-protocol.h>
 
 #include "src/core/compositor.h"
+#include "src/core/content_update.h"
+#include "src/core/scene.h"
 #include "src/core/surface.h"
 #include "src/core/util.h"
-#include "src/core/scene.h"
-#include "src/protocols/xdg_shell.h"
 #include "src/protocols/wl_subcompositor.h"
-#include "src/core/content_update.h"
+#include "src/protocols/xdg_shell.h"
 
 #define _SUBSYS_NAME "SEAT"
 
@@ -53,7 +53,12 @@ static void _wl_seat_release_pointer(struct wl_client   *client,
 static void _wl_keyboard_handle_resource_destroy(struct wl_resource *res);
 static void _wl_pointer_handle_resource_destroy(struct wl_resource *res);
 
-static bool _surface_role_cursor_apply(struct vt_surface_t* surf, struct vt_content_update_t* cu);
+static bool _surface_role_cursor_apply(struct vt_surface_t        *surf,
+                                       struct vt_content_update_t *cu);
+
+static void _send_pointer_enter(struct vt_pointer_t *ptr,
+                                struct vt_surface_t *surf, double sx,
+                                double sy);
 
 static struct vt_kb_modifier_states_t
 _wl_kb_get_mod_states(struct xkb_state *state);
@@ -82,8 +87,7 @@ static const struct vt_surface_role_impl_t surface_role_cursor_impl = {
     .type = VT_SURFACE_ROLE_CURSOR,
     .validate_commit = NULL,
     .commit = NULL,
-    .apply = _surface_role_cursor_apply
-};
+    .apply = _surface_role_cursor_apply};
 
 void _wl_seat_bind(struct wl_client *client, void *data, uint32_t version,
                    uint32_t id) {
@@ -190,24 +194,23 @@ void _wl_seat_get_pointer(struct wl_client   *client,
   wl_resource_set_implementation(res, &pointer_impl, ptr,
                                  _wl_pointer_handle_resource_destroy);
 
-  if (seat->ptr_focus.client == client && seat->ptr_focus.surf) {
+  if (seat->ptr_focus.client == client &&
+    seat->ptr_focus.surf) {
 
-    struct vt_surface_t *surf = seat->ptr_focus.surf;
+    struct vt_surface_t *surf =
+        seat->ptr_focus.surf;
 
-    struct vt_rect_t* global_bounds = vt_scene_node_get_global_bounds(surf->scene_node);
+    struct vt_rect_t *bounds =
+        vt_scene_node_get_global_bounds(surf->scene_node);
 
-    uint32_t serial = wl_display_next_serial(seat->comp->wl.dsp);
-
-    ptr->enter_serial = serial;
-
-    wl_pointer_send_enter(ptr->res, serial, surf->res,
-                          wl_fixed_from_double(seat->pointer_x - global_bounds->width),
-                          wl_fixed_from_double(seat->pointer_y - global_bounds->height));
-
-    if (wl_resource_get_version(ptr->res) >= WL_POINTER_FRAME_SINCE_VERSION) {
-      wl_pointer_send_frame(ptr->res);
+    if (bounds) {
+        _send_pointer_enter(
+            ptr,
+            surf,
+            seat->pointer_x - bounds->x,
+            seat->pointer_y - bounds->y);
     }
-  }
+}
 }
 
 void _wl_seat_get_touch(struct wl_client *client, struct wl_resource *seat_res,
@@ -249,7 +252,7 @@ static void _wl_seat_pointer_set_cursor(struct wl_client   *client,
     if (!surf)
       return;
 
-    if(!vt_surface_set_role(surf, &surface_role_cursor_impl, NULL)) {
+    if (!vt_surface_set_role(surf, &surface_role_cursor_impl, NULL)) {
       wl_resource_post_error(resource, WL_POINTER_ERROR_ROLE,
                              "wl_surface already has another role");
       VT_ERROR(surf->comp->log, "Failed to set cursor role for surface %p",
@@ -257,7 +260,7 @@ static void _wl_seat_pointer_set_cursor(struct wl_client   *client,
       return;
     }
   }
-
+  
   seat->cursor.surf = surf;
   seat->cursor.owner = ptr;
   seat->cursor.hotspot_x = hotspot_x;
@@ -345,27 +348,28 @@ void _wl_pointer_handle_resource_destroy(struct wl_resource *res) {
   wl_resource_set_user_data(res, NULL);
 }
 
-static bool _surface_role_cursor_apply(struct vt_surface_t* surf, struct vt_content_update_t* cu) {
-  if(!surf || !cu || !surf->comp || !surf->comp->seat)
+static bool _surface_role_cursor_apply(struct vt_surface_t        *surf,
+                                       struct vt_content_update_t *cu) {
+  if (!surf || !cu || !surf->comp || !surf->comp->seat)
     return false;
 
   struct vt_seat_t *seat = surf->comp->seat;
 
-  if (surf != seat->cursor.surf) 
+  if (surf != seat->cursor.surf)
     return true;
 
-  if(cu->state.offset_set) {
+  if (cu->state.offset_set) {
     seat->cursor.hotspot_x -= cu->state.offset_x;
     seat->cursor.hotspot_y -= cu->state.offset_y;
 
-    VT_ERROR(surf->comp->log,
+    VT_TRACE(surf->comp->log,
              "Cursor role commit of seat cursor, offsetting pointer by [x: %i, "
              "y: %i]",
              cu->state.offset_x, cu->state.offset_y);
   }
 
   return true;
-} 
+}
 
 struct vt_kb_modifier_states_t _wl_kb_get_mod_states(struct xkb_state *state) {
   uint32_t depressed =
@@ -391,7 +395,6 @@ bool vt_seat_init(struct vt_seat_t *seat) {
   wl_list_init(&seat->pointers);
   wl_list_init(&seat->keybinds);
 
-  wl_list_init(&seat->focus_stack);
   wl_list_init(&seat->drag_resources);
 
   seat->serial = 1;
@@ -425,16 +428,15 @@ void vt_seat_handle_key(struct vt_seat_t *seat, uint32_t keycode,
       _wl_kb_get_mod_states(backend->kb_state);
 
   VT_TRACE(seat->comp->log,
-           "INPUT: Got key event: keycode: %i, state: %i, mods: %08x",
-           keycode, state, mod_states.depressed);
+           "INPUT: Got key event: keycode: %i, state: %i, mods: %08x", keycode,
+           state, mod_states.depressed);
 
   if (_wl_handle_global_keybind(seat, keycode, state, mod_states.depressed))
     return;
 
-  VT_TRACE(
-      seat->comp->log,
-      "INPUT: Handled global keybind: keycode: %i, state: %i, mods: %08x",
-      keycode, state, mod_states.depressed);
+  VT_TRACE(seat->comp->log,
+           "INPUT: Handled global keybind: keycode: %i, state: %i, mods: %08x",
+           keycode, state, mod_states.depressed);
 
   struct wl_client *client = seat->kb_focus.client;
   if (!client)
@@ -473,6 +475,25 @@ void vt_seat_handle_key(struct vt_seat_t *seat, uint32_t keycode,
   seat->_last_mods = mod_states;
 }
 
+static void _send_pointer_enter(struct vt_pointer_t *ptr,
+                                struct vt_surface_t *surf, double sx,
+                                double sy) {
+  if (!ptr || !ptr->res || !surf || !surf->res)
+    return;
+
+  uint32_t serial = wl_display_next_serial(ptr->seat->comp->wl.dsp);
+
+  wl_pointer_send_enter(ptr->res, serial, surf->res, wl_fixed_from_double(sx),
+                        wl_fixed_from_double(sy));
+
+  ptr->enter_serial = serial;
+
+  if (wl_resource_get_version(ptr->res) >= WL_POINTER_FRAME_SINCE_VERSION)
+    wl_pointer_send_frame(ptr->res);
+
+  printf("SENT ENTER TO: %p\n", surf);
+}
+
 static void _send_pointer_motion(struct vt_seat_t *seat, uint32_t time,
                                  double sx, double sy) {
   struct wl_client    *client = seat->ptr_focus.client;
@@ -497,30 +518,30 @@ static void _send_pointer_motion(struct vt_seat_t *seat, uint32_t time,
     }
   }
 
-  if (seat->cursor.surf) {
-    vt_scene_node_damage_whole(surf->comp, seat->cursor.surf->scene_node);
-  }
 }
 
-void vt_seat_handle_pointer_motion(struct vt_seat_t *seat, double x, double y,
+
+void vt_seat_handle_pointer_motion(struct vt_seat_t *seat,
+                                   double x, double y,
                                    uint32_t time) {
   if (!seat)
     return;
 
-  struct vt_surface_t *surf = vt_comp_pick_surface(seat->comp, x, y);
-
   seat->pointer_x = x;
   seat->pointer_y = y;
 
-  if (!surf) {
-    if (seat->ptr_focus.surf) {
-      VT_TRACE(seat->comp->log,
-               "PTR FOCUS CHANGE old_surf=%p new_surf=NULL "
-               "old_client=%p new_client=NULL",
-               seat->ptr_focus.surf, seat->ptr_focus.client);
+  if (seat->cursor.surf && seat->cursor.surf->mapped) {
+    vt_scene_node_damage_whole(
+        seat->comp,
+        seat->cursor.surf->scene_node);
+  }
 
+  struct vt_surface_t *surf =
+      vt_comp_pick_surface(seat->comp, x, y);
+
+  if (!surf) {
+    if (seat->ptr_focus.surf)
       vt_seat_set_pointer_focus(seat, NULL, 0.0, 0.0);
-    }
 
     return;
   }
@@ -528,26 +549,14 @@ void vt_seat_handle_pointer_motion(struct vt_seat_t *seat, double x, double y,
   struct vt_rect_t *global_bounds =
       vt_scene_node_get_global_bounds(surf->scene_node);
 
-  if (!global_bounds) {
-    VT_ERROR(seat->comp->log,
-             "Cannot handle pointer motion for surface %p: "
-             "surface has no valid scene bounds.",
-             surf);
+  if (!global_bounds)
     return;
-  }
 
   double sx = x - global_bounds->x;
   double sy = y - global_bounds->y;
 
-  if (surf != seat->ptr_focus.surf) {
-    VT_TRACE(seat->comp->log,
-             "PTR FOCUS CHANGE old_surf=%p new_surf=%p "
-             "old_client=%p new_client=%p",
-             seat->ptr_focus.surf, surf, seat->ptr_focus.client,
-             surf->res ? wl_resource_get_client(surf->res) : NULL);
-
+  if (surf != seat->ptr_focus.surf)
     vt_seat_set_pointer_focus(seat, surf, sx, sy);
-  }
 
   _send_pointer_motion(seat, time, sx, sy);
 }
@@ -617,10 +626,8 @@ void vt_seat_handle_pointer_button(struct vt_seat_t *seat, uint32_t button,
     struct vt_surface_t *focus =
         _get_first_focusable_surface(seat->ptr_focus.surf);
 
-    if (focus &&
-        focus != seat->kb_focus.surf) {
-        vt_seat_set_keyboard_focus(
-            seat, focus);
+    if (focus && focus != seat->kb_focus.surf) {
+      vt_seat_set_keyboard_focus(seat, focus);
     }
   }
 
@@ -731,6 +738,7 @@ _surface_get_xdg_toplevel(struct vt_surface_t *surf) {
 
 void vt_seat_set_keyboard_focus(struct vt_seat_t    *seat,
                                 struct vt_surface_t *surf) {
+
   if (!seat)
     return;
 
@@ -772,7 +780,6 @@ void vt_seat_set_pointer_focus(struct vt_seat_t    *seat,
                                double sy) {
   if (!seat)
     return;
-
   struct vt_surface_t *old = seat->ptr_focus.surf;
 
   if (old == surf)
@@ -807,51 +814,17 @@ void vt_seat_set_pointer_focus(struct vt_seat_t    *seat,
   if (surf && surf->res && new_client) {
     uint32_t serial = wl_display_next_serial(seat->comp->wl.dsp);
 
+
     struct vt_pointer_t *ptr;
-    wl_list_for_each(ptr, &seat->pointers, link) {
-      if (!ptr->res)
+wl_list_for_each(ptr, &seat->pointers, link) {
+    if (!ptr->res)
         continue;
 
-      if (wl_resource_get_client(ptr->res) != new_client)
+    if (wl_resource_get_client(ptr->res) != new_client)
         continue;
 
-      wl_pointer_send_enter(ptr->res, serial, surf->res,
-                            wl_fixed_from_double(sx), wl_fixed_from_double(sy));
-
-      ptr->enter_serial = serial;
-
-      if (wl_resource_get_version(ptr->res) >= WL_POINTER_FRAME_SINCE_VERSION)
-        wl_pointer_send_frame(ptr->res);
-    }
-  }
+    _send_pointer_enter(ptr, surf, sx, sy);
 }
-
-void vt_seat_handle_surface_destroyed(struct vt_seat_t    *seat,
-                                      struct vt_surface_t *surf) {
-  if (!surf)
-    return;
-
-  if (seat) {
-    if (seat->kb_focus.surf == surf) {
-      seat->kb_focus.surf = NULL;
-      seat->kb_focus.client = NULL;
-    }
-
-    if (seat->ptr_focus.surf == surf) {
-      seat->ptr_focus.surf = NULL;
-      seat->ptr_focus.client = NULL;
-    }
-
-    if (seat->cursor.surf == surf) {
-      seat->cursor.surf = NULL;
-      seat->cursor.owner = NULL;
-    }
-  }
-
-  /* Focus stack must not retain the surface. */
-  if (!wl_list_empty(&surf->link_focus)) {
-    wl_list_remove(&surf->link_focus);
-    wl_list_init(&surf->link_focus);
   }
 }
 
@@ -863,6 +836,35 @@ void vt_seat_bind_global_keybinds(struct vt_seat_t *seat) {
                              _wl_handle_keybind_exit, NULL);
   vt_seat_add_global_keybind(seat, XKB_KEY_e, mods.alt, _wl_handle_keybind_term,
                              NULL);
+}
+
+void vt_seat_handle_surface_unmapped(struct vt_seat_t    *seat,
+                                     struct vt_surface_t *surf) {
+  if (!seat || !surf)
+    return;
+
+  if (seat->kb_focus.surf == surf)
+    vt_seat_set_keyboard_focus(seat, NULL);
+
+}
+void vt_seat_repick_pointer_focus(struct vt_seat_t *seat) {
+  struct vt_surface_t *surf =
+      vt_comp_pick_surface(seat->comp, seat->pointer_x, seat->pointer_y);
+
+  if (!surf) {
+    vt_seat_set_pointer_focus(seat, NULL, 0, 0);
+    return;
+  }
+
+  struct vt_rect_t *bounds = vt_scene_node_get_global_bounds(surf->scene_node);
+
+  if (!bounds) {
+    vt_seat_set_pointer_focus(seat, NULL, 0, 0);
+    return;
+  }
+
+  vt_seat_set_pointer_focus(seat, surf, seat->pointer_x - bounds->x,
+                            seat->pointer_y - bounds->y);
 }
 
 bool vt_seat_terminate(struct vt_seat_t *seat) {

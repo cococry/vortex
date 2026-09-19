@@ -7,6 +7,7 @@
 #include "src/core/util.h"
 #include "src/input/wl_seat.h"
 #include "src/render/renderer.h"
+#include <assert.h>
 #include <stdbool.h>
 #include <unistd.h>
 #include <wayland-server-core.h>
@@ -421,14 +422,25 @@ void _wl_surface_handle_resource_destroy(struct wl_resource *resource) {
 
   VT_TRACE(surf->comp->log, "Got wl_surface.destroy")
 
-  if (surf->mapped)
-    vt_surface_unmapped(surf);
+  surf->res = NULL;
+
+  vt_surface_set_mapped(surf, false);
+
+  if (surf->comp->seat) {
+    struct vt_seat_t *seat = surf->comp->seat;
+
+    assert(seat->kb_focus.surf != surf);
+    assert(seat->ptr_focus.surf != surf);
+    assert(wl_list_empty(&surf->link_focus));
+
+    if (seat->cursor.surf == surf) {
+      seat->cursor.surf = NULL;
+      seat->cursor.owner = NULL;
+    }
+  }
 
   /* Unlink from compositor list */
   wl_list_remove(&surf->link);
-
-  if (surf->comp->seat)
-    vt_seat_handle_surface_destroyed(surf->comp->seat, surf);
 
   if (surf->scene_node) {
     vt_scene_node_damage_whole(surf->comp, surf->scene_node);

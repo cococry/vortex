@@ -161,6 +161,9 @@ static bool _xdg_toplevel_send_state(struct vt_xdg_toplevel_t *top,
 
 static bool _xdg_surface_commit(struct vt_surface_t *surf, struct vt_content_update_t* cu);
 
+static void _xdg_toplevel_mapping_changed(struct vt_surface_t *surf,
+                                          bool                 mapped);
+
 struct vt_xdg_positioner_t {
   struct wl_resource *res;
   int32_t             width;
@@ -245,6 +248,8 @@ static const struct vt_surface_role_impl_t xdg_popup_role_impl = {
   .type = VT_SURFACE_ROLE_XDG_POPUP,
   .commit = _xdg_surface_commit,
   .validate_commit = NULL,
+  .apply = NULL,
+  .mapping_changed = _xdg_toplevel_mapping_changed
 };
 
 static struct vt_proto_xdg_shell_t _proto;
@@ -333,46 +338,31 @@ void _xdg_wm_base_positioner_handle_resource_destroy(
   wl_resource_set_user_data(resource, NULL);
 }
 
-void _xdg_toplevel_handle_resource_destroy(struct wl_resource *resource) {
+
+void
+_xdg_toplevel_handle_resource_destroy(struct wl_resource *resource)
+{
   struct vt_xdg_toplevel_t *top =
       resource ? wl_resource_get_user_data(resource) : NULL;
+
   if (!top) {
     VT_PARAM_CHECK_FAIL(_proto.comp);
     return;
   }
+
   top->xdg_toplevel_res = NULL;
 
-  /* 1. Unmap all children surfaces of the toplevel and remove
-   * them from this toplevel's children list. */
-  struct vt_xdg_toplevel_t *child, *tmp;
-  wl_list_for_each_safe(child, tmp, &top->childs, link) {
-    /* Remove child from list first to avoid list corruption
-     * in unmap handle. */
-    if (!wl_list_empty(&child->link)) {
-      wl_list_remove(&child->link);
-      wl_list_init(&child->link);
-    }
+  if (top->xdg_surf && top->xdg_surf->surf)
+    vt_surface_set_mapped(top->xdg_surf->surf, false);
 
-    /* Unmap child */
-    child->parent = NULL;
-    if (child->xdg_surf && child->xdg_surf->surf) {
-      vt_surface_unmapped(child->xdg_surf->surf);
-    }
-  }
-
-  /* 2. Unmap the toplevel surface itself. */
-  if (top->xdg_surf && top->xdg_surf->surf) {
-    vt_surface_unmapped(top->xdg_surf->surf);
-  }
-
-  /* 3. Unlink internal pointers and deallocate the toplevel
-   * handle associated with the resource. */
   if (top->xdg_surf)
     top->xdg_surf->toplevel = NULL;
 
   if (top->parent) {
-    wl_list_remove(&top->link);
-    wl_list_init(&top->link);
+    if (!wl_list_empty(&top->link)) {
+      wl_list_remove(&top->link);
+      wl_list_init(&top->link);
+    }
 
     top->parent = NULL;
   }
@@ -381,21 +371,21 @@ void _xdg_toplevel_handle_resource_destroy(struct wl_resource *resource) {
   free(top);
 }
 
-void _xdg_surface_handle_resource_destroy(struct wl_resource *resource) {
+  void
+_xdg_surface_handle_resource_destroy(struct wl_resource *resource)
+{
   struct vt_xdg_surface_t *xdg =
       resource ? wl_resource_get_user_data(resource) : NULL;
+
   if (!xdg) {
     VT_PARAM_CHECK_FAIL(_proto.comp);
     return;
   }
 
-  /* Unlink internal pointers and deallocate the toplevel
-   * handle associated with the resource. */
-
   struct vt_surface_t *surf = xdg->surf;
-  if (surf && surf->mapped) {
-    vt_surface_unmapped(surf);
-  }
+
+  if (surf)
+    vt_surface_set_mapped(surf, false);
 
   if (xdg->toplevel) {
     if (xdg->toplevel->xdg_surf == xdg)
@@ -412,7 +402,6 @@ void _xdg_surface_handle_resource_destroy(struct wl_resource *resource) {
   }
 
   xdg->surf = NULL;
-
   xdg->xdg_surf_res = NULL;
 
   wl_resource_set_user_data(resource, NULL);
@@ -422,27 +411,30 @@ void _xdg_surface_handle_resource_destroy(struct wl_resource *resource) {
 void _xdg_popup_handle_resource_destroy(struct wl_resource *resource) {
   struct vt_xdg_popup_t *popup =
       resource ? wl_resource_get_user_data(resource) : NULL;
+
   if (!popup) {
     VT_PARAM_CHECK_FAIL(_proto.comp);
     return;
   }
 
-  /* 1. Unmap the popup's surface */
-  if (popup->xdg_surf && popup->xdg_surf->surf) {
-    vt_surface_unmapped(popup->xdg_surf->surf);
+  popup->xdg_popup_res = NULL;
+
+  if (popup->xdg_surf && popup->xdg_surf->surf)
+    vt_surface_set_mapped(popup->xdg_surf->surf, false);
+
+  if (popup->xdg_surf) {
+    if (popup->xdg_surf->popup == popup)
+      popup->xdg_surf->popup = NULL;
   }
 
-  /* 2. Unlink internal pointers and deallocate the toplevel
-   * handle associated with the resource. */
-  popup->xdg_popup_res = NULL;
-  if (popup->parent_xdg_surf)
-    popup->parent_xdg_surf->popup = NULL;
   popup->parent_xdg_surf = NULL;
+
   wl_resource_set_user_data(resource, NULL);
   free(popup);
 }
 
-static bool _xdg_surface_commit(struct vt_surface_t *surf, struct vt_content_update_t* cu) {
+static bool _xdg_surface_commit(struct vt_surface_t        *surf,
+                                struct vt_content_update_t *cu) {
   struct vt_xdg_surface_t *xdg = surf->role.data;
 
   if (!xdg)
@@ -468,6 +460,32 @@ static bool _xdg_surface_commit(struct vt_surface_t *surf, struct vt_content_upd
 
     vt_scene_node_set_position(surf->scene_node, popup->configured_geom.x,
                                popup->configured_geom.y);
+  }
+
+  return true;
+}
+
+static void _xdg_toplevel_mapping_changed(struct vt_surface_t *surf,
+                                          bool                 mapped) {
+  if (!surf || mapped)
+    return;
+
+  struct vt_xdg_surface_t *xdg = surf->role.data;
+  if (!xdg || !xdg->toplevel)
+    return;
+
+  struct vt_xdg_toplevel_t *top = xdg->toplevel;
+  struct vt_xdg_toplevel_t *new_parent = top->parent;
+
+  struct vt_xdg_toplevel_t *child, *tmp;
+  wl_list_for_each_safe(child, tmp, &top->childs, link) {
+    wl_list_remove(&child->link);
+    wl_list_init(&child->link);
+
+    child->parent = new_parent;
+
+    if (new_parent)
+      wl_list_insert(&new_parent->childs, &child->link);
   }
 }
 
@@ -758,7 +776,7 @@ void _xdg_surface_get_toplevel(struct wl_client   *client,
                            "xdg_surface already has a role");
 
     VT_WARN(_proto.comp->log, "XDG surface %p already has another role.",
-            xdg_surf)
+            xdg_surf);
     return;
   }
 
@@ -772,17 +790,35 @@ void _xdg_surface_get_toplevel(struct wl_client   *client,
   }
 
   /* 4. Allcoate internal toplevel handle and assign pointers. */
-  xdg_surf->toplevel = calloc(1, sizeof(*xdg_surf->toplevel));
-  if (!xdg_surf->toplevel) {
+  struct vt_xdg_toplevel_t *toplevel = calloc(1, sizeof(*toplevel));
+
+  if (!toplevel) {
+    wl_resource_destroy(res);
     VT_WL_OUT_OF_MEMORY(_proto.comp, client);
     return;
   }
 
-  xdg_surf->toplevel->xdg_surf = xdg_surf;
-  xdg_surf->toplevel->xdg_toplevel_res = res;
-  xdg_surf->toplevel->parent = NULL;
-  wl_list_init(&xdg_surf->toplevel->childs);
-  wl_list_init(&xdg_surf->toplevel->link);
+  toplevel->xdg_surf = xdg_surf;
+  toplevel->xdg_toplevel_res = res;
+  toplevel->parent = NULL;
+  wl_list_init(&toplevel->childs);
+  wl_list_init(&toplevel->link);
+
+  /*
+   * xdg_surface.get_toplevel assigns the associated wl_surface
+   * its permanent xdg_toplevel role.
+   */
+  if (!vt_surface_set_role(xdg_surf->surf, &xdg_toplevel_role_impl, xdg_surf)) {
+    /* protocol error */
+    wl_resource_post_error(resource, XDG_SURFACE_ERROR_ALREADY_CONSTRUCTED,
+                           "cannot set xdg_toplevel surface role");
+
+    wl_resource_destroy(res);
+    free(toplevel);
+    return;
+  }
+
+  xdg_surf->toplevel = toplevel;
 
   /* 5. Set handler functions via the implementation */
   wl_resource_set_implementation(res, &xdg_toplevel_impl, xdg_surf->toplevel,
@@ -793,7 +829,8 @@ void _xdg_surface_get_toplevel(struct wl_client   *client,
 }
 
 void _xdg_surface_get_popup(struct wl_client   *client,
-                            struct wl_resource *resource, uint32_t id,
+                            struct wl_resource *resource,
+                            uint32_t            id,
                             struct wl_resource *parent_surface,
                             struct wl_resource *positioner) {
 
@@ -809,8 +846,13 @@ void _xdg_surface_get_popup(struct wl_client   *client,
   }
 
   if (!parent_xdg_surf) {
-    wl_resource_post_error(resource, XDG_WM_BASE_ERROR_INVALID_SURFACE_STATE,
-                           "parentless xdg_popup is not supported");
+    /*
+     * NOTE: xdg-shell itself allows a NULL parent if another protocol
+     * assigns the popup parent before the initial commit. Vortex currently
+     * does not support that case.
+     */
+    VT_WARN(_proto.comp->log,
+            "Parentless xdg_popup is not supported.");
     return;
   }
 
@@ -821,7 +863,7 @@ void _xdg_surface_get_popup(struct wl_client   *client,
                            "xdg_surface already has a role");
 
     VT_WARN(_proto.comp->log, "XDG surface %p already has another role.",
-            popup_xdg_surf)
+            popup_xdg_surf);
 
     return;
   }
@@ -847,26 +889,52 @@ void _xdg_surface_get_popup(struct wl_client   *client,
   popup->parent_xdg_surf = parent_xdg_surf;
   popup->xdg_surf = popup_xdg_surf;
 
-  popup_xdg_surf->popup = popup;
-
   /* 5. Set handler functions via the implementation */
-  wl_resource_set_implementation(res, &xdg_popup_impl, popup_xdg_surf->popup,
-                                 _xdg_popup_handle_resource_destroy);
 
   /* 6. Send popup configure with positioner data*/
   struct vt_xdg_positioner_t *pos =
       positioner ? wl_resource_get_user_data(positioner) : NULL;
 
-  if (!pos)
+  if (!pos) {
+    wl_resource_destroy(res);
+    free(popup);
     return;
+  }
 
   struct vt_xdg_window_geom_t geom;
 
   if (!_popup_resolve_pos(popup, pos, &geom)) {
     VT_ERROR(popup_xdg_surf->surf->comp->log,
              "Failed to resolve initial popup geometry.");
+
+    wl_resource_destroy(res);
+    free(popup);
     return;
   }
+
+  /*
+   * xdg_surface.get_popup assigns the associated wl_surface
+   * its permanent xdg_popup role.
+   */
+  if (!vt_surface_set_role(popup_xdg_surf->surf, &xdg_popup_role_impl,
+                           popup_xdg_surf)) {
+    /* protocol error */
+    wl_resource_post_error(resource, XDG_SURFACE_ERROR_ALREADY_CONSTRUCTED,
+                           "cannot set xdg_popup surface role");
+
+    wl_resource_destroy(res);
+    free(popup);
+    return;
+  }
+
+  /*
+   * Publish the popup only after all fallible setup and role assignment
+   * have succeeded.
+   */
+  popup_xdg_surf->popup = popup;
+
+  wl_resource_set_implementation(res, &xdg_popup_impl, popup_xdg_surf->popup,
+                                 _xdg_popup_handle_resource_destroy);
 
   uint32_t serial = wl_display_next_serial(popup_xdg_surf->surf->comp->wl.dsp);
 
@@ -881,8 +949,9 @@ void _xdg_surface_get_popup(struct wl_client   *client,
   xdg_surface_send_configure(popup_xdg_surf->xdg_surf_res, serial);
 
   popup_xdg_surf->last_configure_serial = serial;
-  
-  if(!popup_xdg_surf->surf || !popup->parent_xdg_surf) return;
+
+  if (!popup_xdg_surf->surf || !popup->parent_xdg_surf)
+    return;
 
   struct vt_scene_node_t *parent_node = popup->parent_xdg_surf->geom_node;
 
@@ -892,9 +961,6 @@ void _xdg_surface_get_popup(struct wl_client   *client,
 
   vt_scene_node_reparent(popup_xdg_surf->surf->comp,
                          popup_xdg_surf->surf->scene_node, parent_node);
-
-  vt_surface_set_role(popup_xdg_surf->surf, &xdg_popup_role_impl,
-                      popup_xdg_surf);
 }
 
 void _xdg_surface_ack_configure(struct wl_client   *client,

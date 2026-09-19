@@ -154,6 +154,7 @@ struct vt_compositor_t {
   struct log_state_t    log;
 
   struct wl_list surfaces;
+  struct wl_list focus_stack;
 
   bool running, suspended;
   bool sent_frame_cbs, any_frame_cb_pending;

@@ -93,6 +93,8 @@ struct vt_surface_role_impl_t {
 
   bool (*commit)(struct vt_surface_t *surface, struct vt_content_update_t *cu);
   bool (*apply)(struct vt_surface_t *surface, struct vt_content_update_t *cu);
+
+  void (*mapping_changed)(struct vt_surface_t *surface, bool mapped);
 };
 
 struct vt_surface_role_t {
@@ -141,9 +143,7 @@ struct vt_surface_t {
 
 bool vt_surface_init(struct vt_surface_t *surf);
 
-void vt_surface_mapped(struct vt_surface_t *surf);
-
-void vt_surface_unmapped(struct vt_surface_t *surf);
+void vt_surface_set_mapped(struct vt_surface_t *surf, bool mapped);
 
 void vt_surface_apply_buffer_use(struct vt_surface_t    *surf,
                                  struct vt_buffer_use_t *new_use);

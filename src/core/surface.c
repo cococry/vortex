@@ -1,18 +1,25 @@
 #include "surface.h"
 #include "../input/wl_seat.h"
 #include "src/core/buffer.h"
-#include "src/core/compositor.h"
 #include "src/core/content_update.h"
 #include "src/core/core_types.h"
+#include "src/core/focus_policy.h"
 #include "src/core/scene.h"
 #include "src/core/surface_addon.h"
 #include "src/core/util.h"
 #include "src/protocols/wl_subcompositor.h"
-#include "src/protocols/xdg_shell.h"
 #include <wayland-server-protocol.h>
 #include <wayland-util.h>
 
 #define _SUBSYS_NAME "SURFACE"
+
+static void _surface_update_mapping(struct vt_surface_t *surf);
+
+static void _surface_update_mapping(struct vt_surface_t *surf) {
+  bool mapped = surf->current_buf_use != NULL;
+
+  vt_surface_set_mapped(surf, mapped);
+}
 
 bool vt_surface_init(struct vt_surface_t *surf) {
   if (!surf)
@@ -43,51 +50,36 @@ bool vt_surface_init(struct vt_surface_t *surf) {
   return true;
 }
 
-void vt_surface_mapped(struct vt_surface_t *surf) {
-  if (!surf)
+void vt_surface_set_mapped(struct vt_surface_t *surf, bool mapped) {
+  if (!surf || !surf->comp || surf->mapped == mapped)
     return;
 
   struct vt_seat_t *seat = surf->comp->seat;
 
-  if (surf->mapped)
-    return;
+  surf->mapped = mapped;
 
-  if (!surf->role.impl)
-    return;
+  if (surf->role.impl && surf->role.impl->mapping_changed) {
+    surf->role.impl->mapping_changed(surf, mapped);
+  }
 
-  surf->mapped = true;
-
-  if (vt_surface_has_role(surf, VT_SURFACE_ROLE_XDG_TOPLEVEL)) {
-    vt_seat_set_keyboard_focus(seat, surf);
-
-    if (wl_list_empty(&surf->link_focus)) {
-      wl_list_insert(&seat->focus_stack, &surf->link_focus);
+  if (seat) {
+    if (mapped) {
+      vt_focus_policy_mapped(surf->comp, surf);
+    } else {
+      vt_focus_policy_unmapped(surf->comp, surf);
+      vt_seat_handle_surface_unmapped(seat, surf);
     }
+
+    vt_seat_repick_pointer_focus(seat);
   }
 
-  struct vt_surface_t *under_cursor =
-      vt_comp_pick_surface(surf->comp, seat->pointer_x, seat->pointer_y);
-
-  if (under_cursor) {
-    struct vt_rect_t *global_bounds =
-        vt_scene_node_get_global_bounds(under_cursor->scene_node);
-    if (!global_bounds)
-      return;
-
-    double sx = seat->pointer_x - global_bounds->x;
-    double sy = seat->pointer_y - global_bounds->y;
-
-    vt_seat_set_pointer_focus(seat, under_cursor, sx, sy);
-  } else {
-    vt_seat_set_pointer_focus(seat, NULL, 0.0, 0.0);
-  }
 }
 
 struct vt_surface_t *focus_stack_pop(struct vt_compositor_t *comp) {
   if (!comp || !comp->seat)
     return NULL;
 
-  struct wl_list *stack = &comp->seat->focus_stack;
+  struct wl_list *stack = &comp->focus_stack;
 
   if (wl_list_empty(stack))
     return NULL;
@@ -95,89 +87,6 @@ struct vt_surface_t *focus_stack_pop(struct vt_compositor_t *comp) {
   struct vt_surface_t *surf = wl_container_of(stack->next, surf, link_focus);
 
   return surf;
-}
-
-void vt_surface_unmapped(struct vt_surface_t *surf) {
-  if (!surf || !surf->comp || !surf->comp->seat)
-    return;
-
-  if (!surf->mapped)
-    return;
-
-  if (!surf->role.impl)
-    return;
-
-  struct vt_seat_t *seat = surf->comp->seat;
-
-  bool had_keyboard_focus = seat->kb_focus.surf == surf;
-
-  bool had_pointer_focus = seat->ptr_focus.surf == surf;
-
-  surf->mapped = false;
-
-  if (!wl_list_empty(&surf->link_focus)) {
-    wl_list_remove(&surf->link_focus);
-    wl_list_init(&surf->link_focus);
-  }
-
-  if (had_pointer_focus) {
-    struct vt_surface_t *under_cursor =
-        vt_comp_pick_surface(surf->comp, seat->pointer_x, seat->pointer_y);
-
-    if (under_cursor) {
-
-      struct vt_rect_t *global_bounds =
-          vt_scene_node_get_global_bounds(under_cursor->scene_node);
-      if (!global_bounds)
-        return;
-
-      vt_seat_set_pointer_focus(seat, under_cursor,
-                                seat->pointer_x - global_bounds->x,
-                                seat->pointer_y - global_bounds->y);
-    } else {
-      vt_seat_set_pointer_focus(seat, NULL, 0.0, 0.0);
-    }
-  }
-
-  if (!had_keyboard_focus)
-    return;
-
-  struct vt_surface_t *new_focus = NULL;
-
-  if (vt_surface_has_role(surf, VT_SURFACE_ROLE_XDG_TOPLEVEL)) {
-    struct vt_xdg_surface_t *xdg_surf = surf->role.data;
-
-    if (xdg_surf->toplevel->parent) {
-      struct vt_xdg_toplevel_t *toplevel_parent = xdg_surf->toplevel->parent;
-
-      bool valid_mapped_parent = toplevel_parent && toplevel_parent->xdg_surf &&
-                                 toplevel_parent->xdg_surf->surf &&
-                                 toplevel_parent->xdg_surf->surf->mapped;
-      if (valid_mapped_parent) {
-        new_focus = toplevel_parent->xdg_surf->surf;
-      }
-    }
-
-  }
-
-  else if (vt_surface_has_role(surf, VT_SURFACE_ROLE_XDG_POPUP)) {
-    struct vt_xdg_surface_t *xdg_surf = surf->role.data;
-
-    if (xdg_surf->popup->parent_xdg_surf) {
-      struct vt_xdg_surface_t *parent = xdg_surf->popup->parent_xdg_surf;
-
-      if (parent && parent->surf && parent->surf->mapped) {
-
-        new_focus = parent->surf;
-      }
-    }
-  }
-
-  if (!new_focus) {
-    new_focus = focus_stack_pop(surf->comp);
-  }
-
-  vt_seat_set_keyboard_focus(seat, new_focus);
 }
 
 void vt_surface_apply_buffer_use(struct vt_surface_t    *surf,
@@ -191,9 +100,6 @@ void vt_surface_apply_buffer_use(struct vt_surface_t    *surf,
     vt_buffer_use_unref(&old);
   }
 
-  surf->mapped = surf->current_buf_use != NULL;
-
-  // TODO: Temporary
   vt_scene_node_damage_whole(surf->comp, surf->scene_node);
 }
 
@@ -368,7 +274,8 @@ bool vt_surface_effectively_synchronized(struct vt_surface_t *surf) {
     return false;
 
   while (surf) {
-    if (!surf->role.impl || !vt_surface_has_role(surf, VT_SURFACE_ROLE_SUBSURFACE)) 
+    if (!surf->role.impl ||
+        !vt_surface_has_role(surf, VT_SURFACE_ROLE_SUBSURFACE))
       return false;
 
     const struct vt_subsurface_t *sub = surf->role.data;
@@ -449,97 +356,59 @@ _content_update_add_child_dependencies(struct vt_content_update_t *cu) {
   return true;
 }
 
-bool vt_surface_emit_content_update(struct vt_surface_t *surf) {
-  if (!surf)
-    return false;
+bool vt_surface_emit_content_update(struct vt_surface_t *surf)
+{
+    if (!surf)
+        return false;
 
-  bool effectively_sync = vt_surface_effectively_synchronized(surf);
+    bool effectively_sync =
+        vt_surface_effectively_synchronized(surf);
 
-  struct vt_content_update_t *cu = vt_content_update_create(
-      surf, &surf->pending, effectively_sync ? VT_CU_SYNC : VT_CU_DESYNC);
+    struct vt_content_update_t *cu =
+        vt_content_update_create(
+            surf,
+            &surf->pending,
+            effectively_sync
+                ? VT_CU_SYNC
+                : VT_CU_DESYNC);
 
-  if (!cu) {
-    VT_ERROR(surf->comp->log, "Failed to create content update for surface %p",
-             surf);
-    return false;
-  }
+    if (!cu)
+        return false;
 
-  /* --- CU injection --- */
-
-  /* Addons commit */
-  struct vt_surface_addon_t *it;
-  wl_list_for_each(it, &surf->addons, link) {
-    if (it->impl.commit) {
-      if (!it->impl.commit(surf, cu)) {
-        VT_ERROR(surf->comp->log,
-                 "Failed to run commit for addon %p of surface %p for CU %p",
-                 it, surf, cu);
-      }
+    /* Addons capture */
+    struct vt_surface_addon_t *it;
+    wl_list_for_each(it, &surf->addons, link) {
+        if (it->impl.commit &&
+            !it->impl.commit(surf, cu))
+            goto fail;
     }
-  }
 
-  /* Role commit */
-  if (surf->role.impl && surf->role.impl->commit) {
-    if (!surf->role.impl->commit(surf, cu)) {
-      VT_ERROR(
-          surf->comp->log,
-          "Failed to run role-specific commit for CU %p of surface %p",
-          cu, surf);
-      return false;
-    }
-  }
-  
-  /* --- End of CU injection --- */
+    /* Role capture */
+    if (surf->role.impl &&
+        surf->role.impl->commit &&
+        !surf->role.impl->commit(surf, cu))
+        goto fail;
 
-  if (!vt_content_update_finish_create(cu)) {
-    VT_ERROR(surf->comp->log,
-             "Failed to finish creation of content update %p for surface %p",
-             cu, surf);
-    goto fail;
-  }
+    if (!vt_content_update_finish_create(cu))
+        goto fail;
 
-  if (!_content_update_enqueue(cu)) {
-    VT_ERROR(surf->comp->log,
-             "Failed to enqueue content update %p for surface %p", cu, surf);
-    goto fail;
-  }
+    if (!_content_update_enqueue(cu))
+        goto fail;
 
-  if (!_content_update_add_child_dependencies(cu)) {
-    VT_ERROR(surf->comp->log,
-             "Failed to add child dependencies for content update %p", cu);
-    goto fail;
-  }
+    if (!_content_update_add_child_dependencies(cu))
+        goto fail;
 
-  if (cu->type == VT_CU_SYNC) {
-    VT_TRACE(surf->comp->log,
-             "Queued synchronized content update=%p for surface=%p; "
-             "waiting for parent commit",
-             cu, surf);
+    if (cu->type == VT_CU_SYNC)
+        return true;
+
+    if (!vt_content_update_apply_dag(cu))
+        goto fail;
 
     return true;
-  }
 
-  bool applied = vt_content_update_apply_dag(cu);
-
-  if (applied) {
-    VT_TRACE(surf->comp->log,
-             "Successfully applied DAG of %s content update=%p",
-             cu->type == VT_CU_SYNC ? "synchronized" : "desynchronized", cu);
-
-    if (surf->role.impl && surf->role.impl->apply) {
-      if (!surf->role.impl->apply(surf, cu))
-        return false;
-    }
-  } else {
-    VT_TRACE(surf->comp->log, "Failed to apply DAG of %s content update=%p",
-             cu->type == VT_CU_SYNC ? "synchronized" : "desynchronized", cu);
-    goto fail;
-  }
-
-  return true;
 fail:
-  vt_content_update_destroy(cu);
-  return false;
+    vt_content_update_destroy(cu);
+    return false;
 }
 
 struct vt_content_update_t *vt_surface_last_scu(struct vt_surface_t *surf) {
@@ -593,13 +462,12 @@ void vt_surface_frame_done(struct vt_surface_t *surf,
   }
 }
 
-bool vt_surface_compute_applied_size(
-    const struct vt_surface_t*surf, uint32_t *o_w,
-    uint32_t *o_h) {
+bool vt_surface_compute_applied_size(const struct vt_surface_t *surf,
+                                     uint32_t *o_w, uint32_t *o_h) {
   if (!surf || !o_w || !o_h)
     return false;
 
-  struct vt_buffer_t* buf = vt_surface_get_buffer(surf);
+  struct vt_buffer_t                *buf = vt_surface_get_buffer(surf);
   struct vt_surface_state_applied_t *state = &surf->applied;
 
   if (!buf) {
@@ -609,8 +477,8 @@ bool vt_surface_compute_applied_size(
   }
 
   uint32_t buffer_scale = (uint32_t)state->buffer_scale;
-  uint32_t buffer_w = buf->tex.width; 
-  uint32_t buffer_h = buf->tex.height; 
+  uint32_t buffer_w = buf->tex.width;
+  uint32_t buffer_h = buf->tex.height;
 
   switch (state->buffer_transform) {
   case WL_OUTPUT_TRANSFORM_90:
@@ -642,7 +510,7 @@ bool vt_surface_compute_applied_size(
 
 bool vt_surface_set_role(struct vt_surface_t                 *surf,
                          const struct vt_surface_role_impl_t *impl,
-                         void *data) {
+                         void                                *data) {
   if (!surf || !impl)
     return false;
 
@@ -664,7 +532,8 @@ bool vt_surface_set_role(struct vt_surface_t                 *surf,
 
 bool vt_surface_has_role(struct vt_surface_t        *surf,
                          enum vt_surface_role_type_t type) {
-  if(!surf) return false;
+  if (!surf)
+    return false;
   return surf->role.impl && surf->role.impl->type == type;
 }
 

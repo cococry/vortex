@@ -46,8 +46,6 @@ void vt_content_update_destroy(struct vt_content_update_t *cu);
 void vt_content_update_dependency_destroy(
     struct vt_content_update_dependency_t *dependency);
 
-bool vt_content_update_apply(struct vt_content_update_t *cu);
-
 bool vt_content_update_add_dependency(struct vt_content_update_t *cu,
                                       struct vt_content_update_t *dependency);
 

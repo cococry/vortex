@@ -123,7 +123,7 @@ static void _apply_frame_callbacks(struct vt_surface_t               *surf,
   wl_list_init(&state->frame_callbacks);
 }
 
-bool vt_content_update_apply(struct vt_content_update_t *cu) {
+static bool _apply_surface_state(struct vt_content_update_t *cu) {
   if (!cu || !cu->surf)
     return false;
 
@@ -237,6 +237,31 @@ _vt_content_update_prepare_dag_recursive(struct vt_content_update_t *cu) {
   return true;
 }
 
+static bool
+_content_update_apply_one(struct vt_content_update_t *cu)
+{
+    struct vt_surface_t *surf = cu->surf;
+
+    _apply_surface_state(cu);
+
+    if (surf->role.impl && surf->role.impl->apply) {
+        if (!surf->role.impl->apply(surf, cu))
+            return false;
+    }
+
+    vt_scene_node_mark_geometry_dirty(surf->scene_node);
+
+    vt_surface_set_mapped(
+        surf,
+        surf->current_buf_use != NULL);
+
+    vt_scene_node_damage_whole(
+        surf->comp,
+        surf->scene_node);
+
+    return true;
+}
+
 
 static bool
 _vt_content_update_apply_dag_recursive(struct vt_content_update_t *cu) {
@@ -252,7 +277,7 @@ _vt_content_update_apply_dag_recursive(struct vt_content_update_t *cu) {
       return false;
   }
 
-  if (!vt_content_update_apply(cu))
+  if (!_content_update_apply_one(cu))
     return false;
 
   cu->applied = true;

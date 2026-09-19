@@ -36,7 +36,6 @@ struct vt_seat_t {
   struct wl_global *global;
   struct wl_list    keyboards;
   struct wl_list    pointers;
-  struct wl_list    focus_stack;
   struct wl_list    drag_resources;
 
   struct vt_seat_focus_t kb_focus, ptr_focus;
@@ -94,9 +93,10 @@ void vt_seat_set_keyboard_focus(struct vt_seat_t    *seat,
 void vt_seat_set_pointer_focus(struct vt_seat_t    *seat,
                                struct vt_surface_t *surf, double sx, double sy);
 
-void vt_seat_handle_surface_destroyed(struct vt_seat_t    *seat,
-                                      struct vt_surface_t *surf);
-
 void vt_seat_bind_global_keybinds(struct vt_seat_t *seat);
+
+void vt_seat_handle_surface_unmapped(struct vt_seat_t* seat, struct vt_surface_t* surf);
+
+void vt_seat_repick_pointer_focus(struct vt_seat_t *seat);
 
 bool vt_seat_terminate(struct vt_seat_t *seat);

@@ -588,6 +588,8 @@ static void _handle_output_changed_backend(struct vt_backend_t *backend,
 }
 
 bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
+  if(!c) return false;
+
   vt_util_arena_init(&c->arena, 1024 * 1024 * 2);
   vt_util_arena_init(&c->frame_arena, 1024 * 1024 * 2);
 
@@ -598,6 +600,7 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
   signal(SIGILL, _sig_handler);
   signal(SIGBUS, _sig_handler);
 
+  wl_list_init(&c->focus_stack);
   wl_list_init(&c->outputs);
 
   c->log.stream = stdout;
@@ -847,3 +850,4 @@ struct vt_surface_t *vt_comp_pick_surface(struct vt_compositor_t *comp,
 
   return surf;
 }
+
