@@ -306,12 +306,15 @@ static void _scene_node_get_size(struct vt_scene_node_t *node, uint32_t *o_w,
                                  uint32_t *o_h) {
   if (!node || !o_w || !o_h)
     return;
+
   switch (node->type) {
   case VT_SCENE_NODE_SURFACE:
     *o_w = node->surf->applied.width;
     *o_h = node->surf->applied.height;
     return;
   case VT_SCENE_NODE_RECT:
+  case VT_SCENE_NODE_INVISIBLE_GEOMETRY:
+  case VT_SCENE_NODE_ROOT:
     *o_w = node->rect_w;
     *o_h = node->rect_h;
     return;
@@ -347,6 +350,10 @@ void vt_scene_node_mark_geometry_dirty(struct vt_scene_node_t *node) {
   if(!node) return;
 
   node->geom_dirty = true;
+
+  for (uint32_t i = 0; i < node->child_count; i++) {
+    vt_scene_node_mark_geometry_dirty(node->childs[i]);
+  }
 }
 
 struct vt_rect_t* vt_scene_node_get_global_bounds(struct vt_scene_node_t *node) {
@@ -359,13 +366,22 @@ struct vt_rect_t* vt_scene_node_get_global_bounds(struct vt_scene_node_t *node) 
 
 struct vt_output_t *vt_scene_node_primary_output(struct vt_compositor_t *comp,
                                                  struct vt_scene_node_t *node) {
-  if (!node)
+  if (!node) {
+    VT_PARAM_CHECK_FAIL(comp);
+    VT_ERROR(comp->log, "Cannot pick primary output for NULL node");
     return NULL;
+  }
 
   const struct vt_rect_t *rect = vt_scene_node_get_global_bounds(node);
 
-  if (!rect)
+  if (!rect) {
+    VT_PARAM_CHECK_FAIL(comp);
+    VT_ERROR(comp->log,
+             "Failed to pick primary output for scene node %p. Node has "
+             "invalid global bounds",
+             node);
     return NULL;
+  }
 
   struct vt_output_t *best = NULL;
   uint64_t            best_area = 0;
@@ -392,5 +408,11 @@ struct vt_output_t *vt_scene_node_primary_output(struct vt_compositor_t *comp,
     }
   }
 
+  if (!best) {
+    VT_ERROR(comp->log,
+             "Failed to pick primary output for scene node %p. [x: %i, y: %i, "
+             "w: %u, h: %u]",
+             node, rect->x, rect->y, rect->width, rect->height);
+  }
   return best;
 }

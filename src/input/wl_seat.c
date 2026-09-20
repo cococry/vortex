@@ -490,8 +490,6 @@ static void _send_pointer_enter(struct vt_pointer_t *ptr,
 
   if (wl_resource_get_version(ptr->res) >= WL_POINTER_FRAME_SINCE_VERSION)
     wl_pointer_send_frame(ptr->res);
-
-  printf("SENT ENTER TO: %p\n", surf);
 }
 
 static void _send_pointer_motion(struct vt_seat_t *seat, uint32_t time,

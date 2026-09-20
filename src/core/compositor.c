@@ -796,24 +796,29 @@ static bool _surface_accepts_input(struct vt_surface_t *surf, double sx,
                                         (int32_t)sx, (int32_t)sy, NULL);
 }
 
-static struct vt_surface_t *_scene_pick_surface(struct vt_scene_node_t *node,
-                                                double parent_x,
-                                                double parent_y, double px,
-                                                double py) {
+
+static struct vt_surface_t *
+_scene_pick_surface(struct vt_scene_node_t *node,
+                    double parent_x,
+                    double parent_y,
+                    double px,
+                    double py) {
   if (!node)
     return NULL;
 
-  struct vt_rect_t *global_bounds = vt_scene_node_get_global_bounds(node);
-  double            x = parent_x + (double)global_bounds->x;
-  double            y = parent_y + (double)global_bounds->y;
+  double x = parent_x + node->x;
+  double y = parent_y + node->y;
 
   for (int i = (int)node->child_count - 1; i >= 0; i--) {
-    struct vt_scene_node_t* it = node->childs[i];
-    if(vt_surface_has_role(it->surf, VT_SURFACE_ROLE_CURSOR)) {
+    struct vt_scene_node_t *child = node->childs[i];
+
+    if (child->surf &&
+        vt_surface_has_role(child->surf, VT_SURFACE_ROLE_CURSOR)) {
       continue;
     }
+
     struct vt_surface_t *surf =
-        _scene_pick_surface(it, x, y, px, py);
+        _scene_pick_surface(child, x, y, px, py);
 
     if (surf)
       return surf;
@@ -830,16 +835,14 @@ static struct vt_surface_t *_scene_pick_surface(struct vt_scene_node_t *node,
   if (!vt_surface_get_buffer(surf))
     return NULL;
 
-  double w = (double)global_bounds->width; 
-  double h = (double)global_bounds->height; 
+  double w = (double)surf->applied.width;
+  double h = (double)surf->applied.height;
 
-  if (px < x || py < y || px >= x + w || py >= y + h) {
+  if (px < x || py < y || px >= x + w || py >= y + h)
     return NULL;
-  }
 
-  if (!_surface_accepts_input(surf, px - x, py - y)) {
+  if (!_surface_accepts_input(surf, px - x, py - y))
     return NULL;
-  }
 
   return surf;
 }

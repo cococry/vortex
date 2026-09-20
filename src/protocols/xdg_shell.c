@@ -1414,17 +1414,24 @@ static bool _popup_resolve_pos(struct vt_xdg_popup_t       *popup,
                                struct vt_xdg_positioner_t  *pos,
                                struct vt_xdg_window_geom_t *out_geom) {
   if (!popup || !pos || !out_geom || !popup->parent_xdg_surf ||
-      !popup->parent_xdg_surf->geom_node)
+      !popup->parent_xdg_surf->geom_node || !pos->comp) {
+    VT_PARAM_CHECK_FAIL_HEADLESS();
     return false;
+  }
 
   struct vt_output_t *output = vt_scene_node_primary_output(
-      popup->xdg_surf->surf->comp, popup->parent_xdg_surf->geom_node);
+      pos->comp, popup->parent_xdg_surf->geom_node);
 
-  if (!output)
+  if (!output) {
     return false;
+  }
 
   struct vt_rect_t *rect =
       vt_scene_node_get_global_bounds(popup->parent_xdg_surf->geom_node);
+
+  if(!rect) {
+    return false;
+  }
 
   struct vt_xdg_window_geom_t constraint = {
       .x = output->x - rect->x,
@@ -1433,7 +1440,8 @@ static bool _popup_resolve_pos(struct vt_xdg_popup_t       *popup,
       .h = output->height,
   };
 
-  return _xdg_positioner_calculate_geometry(pos, &constraint, out_geom);
+  _xdg_positioner_calculate_geometry(pos, &constraint, out_geom);
+  return true;
 }
 
 void _xdg_popup_reposition(struct wl_client   *client,
