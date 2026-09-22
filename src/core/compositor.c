@@ -33,11 +33,17 @@
 
 #include <dirent.h>
 #include <dlfcn.h>
+#include <errno.h>
 #include <execinfo.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <linux/vt.h>
+#include <math.h>
 #include <signal.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
@@ -103,24 +109,35 @@ void _vt_comp_frame_handler(void *data) {
   struct vt_output_t *output = data;
   if (!output)
     return;
+  if (!output->backend) {
+    output->repaint_pending = false;
+    output->repaint_source = NULL;
+    return;
+  }
   struct vt_compositor_t *c = output->backend->comp;
 
-  if (!c)
+  if (!c || !c->backend || !c->backend->impl.prepare_output_frame) {
+    output->repaint_pending = false;
+    output->repaint_source = NULL;
     return;
+  }
   if (output->backend->comp->suspended) {
     // Avoid busy loop
     output->repaint_pending = false;
+    output->repaint_source = NULL;
     return;
   }
 
   if (!c->backend->impl.prepare_output_frame(c->backend, output)) {
     // Avoid busy loop
     output->repaint_pending = false;
+    output->repaint_source = NULL;
     return;
   }
   if (!_vt_comp_render_output(c, output)) {
     // Avoid busy loop
     output->repaint_pending = false;
+    output->repaint_source = NULL;
     return;
   }
   VT_TRACE(c->log, "Pending repaint on output %p got satisfied.", output);
@@ -152,11 +169,14 @@ void vt_comp_frame_done(struct vt_compositor_t *c, struct vt_output_t *output,
 }
 
 void vt_comp_frame_done_all(struct vt_compositor_t *c, uint32_t t) {
+  if (!c)
+    return;
+
   struct vt_surface_t *surf;
   wl_list_for_each(surf, &c->surfaces, link) { vt_surface_frame_done(surf, t); }
 
-  VT_TRACE(surf->comp->log, "Sent wl_callback.done() for all pending frame "
-                            "callbacks of all surfaces.");
+  VT_TRACE(c->log, "Sent wl_callback.done() for all pending frame callbacks of "
+                   "all surfaces.");
 }
 
 bool _vt_comp_render_output(struct vt_compositor_t *c,
@@ -176,8 +196,14 @@ static bool _flag_cmp(const char *flag, const char *lng, const char *shrt) {
 }
 
 static char **_scan_valid_backends(size_t *count_out) {
+  if (count_out)
+    *count_out = 0;
+
   char path[512];
-  snprintf(path, sizeof(path), "%s/%s", VORTEX_PREFIX, VORTEX_BACKEND_DIR);
+  int  path_len =
+      snprintf(path, sizeof(path), "%s/%s", VORTEX_PREFIX, VORTEX_BACKEND_DIR);
+  if (path_len < 0 || (size_t)path_len >= sizeof(path))
+    return NULL;
 
   DIR *dir = opendir(path);
   if (!dir) {
@@ -210,7 +236,16 @@ static char **_scan_valid_backends(size_t *count_out) {
       memcpy(backend, name + prefix_len, core_len);
       backend[core_len] = '\0';
 
-      list = realloc(list, (count + 2) * sizeof(char *));
+      char **new_list = realloc(list, (count + 2) * sizeof(char *));
+      if (!new_list) {
+        free(backend);
+        for (size_t i = 0; i < count; i++)
+          free(list[i]);
+        free(list);
+        closedir(dir);
+        return NULL;
+      }
+      list = new_list;
       list[count++] = backend;
       list[count] = NULL;
     }
@@ -224,9 +259,16 @@ static char **_scan_valid_backends(size_t *count_out) {
 
 const char *_vt_comp_handle_cmd_flags(struct vt_compositor_t *c, int argc,
                                       char **argv) {
+  if (!c || argc < 0 || (argc > 0 && !argv))
+    return NULL;
+
+  const char *selected_backend = NULL;
+
   if (argc > 1) {
-    for (uint32_t i = 1; i < argc; i++) {
+    for (int i = 1; i < argc; i++) {
       char *flag = argv[i];
+      if (!flag)
+        continue;
       if (_flag_cmp(flag, "--logfile", "-lf")) {
         c->log.stream = fopen(vt_util_log_get_filepath(), "a");
         if (c->log.stream) {
@@ -241,7 +283,7 @@ const char *_vt_comp_handle_cmd_flags(struct vt_compositor_t *c, int argc,
       } else if (_flag_cmp(flag, "-h", "--help")) {
         _vt_comp_log_help();
       } else if (_flag_cmp(flag, "-v", "--version")) {
-        printf(_VERSION "\n");
+        printf("%s\n", _VERSION);
         exit(0);
       } else if (_flag_cmp(flag, "-b", "--backend")) {
         if (i + 1 >= argc) {
@@ -254,24 +296,27 @@ const char *_vt_comp_handle_cmd_flags(struct vt_compositor_t *c, int argc,
         size_t n;
         char **valid_backends = _scan_valid_backends(&n);
         bool   valid = false;
-        for (uint32_t i = 0; i < n; i++)
-          if (strcmp(backend_str, valid_backends[i]) == 0) {
+        for (size_t j = 0; j < n; j++)
+          if (strcmp(backend_str, valid_backends[j]) == 0) {
             valid = true;
             break;
           }
         if (!valid) {
           VT_ERROR(c->log, "Invalid compositor backend: '%s'", backend_str);
           fprintf(stderr, " Valid options for backends are: [ ");
-          for (uint32_t i = 0; i < n; i++)
-            fprintf(stderr, "%s%s ", valid_backends[i], i != n - 1 ? "," : "");
+          for (size_t j = 0; j < n; j++)
+            fprintf(stderr, "%s%s ", valid_backends[j], j != n - 1 ? "," : "");
           fprintf(stderr, "]\n");
-          for (uint32_t i = 0; i < n; i++) {
-            free(valid_backends[i]);
+          for (size_t j = 0; j < n; j++) {
+            free(valid_backends[j]);
           }
           free(valid_backends);
           exit(1);
         }
-        return backend_str;
+        for (size_t j = 0; j < n; j++)
+          free(valid_backends[j]);
+        free(valid_backends);
+        selected_backend = backend_str;
       } else if (_flag_cmp(flag, "-bp", "--backend-path")) {
         if (i + 1 >= argc) {
           VT_ERROR(c->log, "Missing value for %s", flag);
@@ -284,35 +329,42 @@ const char *_vt_comp_handle_cmd_flags(struct vt_compositor_t *c, int argc,
           VT_ERROR(c->log, "Missing value for %s", flag);
           exit(1);
         }
-        c->n_virtual_outputs = atoi(argv[++i]);
-        if (c->n_virtual_outputs <= 0)
-          ;
-        c->n_virtual_outputs = 1;
+        char *end = NULL;
+        errno = 0;
+        long n_virtual_outputs = strtol(argv[++i], &end, 10);
+        if (errno || end == argv[i] || *end != '\0' || n_virtual_outputs <= 0 ||
+            n_virtual_outputs > INT_MAX) {
+          VT_ERROR(c->log, "Invalid number of virtual outputs: '%s'", argv[i]);
+          exit(1);
+        }
+        c->n_virtual_outputs = (int)n_virtual_outputs;
         VT_TRACE(c->log, "Virtual outputs set to %d", c->n_virtual_outputs);
       } else if (_flag_cmp(flag, "-expt", "--exclude-protocol")) {
         if (i + 1 >= argc) {
           VT_ERROR(c->log, "Missing value for %s", flag);
           exit(1);
         }
-        bool disabled = false;
-        i++;
-        for (uint32_t j = i; j < argc; j++) {
-          if (argv[j][0] == '-')
+        int first = ++i;
+        for (; i < argc; i++) {
+          if (!argv[i] || argv[i][0] == '-')
             break;
-          if (strcmp(argv[j], "linux-dmabuf") == 0) {
+          if (strcmp(argv[i], "linux-dmabuf") == 0) {
             c->have_proto_dmabuf = false;
-            disabled = true;
-          } else if (strcmp(argv[j], "linux-dmabuf-explicit-sync") == 0) {
+          } else if (strcmp(argv[i], "linux-dmabuf-explicit-sync") == 0) {
             c->have_proto_dmabuf_explicit_sync = false;
-            disabled = true;
           } else {
             VT_ERROR(c->log,
                      "Protocol %s is not valid, valid protocols are: "
                      "[ 'linux-dmabuf', 'linux-dmabuf-explicit-sync' ] ",
-                     argv[j]);
+                     argv[i]);
             exit(1);
           }
         }
+        if (i == first) {
+          VT_ERROR(c->log, "Missing value for %s", flag);
+          exit(1);
+        }
+        i--;
       } else {
         VT_ERROR(c->log,
                  "invalid option -- '%s'. Use --help to see valid options",
@@ -321,7 +373,7 @@ const char *_vt_comp_handle_cmd_flags(struct vt_compositor_t *c, int argc,
       }
     }
   }
-  return NULL;
+  return selected_backend;
 }
 
 void _vt_comp_log_help() {
@@ -342,13 +394,13 @@ void _vt_comp_log_help() {
   printf("%-35s %s", "-b, --backend [val]",
          "Specifies the sink backend of the compositor.");
   printf(" Valid options for backends are: [ ");
-  size_t n;
+  size_t n = 0;
   char **valid_backends = _scan_valid_backends(&n);
-  for (uint32_t i = 0; i < n; i++)
+  for (size_t i = 0; i < n; i++)
     printf("'%s'%s ", valid_backends[i], i != n - 1 ? "," : "");
   printf("]\n");
 
-  for (uint32_t i = 0; i < n; i++)
+  for (size_t i = 0; i < n; i++)
     free(valid_backends[i]);
   free(valid_backends);
 
@@ -360,13 +412,23 @@ void _vt_comp_log_help() {
 
 void _vt_comp_wl_bind(struct wl_client *client, void *data, uint32_t version,
                       uint32_t id) {
+  if (!client || !data)
+    return;
+
   struct wl_resource *res =
       wl_resource_create(client, &wl_compositor_interface, version, id);
+  if (!res) {
+    wl_client_post_no_memory(client);
+    return;
+  }
   wl_resource_set_implementation(res, &compositor_impl, data, NULL);
 }
 
 void _vt_comp_load_backend(struct vt_compositor_t *c, const char *backend_name,
                            const char *backend_path) {
+  if (!c || !c->backend || !backend_name || !backend_name[0])
+    return;
+
   if (_vt_comp_dl_handle) {
     VT_WARN(c->log,
             "Trying to reload backend during runtime, this is not supported.");
@@ -374,11 +436,18 @@ void _vt_comp_load_backend(struct vt_compositor_t *c, const char *backend_name,
   }
 
   char path[PATH_MAX];
+  int  path_len;
   if (backend_path) {
-    sprintf(path, "%s", backend_path);
+    path_len = snprintf(path, sizeof(path), "%s", backend_path);
   } else {
-    sprintf(path, (VORTEX_PREFIX "/" VORTEX_BACKEND_DIR "/lib%s-backend.so"),
-            backend_name);
+    path_len =
+        snprintf(path, sizeof(path),
+                 (VORTEX_PREFIX "/" VORTEX_BACKEND_DIR "/lib%s-backend.so"),
+                 backend_name);
+  }
+  if (path_len < 0 || (size_t)path_len >= sizeof(path)) {
+    VT_ERROR(c->log, "Backend path is too long.");
+    return;
   }
 
   _vt_comp_dl_handle = dlopen(path, RTLD_NOW);
@@ -389,11 +458,19 @@ void _vt_comp_load_backend(struct vt_compositor_t *c, const char *backend_name,
   }
 
   char sym[64];
-  sprintf(sym, "backend_implement_%s", backend_name);
+  int  sym_len =
+      snprintf(sym, sizeof(sym), "backend_implement_%s", backend_name);
+  if (sym_len < 0 || (size_t)sym_len >= sizeof(sym)) {
+    dlclose(_vt_comp_dl_handle);
+    _vt_comp_dl_handle = NULL;
+    VT_ERROR(c->log, "Backend name is too long.");
+    return;
+  }
   backend_implement_func_t sym_ptr = dlsym(_vt_comp_dl_handle, sym);
 
   if (!sym_ptr) {
     dlclose(_vt_comp_dl_handle);
+    _vt_comp_dl_handle = NULL;
     log_fatal(c->log, "Backend %s does not export backend_implement_%s.", path,
               backend_name);
     return;
@@ -401,6 +478,8 @@ void _vt_comp_load_backend(struct vt_compositor_t *c, const char *backend_name,
 
   if (!sym_ptr(c)) {
     dlclose(_vt_comp_dl_handle);
+    _vt_comp_dl_handle = NULL;
+    memset(&c->backend->impl, 0, sizeof(c->backend->impl));
     log_fatal(c->log, "backend %s failed to initialize.", path);
     return;
   }
@@ -429,6 +508,7 @@ void _vt_comp_wl_surface_create(struct wl_client   *client,
   if (!vt_surface_init(surf)) {
     VT_ERROR(c->log,
              "wl_compositor.surface_create: Failed to initialize surface.");
+    free(surf);
     return;
   }
 
@@ -437,12 +517,20 @@ void _vt_comp_wl_surface_create(struct wl_client   *client,
     return;
   }
 
+  struct vt_scene_node_t *node = vt_scene_node_create(c, surf);
+  if (!node) {
+    VT_WL_OUT_OF_MEMORY(c, client);
+    return;
+  }
 
-  vt_scene_node_add_child(c, c->root_node, vt_scene_node_create(c, surf));
+  vt_scene_node_add_child(c, c->root_node, node);
 }
 
 void _vt_comp_wl_region_handle_resource_destroy(struct wl_resource *resource) {
   struct vt_region_t *r = resource ? wl_resource_get_user_data(resource) : NULL;
+  if (!r)
+    return;
+
   VT_TRACE(r->comp->log, "region.destroy_resoure: destroying region %p", r);
   pixman_region32_fini(&r->region);
   free(r);
@@ -454,8 +542,10 @@ void _vt_comp_wl_surface_create_region(struct wl_client   *client,
   struct vt_compositor_t *comp =
       resource ? wl_resource_get_user_data(resource) : NULL;
   if (!comp) {
-    wl_resource_post_error(resource, WL_DISPLAY_ERROR_INVALID_OBJECT,
-                           "compositor resource missing compositor user data");
+    if (resource)
+      wl_resource_post_error(
+          resource, WL_DISPLAY_ERROR_INVALID_OBJECT,
+          "compositor resource missing compositor user data");
     return;
   }
 
@@ -463,7 +553,6 @@ void _vt_comp_wl_surface_create_region(struct wl_client   *client,
 
   struct vt_region_t *region = calloc(1, sizeof(*region));
   if (!region) {
-    wl_client_post_no_memory(client);
     VT_WL_OUT_OF_MEMORY(comp, client);
     return;
   }
@@ -473,6 +562,12 @@ void _vt_comp_wl_surface_create_region(struct wl_client   *client,
 
   struct wl_resource *res = wl_resource_create(
       client, &wl_region_interface, wl_resource_get_version(resource), id);
+  if (!res) {
+    pixman_region32_fini(&region->region);
+    free(region);
+    VT_WL_OUT_OF_MEMORY(comp, client);
+    return;
+  }
 
   wl_resource_set_implementation(res, &region_impl, region,
                                  _vt_comp_wl_region_handle_resource_destroy);
@@ -491,6 +586,8 @@ void _vt_comp_wl_region_add(struct wl_client   *client,
   struct vt_region_t *r = resource ? wl_resource_get_user_data(resource) : NULL;
   if (!r)
     return;
+  if (width <= 0 || height <= 0)
+    return;
   pixman_region32_union_rect(&r->region, &r->region, x, y, width, height);
 }
 
@@ -499,6 +596,8 @@ void _vt_comp_wl_region_subtract(struct wl_client   *client,
                                  int32_t y, int32_t width, int32_t height) {
   struct vt_region_t *r = resource ? wl_resource_get_user_data(resource) : NULL;
   if (!r)
+    return;
+  if (width <= 0 || height <= 0)
     return;
   pixman_region32_t rect;
   pixman_region32_init_rect(&rect, x, y, width, height);
@@ -510,6 +609,10 @@ static void _wl_region_add(struct wl_client   *client,
                            struct wl_resource *resource, int32_t x, int32_t y,
                            int32_t width, int32_t height) {
   struct vt_region_t *r = resource ? wl_resource_get_user_data(resource) : NULL;
+  if (!r)
+    return;
+  if (width <= 0 || height <= 0)
+    return;
   pixman_region32_union_rect(&r->region, &r->region, x, y, width, height);
 }
 
@@ -517,7 +620,11 @@ static void _wl_region_subtract(struct wl_client   *client,
                                 struct wl_resource *resource, int32_t x,
                                 int32_t y, int32_t width, int32_t height) {
   struct vt_region_t *r = resource ? wl_resource_get_user_data(resource) : NULL;
-  pixman_region32_t   rect;
+  if (!r)
+    return;
+  if (width <= 0 || height <= 0)
+    return;
+  pixman_region32_t rect;
   pixman_region32_init_rect(&rect, x, y, width, height);
   pixman_region32_subtract(&r->region, &r->region, &rect);
   pixman_region32_fini(&rect);
@@ -525,10 +632,15 @@ static void _wl_region_subtract(struct wl_client   *client,
 
 static void _wl_region_handle_destroy(struct wl_resource *resource) {
   struct vt_region_t *r = resource ? wl_resource_get_user_data(resource) : NULL;
+  if (!r)
+    return;
   pixman_region32_fini(&r->region);
   free(r);
 }
 bool _vt_comp_wl_init(struct vt_compositor_t *c) {
+  if (!c)
+    return false;
+
   if (!(c->wl.dsp = wl_display_create())) {
     VT_ERROR(c->log, "cannot create wayland display.");
     return false;
@@ -540,24 +652,28 @@ bool _vt_comp_wl_init(struct vt_compositor_t *c) {
 
   if (!(c->wl.evloop = wl_display_get_event_loop(c->wl.dsp))) {
     VT_ERROR(c->log, "Cannot get wayland event loop.");
-    return false;
+    goto error;
   }
 
-  wl_global_create(c->wl.dsp, &wl_compositor_interface, 4, c, _vt_comp_wl_bind);
+  if (!wl_global_create(c->wl.dsp, &wl_compositor_interface, 4, c,
+                        _vt_comp_wl_bind)) {
+    VT_ERROR(c->log, "Cannot create Wayland compositor global.");
+    goto error;
+  }
 
   if (!vt_proto_xdg_shell_init(c, 1)) {
     VT_ERROR(c->log, "Cannot initialize XDG shell protocol.");
-    return false;
+    goto error;
   }
 
   if (!vt_proto_wl_data_device_init(c)) {
     VT_ERROR(c->log, "Cannot initialize Wayland data device protocol.");
-    return false;
+    goto error;
   }
 
   if (!vt_proto_wl_subcompositor_init(c)) {
     VT_ERROR(c->log, "Cannot initialize Wayland subcompositor protocol.");
-    return false;
+    goto error;
   }
 
   const char *socket_name = wl_display_add_socket_auto(c->wl.dsp);
@@ -565,12 +681,18 @@ bool _vt_comp_wl_init(struct vt_compositor_t *c) {
     VT_ERROR(
         c->log,
         "Failed to create Wayland socket: no clients will be able to connect.");
-    return false;
+    goto error;
   } else {
     VT_TRACE(c->log, "Wayland display ready on socket '%s'.", socket_name);
   }
 
   return true;
+
+error:
+  wl_display_destroy(c->wl.dsp);
+  c->wl.dsp = NULL;
+  c->wl.evloop = NULL;
+  return false;
 }
 
 static struct vt_compositor_t *vt_global_compositor;
@@ -594,8 +716,10 @@ static void _sig_handler(int sig) {
 
 static void _handle_output_changed_backend(struct vt_backend_t *backend,
                                            struct vt_output_t  *output) {
-  (void)backend;
   (void)output;
+  if (!backend || !backend->comp)
+    return;
+
   if (backend->comp->root_node) {
     uint32_t            root_w = 0, root_h = 0;
     struct vt_output_t *output;
@@ -611,17 +735,11 @@ static void _handle_output_changed_backend(struct vt_backend_t *backend,
 }
 
 bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
-  if(!c) return false;
+  if (!c)
+    return false;
 
   vt_util_arena_init(&c->arena, 1024 * 1024 * 2);
   vt_util_arena_init(&c->frame_arena, 1024 * 1024 * 2);
-
-  vt_global_compositor = c;
-  signal(SIGSEGV, _sig_handler);
-  signal(SIGABRT, _sig_handler);
-  signal(SIGFPE, _sig_handler);
-  signal(SIGILL, _sig_handler);
-  signal(SIGBUS, _sig_handler);
 
   wl_list_init(&c->focus_stack);
   wl_list_init(&c->outputs);
@@ -631,19 +749,34 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
   c->log.quiet = false;
 
   c->backend = VT_ALLOC(c, sizeof(*c->backend));
+  if (!c->backend)
+    return false;
+  memset(c->backend, 0, sizeof(*c->backend));
   c->backend->comp = c;
 
   c->session = VT_ALLOC(c, sizeof(*c->session));
+  if (!c->session)
+    return false;
+  memset(c->session, 0, sizeof(*c->session));
   c->session->comp = c;
 
   c->renderer = VT_ALLOC(c, sizeof(*c->renderer));
+  if (!c->renderer)
+    return false;
+  memset(c->renderer, 0, sizeof(*c->renderer));
   c->renderer->comp = c;
   vt_renderer_implement(c->renderer, VT_RENDERING_BACKEND_EGL_OPENGL);
 
   c->input_backend = VT_ALLOC(c, sizeof(*c->input_backend));
+  if (!c->input_backend)
+    return false;
+  memset(c->input_backend, 0, sizeof(*c->input_backend));
   c->input_backend->comp = c;
 
   c->seat = VT_ALLOC(c, sizeof(*c->seat));
+  if (!c->seat)
+    return false;
+  memset(c->seat, 0, sizeof(*c->seat));
   c->seat->comp = c;
 
   c->have_proto_dmabuf = true;
@@ -661,6 +794,11 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
     c->n_virtual_outputs = 1;
 
   _vt_comp_load_backend(c, backend_str, c->_cmd_line_backend_path);
+
+  if (!c->backend->impl.init) {
+    VT_ERROR(c->log, "Compositor backend does not provide an init function.");
+    return false;
+  }
 
   c->backend->on_output_change = _handle_output_changed_backend;
 
@@ -710,6 +848,10 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
   }
 
   c->root_node = vt_scene_node_create_rect(c, 0, 0, root_w, root_h, 0x181818);
+  if (!c->root_node) {
+    VT_ERROR(c->log, "Failed to create root scene node.");
+    return false;
+  }
 
   c->root_node->type = VT_SCENE_NODE_ROOT;
 
@@ -721,34 +863,53 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
                     "linux-dmabuf-explicit-sync protocol");
   }
 
+  vt_global_compositor = c;
+  signal(SIGSEGV, _sig_handler);
+  signal(SIGABRT, _sig_handler);
+  signal(SIGFPE, _sig_handler);
+  signal(SIGILL, _sig_handler);
+  signal(SIGBUS, _sig_handler);
+
   return true;
 }
 
 void vt_comp_run(struct vt_compositor_t *c) {
+  if (!c || !c->wl.evloop || !c->wl.dsp)
+    return;
+
   c->running = true;
   VT_TRACE(c->log, "Entering main event loop...");
   while (c->running) {
     vt_util_arena_reset(&c->frame_arena);
 
-    wl_event_loop_dispatch(c->wl.evloop, -1);
+    if (wl_event_loop_dispatch(c->wl.evloop, -1) < 0) {
+      c->running = false;
+      break;
+    }
     wl_display_flush_clients(c->wl.dsp);
   }
 }
 
 bool vt_comp_terminate(struct vt_compositor_t *c) {
+  if (!c)
+    return false;
+
   VT_TRACE(c->log, "Shutting down...");
   c->running = false;
 
-  if (!(c->backend->impl.terminate(c->backend))) {
+  if (c->backend && c->backend->impl.terminate &&
+      !c->backend->impl.terminate(c->backend)) {
     VT_ERROR(c->log, "Failed to terminate backend");
     return false;
   }
 
-  vt_seat_terminate(c->seat);
+  if (c->seat)
+    vt_seat_terminate(c->seat);
 
-  c->input_backend->impl.terminate(c->input_backend);
+  if (c->input_backend && c->input_backend->impl.terminate)
+    c->input_backend->impl.terminate(c->input_backend);
 
-  if (c->session->impl.terminate) {
+  if (c->session && c->session->impl.terminate) {
     c->session->impl.terminate(c->session);
   }
 
@@ -770,28 +931,36 @@ bool vt_comp_terminate(struct vt_compositor_t *c) {
   vt_util_arena_destroy(&c->arena);
   vt_util_arena_destroy(&c->frame_arena);
 
-  dlclose(_vt_comp_dl_handle);
+  if (_vt_comp_dl_handle) {
+    dlclose(_vt_comp_dl_handle);
+    _vt_comp_dl_handle = NULL;
+  }
 
   exit(0);
 }
 
 void vt_comp_schedule_repaint(struct vt_compositor_t *c,
                               struct vt_output_t     *output) {
-  if (!c || !output || !c->backend)
+  if (!c || !output || !c->backend || !c->wl.evloop)
     return;
+
   if (c->suspended) {
     VT_WARN(c->log,
             "Trying to schedule repaint while compositor is suspended.");
     return;
   }
-  if (output->repaint_pending) {
-    return;
-  }
+
   output->needs_repaint = true;
-  if (!output->repaint_pending) {
-    output->repaint_pending = true;
-    output->repaint_source =
-        wl_event_loop_add_idle(c->wl.evloop, _vt_comp_frame_handler, output);
+
+  if (output->repaint_pending)
+    return;
+
+  output->repaint_pending = true;
+  output->repaint_source =
+      wl_event_loop_add_idle(c->wl.evloop, _vt_comp_frame_handler, output);
+  if (!output->repaint_source) {
+    output->repaint_pending = false;
+    return;
   }
 
   VT_TRACE(c->log, "Scheduling repaint on output %p.", output);
@@ -799,7 +968,7 @@ void vt_comp_schedule_repaint(struct vt_compositor_t *c,
 
 void vt_comp_repaint_scene(struct vt_compositor_t *c,
                            struct vt_output_t     *output) {
-  if (!c || !output || !c->backend || !c->renderer)
+  if (!c || !output || !c->backend || !c->renderer || !c->root_node)
     return;
 
   vt_scene_render(c->renderer, output, c->root_node);
@@ -807,7 +976,9 @@ void vt_comp_repaint_scene(struct vt_compositor_t *c,
 
 static bool _surface_accepts_input(struct vt_surface_t *surf, double sx,
                                    double sy) {
-  if (!surf || !vt_surface_get_buffer(surf))
+  if (!surf || !isfinite(sx) || !isfinite(sy) || sx < INT32_MIN ||
+      sx > INT32_MAX || sy < INT32_MIN || sy > INT32_MAX ||
+      !vt_surface_get_buffer(surf))
     return false;
 
   if (surf->applied.input_region_infinite) {
@@ -819,13 +990,10 @@ static bool _surface_accepts_input(struct vt_surface_t *surf, double sx,
                                         (int32_t)sx, (int32_t)sy, NULL);
 }
 
-
-static struct vt_surface_t *
-_scene_pick_surface(struct vt_scene_node_t *node,
-                    double parent_x,
-                    double parent_y,
-                    double px,
-                    double py) {
+static struct vt_surface_t *_scene_pick_surface(struct vt_scene_node_t *node,
+                                                double parent_x,
+                                                double parent_y, double px,
+                                                double py) {
   if (!node)
     return NULL;
 
@@ -834,14 +1002,15 @@ _scene_pick_surface(struct vt_scene_node_t *node,
 
   for (int i = (int)node->child_count - 1; i >= 0; i--) {
     struct vt_scene_node_t *child = node->childs[i];
+    if (!child)
+      continue;
 
     if (child->surf &&
         vt_surface_has_role(child->surf, VT_SURFACE_ROLE_CURSOR)) {
       continue;
     }
 
-    struct vt_surface_t *surf =
-        _scene_pick_surface(child, x, y, px, py);
+    struct vt_surface_t *surf = _scene_pick_surface(child, x, y, px, py);
 
     if (surf)
       return surf;
@@ -872,8 +1041,10 @@ _scene_pick_surface(struct vt_scene_node_t *node,
 
 struct vt_surface_t *vt_comp_pick_surface(struct vt_compositor_t *comp,
                                           double x, double y) {
+  if (!comp || !comp->root_node || !isfinite(x) || !isfinite(y))
+    return NULL;
+
   struct vt_surface_t *surf = _scene_pick_surface(comp->root_node, 0, 0, x, y);
 
   return surf;
 }
-

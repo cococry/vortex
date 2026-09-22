@@ -25,7 +25,6 @@
 
 #include <fcntl.h>
 #include <pthread.h>
-#include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/sysmacros.h>
@@ -44,6 +43,9 @@
 #include "../../render/renderer.h"
 #include "xdg-shell-client-protocol.h"
 
+#include <errno.h>
+#include <string.h>
+
 #define _WL_DEFAULT_OUTPUT_WIDTH  1280
 #define _WL_DEFAULT_OUTPUT_HEIGHT 720
 
@@ -55,6 +57,7 @@ typedef struct {
   struct wl_compositor   *parent_compositor;
   struct xdg_wm_base     *parent_xdg_wm_base;
   struct wl_seat         *parent_seat;
+  struct wl_event_source *parent_event_source;
   struct vt_compositor_t *comp;
 } wayland_backend_state_t;
 
@@ -109,6 +112,8 @@ static void _wl_parent_xdg_toplevel_configure(void                *data,
                                               struct xdg_toplevel *toplevel,
                                               int32_t w, int32_t h,
                                               struct wl_array *states);
+
+static bool _wl_parent_flush(wayland_backend_state_t *wl);
 
 static void _wl_parent_xdg_toplevel_close(void                *data,
                                           struct xdg_toplevel *toplevel);
@@ -295,6 +300,27 @@ void _wl_parent_xdg_toplevel_configure(void                *data,
   }
 }
 
+static bool _wl_parent_flush(wayland_backend_state_t *wl) {
+  if (!wl || !wl->parent_display || !wl->parent_event_source)
+    return false;
+
+  int ret = wl_display_flush(wl->parent_display);
+  if (ret >= 0) {
+    wl_event_source_fd_update(wl->parent_event_source, WL_EVENT_READABLE);
+    return true;
+  }
+
+  if (errno == EAGAIN) {
+    wl_event_source_fd_update(wl->parent_event_source,
+                              WL_EVENT_READABLE | WL_EVENT_WRITABLE);
+    return true;
+  }
+
+  VT_ERROR(wl->comp->log, "Failed to flush parent display: %s",
+           strerror(errno));
+  return false;
+}
+
 void _wl_parent_xdg_surface_configure(void *data, struct xdg_surface *surf,
                                       uint32_t serial) {
   struct vt_output_t *output = data;
@@ -317,11 +343,29 @@ void _wl_parent_xdg_toplevel_close(void *data, struct xdg_toplevel *toplevel) {
 }
 
 int _wl_parent_dispatch(int fd, uint32_t mask, void *data) {
+  (void)fd;
+
   wayland_backend_state_t *wl = data;
-  // process incoming events from parent
-  if (wl_display_dispatch(wl->parent_display) < 0) {
-    wl->comp->running = false; // parent died
+  if (!wl)
+    return 0;
+
+  if (mask & (WL_EVENT_ERROR | WL_EVENT_HANGUP)) {
+    wl->comp->running = false;
+    return 0;
   }
+
+  if (mask & WL_EVENT_READABLE) {
+    if (wl_display_dispatch(wl->parent_display) < 0) {
+      wl->comp->running = false;
+      return 0;
+    }
+  }
+
+  if ((mask & WL_EVENT_WRITABLE) && !_wl_parent_flush(wl)) {
+    wl->comp->running = false;
+    return 0;
+  }
+
   return 0;
 }
 
@@ -341,9 +385,14 @@ void _wl_parent_frame_done(void *data, struct wl_callback *wl_callback,
 
   // first clean up the previously used data
   wl_callback_destroy(wl_callback);
-  wl_output->parent_frame_cb = NULL;
+
+  if (wl_output->parent_frame_cb == wl_callback)
+    wl_output->parent_frame_cb = NULL;
 
   vt_comp_frame_done(comp, output, time);
+
+  if (output->needs_repaint)
+    vt_comp_schedule_repaint(comp, output);
 }
 
 bool _wl_backend_init_active_outputs(struct vt_backend_t *backend) {
@@ -378,6 +427,19 @@ bool _wl_backend_init_active_outputs(struct vt_backend_t *backend) {
       _wl_backend_destroy_output(backend, output);
       return false;
     }
+
+    wayland_output_state_t *wl_output =
+        BACKEND_DATA(output, wayland_output_state_t);
+
+    wl_surface_commit(wl_output->parent_surface);
+
+    if (wl_display_roundtrip(wl_backend->parent_display) < 0) {
+      VT_ERROR(backend->comp->log,
+               "Failed to receive initial xdg_surface configure.");
+      _wl_backend_destroy_output(backend, output);
+      return false;
+    }
+
     vt_comp_schedule_repaint(backend->comp, output);
   }
 
@@ -531,17 +593,6 @@ bool _wl_backend_create_output(struct vt_backend_t *backend,
   xdg_toplevel_set_title(wl_output->parent_xdg_toplevel, name);
 
   VT_TRACE(backend->comp->log, "Created virtual nested output %s.", name);
-
-  wl_output->parent_frame_cb = wl_surface_frame(wl_output->parent_surface);
-  wl_callback_add_listener(wl_output->parent_frame_cb,
-                           &parent_surface_frame_listener, output);
-
-  vt_comp_schedule_repaint(backend->comp, output);
-
-  // Trigger initial configure
-  wl_surface_commit(wl_output->parent_surface);
-  // Get the initial configure immidiately
-  wl_display_roundtrip(wl->parent_display);
 
   output->native_window = wl_output->parent_surface;
 
@@ -727,8 +778,12 @@ bool backend_init_wl(struct vt_backend_t *backend) {
   xdg_wm_base_add_listener(wl->parent_xdg_wm_base, &parent_wm_listener, c);
 
   int pfd = wl_display_get_fd(wl->parent_display);
-  wl_event_loop_add_fd(c->wl.evloop, pfd, WL_EVENT_READABLE,
-                       _wl_parent_dispatch, wl);
+
+  wl->parent_event_source = wl_event_loop_add_fd(
+      c->wl.evloop, pfd, WL_EVENT_READABLE, _wl_parent_dispatch, wl);
+
+  if (!wl->parent_event_source)
+    return false;
 
   backend->comp->renderer->impl.init(c->backend, backend->comp->renderer,
                                      wl->parent_display);
@@ -839,15 +894,16 @@ bool backend_implement_wl(struct vt_compositor_t *comp) {
 
 bool backend_handle_frame_wl(struct vt_backend_t *backend,
                              struct vt_output_t  *output) {
-  // Fully driven by the parent surface's .done event (see
-  // _wl_parent_frame_done)
+  if (!backend || !output)
+    return false;
+
+  wayland_backend_state_t *wl = BACKEND_DATA(backend, wayland_backend_state_t);
+
   wayland_output_state_t *wl_output =
       BACKEND_DATA(output, wayland_output_state_t);
-  wl_output->parent_frame_cb = wl_surface_frame(wl_output->parent_surface);
-  wl_callback_add_listener(wl_output->parent_frame_cb,
-                           &parent_surface_frame_listener, output);
 
-  wl_surface_commit(wl_output->parent_surface);
+  if (!_wl_parent_flush(wl))
+    return false;
 
   return true;
 }
@@ -877,7 +933,18 @@ bool backend_terminate_wl(struct vt_backend_t *backend) {
 }
 bool backend_prepare_output_frame_wl(struct vt_backend_t *backend,
                                      struct vt_output_t  *output) {
-  (void)backend;
-  (void)output;
+  wayland_output_state_t *wl_output =
+      BACKEND_DATA(output, wayland_output_state_t);
+
+  if (wl_output->parent_frame_cb)
+    return false;
+
+  wl_output->parent_frame_cb = wl_surface_frame(wl_output->parent_surface);
+  if (!wl_output->parent_frame_cb)
+    return false;
+
+  wl_callback_add_listener(wl_output->parent_frame_cb,
+                           &parent_surface_frame_listener, output);
+
   return true;
 }
