@@ -179,6 +179,7 @@ static bool _drm_init_for_device(struct vt_compositor_t     *comp,
                                  struct vt_device_t         *dev);
 static bool
 _drm_init_active_outputs_for_device(struct drm_backend_state_t *drm);
+
 static struct vt_output_mode_t *
 _drm_create_output_mode(struct wl_list *list, drmModeModeInfo *mode_info);
 static uint32_t    _drm_subpixel_to_wl(drmModeSubPixel subpixel);
@@ -196,6 +197,8 @@ static void _drm_keybind_switch_vt(struct vt_compositor_t *comp,
 static void _drm_on_seat_enable(struct wl_listener *listener, void *data);
 static bool _drm_handle_frame_for_device(struct drm_backend_state_t *drm,
                                          struct vt_output_t         *output);
+
+static bool _verify_drm_capibilites(struct drm_backend_state_t *drm);
 
 static bool _added_global_keybinds = false;
 
@@ -1532,6 +1535,12 @@ static bool _drm_handle_frame_for_device(struct drm_backend_state_t *drm,
   return true;
 }
 
+static bool _verify_drm_capibilites(struct drm_backend_state_t *drm) {
+  if(!drm) return false;
+
+  return true;
+}
+
 // ===================================================
 // =================== PUBLIC API ====================
 // ===================================================
@@ -1593,13 +1602,16 @@ bool backend_init_drm(struct vt_backend_t *backend) {
     }
     struct drm_backend_state_t *drm_backend =
         VT_ALLOC(backend->comp, sizeof(struct drm_backend_state_t));
+
     if (!drm_backend) {
       VT_ERROR(backend->comp->log,
                "Failed to allocate DRM backend for GPU (%i).", gpus[i]->fd);
       goto fail;
     }
+
     memset(drm_backend, 0, sizeof(*drm_backend));
     drm_backend->root_backend = backend;
+
     if (!_drm_init_for_device(backend->comp, drm_backend, gpus[i])) {
       VT_ERROR(backend->comp->log,
                "Failed to initialize DRM backend for GPU (%i).", gpus[i]->fd);
