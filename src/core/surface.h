@@ -151,7 +151,7 @@ struct vt_surface_t {
     struct vt_linux_explicit_sync_v1_surface_state_t *linux_explicit_sync_v1;
   } proto_state;
 
-  struct wl_list link, link_focus; 
+  struct wl_list link, link_focus;
 
   bool damaged;
   bool mapped;
@@ -167,8 +167,11 @@ bool vt_surface_init(struct vt_surface_t *surf);
 
 void vt_surface_set_mapped(struct vt_surface_t *surf, bool mapped);
 
-void vt_surface_apply_buffer_use(struct vt_surface_t    *surf,
+bool vt_surface_apply_buffer_use(struct vt_surface_t    *surf,
                                  struct vt_buffer_use_t *new_use);
+
+void vt_surface_apply_pending_frame_callbacks(
+    struct vt_surface_t *surf, struct vt_surface_state_pending_t *state);
 
 void vt_surface_pending_state_init(struct vt_surface_state_pending_t *state);
 
@@ -197,12 +200,14 @@ bool vt_surface_emit_content_update(struct vt_surface_t *surf);
 struct vt_content_update_t *vt_surface_last_scu(struct vt_surface_t *surf);
 
 struct vt_buffer_release_t *vt_surface_state_get_or_create_buffer_release(
-    struct vt_renderer_t *renderer, struct vt_surface_state_pending_t *state); 
+    struct vt_renderer_t *renderer, struct vt_surface_state_pending_t *state);
 
 void vt_surface_frame_done(struct vt_surface_t *surf, uint32_t frame_time_msec);
 
-bool vt_surface_compute_applied_size(const struct vt_surface_t *surf,
-                                     uint32_t *o_w, uint32_t *o_h);
+bool vt_surface_compute_final_size(const struct vt_surface_t *surf,
+                                   uint32_t                   buffer_scale,
+                                   uint32_t buffer_transform, uint32_t *o_w,
+                                   uint32_t *o_h);
 
 bool vt_surface_set_role(struct vt_surface_t                 *surf,
                          const struct vt_surface_role_impl_t *impl, void *data);

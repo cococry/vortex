@@ -104,6 +104,7 @@ void _vt_comp_frame_handler(void *data) {
   if (!output)
     return;
   struct vt_compositor_t *c = output->backend->comp;
+
   if (!c)
     return;
   if (output->backend->comp->suspended) {

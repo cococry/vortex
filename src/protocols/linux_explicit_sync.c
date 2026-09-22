@@ -95,6 +95,7 @@ _linux_explicit_sync_addon_commit(struct vt_surface_t *surf,
   if (!sync)
     return true;
 
+  /* Transfer acquire_fence_fd to content update (this is one-shot state)*/
   cu->acquire_fence_fd = sync->acquire_fence_fd;
   sync->acquire_fence_fd = -1;
 

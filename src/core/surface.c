@@ -111,10 +111,11 @@ struct vt_surface_t *focus_stack_pop(struct vt_compositor_t *comp) {
   return surf;
 }
 
-void vt_surface_apply_buffer_use(struct vt_surface_t    *surf,
+bool vt_surface_apply_buffer_use(struct vt_surface_t    *surf,
                                  struct vt_buffer_use_t *new_use) {
   if (!surf)
-    return;
+    return false;
+
   struct vt_buffer_use_t *old = surf->current_buf_use;
 
   surf->current_buf_use = new_use;
@@ -122,7 +123,20 @@ void vt_surface_apply_buffer_use(struct vt_surface_t    *surf,
     vt_buffer_use_unref(&old);
   }
 
-  vt_scene_node_damage_whole(surf->comp, surf->scene_node);
+  if (!vt_scene_node_damage_whole(surf->comp, surf->scene_node))
+    return false;
+
+  return true;
+}
+
+void vt_surface_apply_pending_frame_callbacks(
+    struct vt_surface_t *surf, struct vt_surface_state_pending_t *state) {
+  if (wl_list_empty(&state->frame_callbacks))
+    return;
+
+  wl_list_insert_list(surf->frame_callbacks.prev, &state->frame_callbacks);
+
+  wl_list_init(&state->frame_callbacks);
 }
 
 void vt_surface_pending_state_init(struct vt_surface_state_pending_t *state) {
@@ -138,11 +152,6 @@ void vt_surface_pending_state_init(struct vt_surface_state_pending_t *state) {
   pixman_region32_init(&state->damage_buffer);
 
   wl_list_init(&state->frame_callbacks);
-
-  state->buffer_scale = 1;
-  state->buffer_transform = WL_OUTPUT_TRANSFORM_NORMAL;
-
-  state->input_region_infinite = true;
 }
 
 void vt_surface_pending_state_defaults(
@@ -185,6 +194,7 @@ void vt_surface_pending_state_move(struct vt_surface_state_pending_t *dst,
     return;
 
   vt_surface_pending_state_init(dst);
+  vt_surface_pending_state_defaults(dst);
 
   dst->input_region_changed = src->input_region_changed;
   dst->input_region_infinite = src->input_region_infinite;
@@ -487,13 +497,14 @@ void vt_surface_frame_done(struct vt_surface_t *surf,
   }
 }
 
-bool vt_surface_compute_applied_size(const struct vt_surface_t *surf,
-                                     uint32_t *o_w, uint32_t *o_h) {
+bool vt_surface_compute_final_size(const struct vt_surface_t *surf,
+                                   uint32_t                   buffer_scale,
+                                   uint32_t buffer_transform, uint32_t *o_w,
+                                   uint32_t *o_h) {
   if (!surf || !o_w || !o_h)
     return false;
 
-  struct vt_buffer_t                *buf = vt_surface_get_buffer(surf);
-  struct vt_surface_state_applied_t *state = &surf->applied;
+  struct vt_buffer_t *buf = vt_surface_get_buffer(surf);
 
   if (!buf) {
     *o_w = 0;
@@ -501,11 +512,10 @@ bool vt_surface_compute_applied_size(const struct vt_surface_t *surf,
     return true;
   }
 
-  uint32_t buffer_scale = (uint32_t)state->buffer_scale;
   uint32_t buffer_w = buf->tex.width;
   uint32_t buffer_h = buf->tex.height;
 
-  switch (state->buffer_transform) {
+  switch (buffer_transform) {
   case WL_OUTPUT_TRANSFORM_90:
   case WL_OUTPUT_TRANSFORM_270:
   case WL_OUTPUT_TRANSFORM_FLIPPED_90:

@@ -57,24 +57,18 @@ struct vt_content_update_dependency_t {
 };
 
 struct vt_content_update_t *
-vt_content_update_create(struct vt_surface_t                     *surf,
+vt_content_update_create(struct vt_surface_t               *surf,
                          struct vt_surface_state_pending_t *state,
-                         enum vt_content_update_type_t            type);
+                         enum vt_content_update_type_t      type);
 
 bool vt_content_update_finish_create(struct vt_content_update_t *cu);
 
 void vt_content_update_destroy(struct vt_content_update_t *cu);
 
-void vt_content_update_dependency_destroy(
-    struct vt_content_update_dependency_t *dependency);
-
 bool vt_content_update_add_dependency(struct vt_content_update_t *cu,
                                       struct vt_content_update_t *dependency);
 
-bool vt_content_update_is_candidate(const struct vt_content_update_t *cu);
-
-bool vt_content_update_is_ready(const struct vt_content_update_t *cu);
-
 bool vt_content_update_apply_dag(struct vt_content_update_t *root);
 
-bool vt_content_update_reaches(struct vt_content_update_t *from, struct vt_content_update_t* target);
+bool vt_content_update_reaches(struct vt_content_update_t *from,
+                               struct vt_content_update_t *target);
