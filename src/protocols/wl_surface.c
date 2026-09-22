@@ -115,7 +115,7 @@ void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
 
   if (buffer) {
     /* Lazily allocate vt_buffer_t wrapper */
-    new_buf = vt_buffer_from_resource(surf->comp->renderer, buffer);
+    new_buf = vt_buffer_get_or_create_from_resource(surf->comp->renderer, buffer);
 
     if (!new_buf) {
       VT_WL_OUT_OF_MEMORY(surf->comp, client);

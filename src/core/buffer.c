@@ -7,21 +7,20 @@
 #include <unistd.h>
 #include <wayland-server-protocol.h>
 
+#include <assert.h>
+#include <stdlib.h>
+#include <string.h>
+
 #define _SUBSYS_NAME "BUFFERS"
 
-static void _buffer_unref_raw(struct vt_buffer_t *buf) {
-  if (!buf)
-    return;
+static void _buffer_destroy_notify(struct wl_listener *listener, void *data);
+static void _buffer_destroy(struct vt_buffer_t *buf);
+static struct vt_buffer_t *
+_buffer_create_from_resource(struct vt_renderer_t *renderer,
+                             struct wl_resource   *res);
 
-  buf->refcount--;
-
-  if (buf->refcount != 0)
-    return;
-
-  vt_buffer_destroy(buf);
-}
-
-static void _buffer_destroyed(struct wl_listener *listener, void *data) {
+static void _buffer_destroy_notify(struct wl_listener *listener, void *data) {
+  (void)data;
   struct vt_buffer_t *buf = wl_container_of(listener, buf, destroy);
 
   if (!buf)
@@ -30,13 +29,42 @@ static void _buffer_destroyed(struct wl_listener *listener, void *data) {
   VT_TRACE(buf->renderer->comp->log,
            "Buffer resource %p (wrapper: %p) destroyed.", buf->res, buf);
 
+  /* Resource has been destroyed, clear the pointer */
   buf->res = NULL;
 
   vt_buffer_unref(&buf);
 }
 
-struct vt_buffer_t *_buffer_create_from_resource(struct vt_renderer_t *renderer,
-                                                 struct wl_resource   *res) {
+static void _buffer_destroy(struct vt_buffer_t *buf) {
+  if (!buf || !buf->renderer || !buf->renderer->comp)
+    return;
+
+  assert(buf->res == NULL);
+
+  struct vt_renderer_t *r = buf->renderer;
+
+  VT_TRACE(r->comp->log, "Dropping buffer resource wrapper %p (resource: %p)",
+           buf, buf->res);
+
+  /* Destroy associated texture handle */
+  if (r->impl.destroy_buffer_texture)
+    r->impl.destroy_buffer_texture(r, buf);
+
+  /* Unlink destroy notifier */
+  if (buf->destroy_linked) {
+    wl_list_remove(&buf->destroy.link);
+    wl_list_init(&buf->destroy.link);
+    buf->destroy_linked = false;
+  }
+
+  VT_TRACE(r->comp->log, "Dropped buffer resource wrapper %p", buf);
+
+  free(buf);
+}
+
+static struct vt_buffer_t *
+_buffer_create_from_resource(struct vt_renderer_t *renderer,
+                             struct wl_resource   *res) {
   if (!renderer || !renderer->comp) {
     return NULL;
   }
@@ -51,7 +79,7 @@ struct vt_buffer_t *_buffer_create_from_resource(struct vt_renderer_t *renderer,
   buf->renderer = renderer;
 
   wl_list_init(&buf->destroy.link);
-  buf->destroy.notify = _buffer_destroyed;
+  buf->destroy.notify = _buffer_destroy_notify;
 
   wl_resource_add_destroy_listener(res, &buf->destroy);
   buf->destroy_linked = true;
@@ -80,14 +108,15 @@ bool vt_buffer_import(struct vt_buffer_t      *buf,
   return true;
 }
 
-struct vt_buffer_t *vt_buffer_from_resource(struct vt_renderer_t *renderer,
-                                            struct wl_resource   *res) {
+struct vt_buffer_t *
+vt_buffer_get_or_create_from_resource(struct vt_renderer_t *renderer,
+                                      struct wl_resource   *res) {
   if (!renderer || !res)
     return NULL;
 
   /* Have we already wrapped this wl_buffer? */
   struct wl_listener *listener =
-      wl_resource_get_destroy_listener(res, _buffer_destroyed);
+      wl_resource_get_destroy_listener(res, _buffer_destroy_notify);
 
   if (listener) {
     struct vt_buffer_t *buf = wl_container_of(listener, buf, destroy);
@@ -99,56 +128,34 @@ struct vt_buffer_t *vt_buffer_from_resource(struct vt_renderer_t *renderer,
   return _buffer_create_from_resource(renderer, res);
 }
 
-void vt_buffer_destroy(struct vt_buffer_t *buf) {
-  if (!buf || !buf->renderer || !buf->renderer->comp)
-    return;
-
-  struct vt_renderer_t *r = buf->renderer;
-
-  VT_TRACE(r->comp->log, "Dropping buffer %p", buf);
-
-  if (r && r->impl.destroy_buffer_texture)
-    r->impl.destroy_buffer_texture(r, buf);
-
-  if (buf->res != NULL)
-    return;
-
-  VT_TRACE(r->comp->log, "Deallocating buffer resource wrapper %p...", buf);
-
-  if (buf->destroy_linked) {
-    wl_list_remove(&buf->destroy.link);
-    wl_list_init(&buf->destroy.link);
-    buf->destroy_linked = false;
-  }
-
-  if (r && r->comp)
-    VT_TRACE(r->comp->log, "Deallocated buffer resource wrapper %p", buf);
-
-  free(buf);
-}
-
 struct vt_buffer_t *vt_buffer_ref(struct vt_buffer_t *buf) {
-  if (buf)
-    buf->refcount++;
+  if (!buf)
+    return NULL;
+
+  buf->refcount++;
+
+  VT_TRACE(buf->renderer->comp->log, "Referenced buffer: buf=%p refs=%u", buf,
+           buf->refcount);
 
   return buf;
 }
 
-void
-vt_buffer_unref(struct vt_buffer_t **buf_ptr)
-{
-    if (!buf_ptr || !*buf_ptr)
-        return;
+void vt_buffer_unref(struct vt_buffer_t **buf_ptr) {
+  if (!buf_ptr || !*buf_ptr)
+    return;
 
-    struct vt_buffer_t *buf = *buf_ptr;
-    *buf_ptr = NULL;
+  struct vt_buffer_t *buf = *buf_ptr;
+  *buf_ptr = NULL;
 
-    assert(buf->refcount > 0);
+  assert(buf->refcount > 0);
 
-    if (--buf->refcount != 0)
-        return;
+  VT_TRACE(buf->renderer->comp->log, "Unreferenced buffer: buf=%p refs=%u", buf,
+           buf->refcount);
 
-    vt_buffer_destroy(buf);
+  if (--buf->refcount != 0)
+    return;
+
+  _buffer_destroy(buf);
 }
 
 void vt_buffer_start_use(struct vt_buffer_t *buf) {
@@ -177,6 +184,7 @@ void vt_buffer_end_use(struct vt_buffer_t *buf) {
   if (buf->uses != 0)
     return;
 
+  /* Send wl_buffer.release to associated resource once no uses remain */
   if (buf->res) {
     wl_buffer_send_release(buf->res);
 
@@ -187,8 +195,14 @@ void vt_buffer_end_use(struct vt_buffer_t *buf) {
 
 struct vt_buffer_release_t *
 vt_buffer_release_ref(struct vt_buffer_release_t *release) {
-  if (release)
-    release->refcount++;
+  if (!release)
+    return NULL;
+
+  release->refcount++;
+
+  VT_TRACE(release->renderer->comp->log,
+           "Referenced buffer release: release=%p refs=%u", release,
+           release->refcount);
 
   return release;
 }
@@ -202,6 +216,10 @@ void vt_buffer_release_unref(struct vt_buffer_release_t **release_ptr) {
 
   assert(release->refcount > 0);
 
+  VT_TRACE(release->renderer->comp->log,
+           "Unreferenced buffer release: release=%p refs=%u", release,
+           release->refcount);
+
   if (--release->refcount != 0)
     return;
 
@@ -209,43 +227,50 @@ void vt_buffer_release_unref(struct vt_buffer_release_t **release_ptr) {
 }
 
 struct vt_buffer_use_t *vt_buffer_use_ref(struct vt_buffer_use_t *use) {
-  if (use)
-    use->refcount++;
+  if (!use)
+    return NULL;
+
+  use->refcount++;
+
+  VT_TRACE(use->renderer->comp->log, "Referenced buffer use: use=%p refs=%u",
+           use, use->refcount);
 
   return use;
 }
 
 static void _buffer_use_destroy(struct vt_buffer_use_t *use) {
-  if (use->buf) {
-    VT_TRACE(use->buf->renderer->comp->log,
-             "USE DESTROY: use=%p release=%p explicit=%p res=%p fence=%d", use,
-             use->release, use->release ? use->release->explicit : NULL,
-             use->release && use->release->explicit
-                 ? use->release->explicit->res
-                 : NULL,
-             use->release_fence_fd);
-  }
-  if (use->release) {
-    struct vt_buffer_release_t *release = use->release;
-    if (release->explicit && release->explicit->res) {
-      struct wl_resource *res = release->explicit->res;
+  if (!use)
+    return;
 
-      if (use->release_fence_fd >= 0) {
-        zwp_linux_buffer_release_v1_send_fenced_release(res,
-                                                        use->release_fence_fd);
-      } else {
-        zwp_linux_buffer_release_v1_send_immediate_release(res);
-      }
+  VT_TRACE(use->renderer->comp->log,
+           "Buffer use destroy: use=%p release=%p explicit=%p res=%p fence=%d",
+           use, use->release, use->release ? use->release->explicit : NULL,
+           use->release && use->release->explicit ? use->release->explicit->res
+                                                  : NULL,
+           use->release_fence_fd);
 
-      wl_resource_destroy(res);
+  struct vt_buffer_release_t *release = use->release;
+  if (release && release->explicit && release->explicit->res) {
+    struct wl_resource *res = release->explicit->res;
+
+    if (use->release_fence_fd >= 0) {
+      zwp_linux_buffer_release_v1_send_fenced_release(res,
+                                                      use->release_fence_fd);
+    } else {
+      zwp_linux_buffer_release_v1_send_immediate_release(res);
     }
+
+    wl_resource_destroy(res);
   }
 
   if (use->release_fence_fd >= 0) {
     close(use->release_fence_fd);
+    use->release_fence_fd = -1;
   }
+
   if (use->acquire_fence_fd >= 0) {
     close(use->acquire_fence_fd);
+    use->acquire_fence_fd = -1;
   }
 
   if (use->buf)
@@ -265,6 +290,8 @@ void vt_buffer_use_unref(struct vt_buffer_use_t **use) {
 
   *use = NULL;
 
+  assert(use_data->refcount > 0);
+
   if (--use_data->refcount != 0) {
     return;
   }
@@ -272,16 +299,17 @@ void vt_buffer_use_unref(struct vt_buffer_use_t **use) {
   _buffer_use_destroy(use_data);
 }
 
-struct vt_buffer_use_t *
-vt_buffer_use_create_take(struct vt_buffer_t         **buf,
-                          struct vt_buffer_release_t **release,
-                          int                         *acquire_fence_fd) {
-  if (!buf || !*buf)
+struct vt_buffer_use_t *vt_buffer_use_create_take(
+    struct vt_renderer_t *renderer, struct vt_buffer_t **buf,
+    struct vt_buffer_release_t **release, int *acquire_fence_fd) {
+  if (!buf || !*buf || !renderer || !renderer->comp)
     return NULL;
 
   struct vt_buffer_use_t *use = calloc(1, sizeof(*use));
   if (!use)
     return NULL;
+
+  use->renderer = renderer;
 
   use->refcount = 1;
 
@@ -303,13 +331,11 @@ vt_buffer_use_create_take(struct vt_buffer_t         **buf,
 
   use->release_fence_fd = -1;
 
-  if (use->buf) {
-    struct vt_compositor_t *comp = use->buf->renderer->comp;
-    VT_TRACE(comp->log,
-             "USE CREATE: use=%p taking buf=%p release=%p explicit release=%p",
-             use, use->buf, use->release,
-             use->release ? use->release->explicit : NULL);
-  }
+  VT_TRACE(
+      use->renderer->comp->log,
+      "Buffer use create: use=%p taking buf=%p release=%p explicit release=%p",
+      use, use->buf, use->release,
+      use->release ? use->release->explicit : NULL);
 
   return use;
 }

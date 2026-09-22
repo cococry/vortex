@@ -40,24 +40,23 @@ vt_content_update_create(struct vt_surface_t               *surf,
 }
 
 bool vt_content_update_finish_create(struct vt_content_update_t *cu) {
-  if (!cu)
+  if (!cu || !cu->surf)
     return false;
 
   if (cu->state.buffer_attached && cu->state.buf) {
     cu->buffer_use = vt_buffer_use_create_take(
-        &cu->state.buf, &cu->state.buffer_release, &cu->acquire_fence_fd);
+        cu->surf->comp->renderer, &cu->state.buf, &cu->state.buffer_release,
+        &cu->acquire_fence_fd);
 
     if (!cu->buffer_use)
       return false;
   }
 
-  if (cu->surf) {
-    VT_TRACE(cu->surf->comp->log,
-             "Finished creating content update cu=%p for "
-             "surface=%p with "
-             "buffer use=%p",
-             cu, cu->surf, cu->buffer_use);
-  }
+  VT_TRACE(cu->surf->comp->log,
+           "Finished creating content update cu=%p for "
+           "surface=%p with "
+           "buffer use=%p",
+           cu, cu->surf, cu->buffer_use);
 
   return true;
 }

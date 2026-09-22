@@ -175,7 +175,7 @@ bool vt_surface_emit_content_update(struct vt_surface_t *surf);
 struct vt_content_update_t *vt_surface_last_scu(struct vt_surface_t *surf);
 
 struct vt_buffer_release_t *vt_surface_state_get_or_create_buffer_release(
-    struct vt_surface_state_pending_t *state);
+    struct vt_renderer_t *renderer, struct vt_surface_state_pending_t *state); 
 
 void vt_surface_frame_done(struct vt_surface_t *surf, uint32_t frame_time_msec);
 

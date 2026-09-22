@@ -254,7 +254,9 @@ void _linux_surface_sync_v1_get_release(struct wl_client   *client,
     return;
   }
 
-  if (!state->surf) {
+  struct vt_surface_t* surf = state->surf;
+
+  if (!surf) {
     VT_PARAM_CHECK_FAIL(_proto.comp);
     wl_resource_post_error(
         resource, ZWP_LINUX_SURFACE_SYNCHRONIZATION_V1_ERROR_NO_SURFACE,
@@ -263,10 +265,11 @@ void _linux_surface_sync_v1_get_release(struct wl_client   *client,
   }
 
   struct vt_buffer_release_t *release =
-      vt_surface_state_get_or_create_buffer_release(&state->surf->pending);
+      vt_surface_state_get_or_create_buffer_release(_proto.comp->renderer,
+                                                    &surf->pending);
 
   if (!release) {
-    VT_WL_OUT_OF_MEMORY(state->surf->comp, client);
+    VT_WL_OUT_OF_MEMORY(_proto.comp, client);
     return;
   }
 
@@ -282,7 +285,7 @@ void _linux_surface_sync_v1_get_release(struct wl_client   *client,
                          wl_resource_get_version(resource), id);
 
   if (!res) {
-    VT_WL_OUT_OF_MEMORY(state->surf->comp, client);
+    VT_WL_OUT_OF_MEMORY(_proto.comp, client);
     return;
   }
 
@@ -291,7 +294,7 @@ void _linux_surface_sync_v1_get_release(struct wl_client   *client,
 
   if (!explicit_release) {
     wl_resource_destroy(res);
-    VT_WL_OUT_OF_MEMORY(state->surf->comp, client);
+    VT_WL_OUT_OF_MEMORY(_proto.comp, client);
     return;
   }
 
@@ -302,10 +305,10 @@ void _linux_surface_sync_v1_get_release(struct wl_client   *client,
   wl_resource_set_implementation(res, NULL, explicit_release,
                                  _handle_explict_release_destroy);
 
-  VT_TRACE(state->surf->comp->log,
+  VT_TRACE(_proto.comp->log,
            "get_release: Pending release=%p explicit=%p res=%p",
-           &state->surf->pending.buffer_release,
-           state->surf->pending.buffer_release->explicit, res);
+           &surf->pending.buffer_release,
+           surf->pending.buffer_release->explicit, res);
 }
 
 void _linux_surface_sync_handle_destroy(struct wl_resource *resource) {

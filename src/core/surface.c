@@ -425,8 +425,8 @@ struct vt_content_update_t *vt_surface_last_scu(struct vt_surface_t *surf) {
 }
 
 struct vt_buffer_release_t *vt_surface_state_get_or_create_buffer_release(
-    struct vt_surface_state_pending_t *state) {
-  if (!state)
+    struct vt_renderer_t *renderer, struct vt_surface_state_pending_t *state) {
+  if (!renderer || !state)
     return NULL;
 
   if (state->buffer_release)
@@ -436,12 +436,15 @@ struct vt_buffer_release_t *vt_surface_state_get_or_create_buffer_release(
 
   if (!release)
     return NULL;
+  
+  release->renderer = renderer;
 
   release->refcount = 1;
   release->fence_fd = -1;
   wl_list_init(&release->callbacks);
 
   state->buffer_release = release;
+
 
   return release;
 }
