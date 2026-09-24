@@ -20,6 +20,10 @@
  * SOFTWARE.
  */
 
+#include "src/core/buffer.h"
+#include "src/core/wl_buffer_release.h"
+#include <stdlib.h>
+#include <wayland-server.h>
 #define _GNU_SOURCE
 
 #include "linux_explicit_sync.h"
@@ -77,6 +81,11 @@ static const struct zwp_linux_surface_synchronization_v1_interface
         .destroy = _linux_surface_sync_v1_destroy,
         .set_acquire_fence = _linux_surface_sync_v1_set_acquire_fence,
         .get_release = _linux_surface_sync_v1_get_release,
+};
+
+static const struct vt_buffer_release_implementation_t buffer_release_impl = {
+  .destroy = NULL,
+  .finish = NULL,
 };
 
 struct vt_proto_linux_explicit_sync_v1_t {
@@ -263,6 +272,37 @@ void _linux_surface_sync_v1_set_acquire_fence(struct wl_client   *client,
            fd, state->surf);
 }
 
+static struct vt_wayland_buffer_release_t *_get_or_create_buffer_release(
+    struct vt_compositor_t* comp,
+    struct vt_surface_state_pending_t *state) {
+  if (!state || !comp) {
+    VT_PARAM_CHECK_FAIL_HEADLESS();
+    return NULL;
+  }
+
+  if (state->buffer_release) {
+    assert(state->buffer_release->impl == &buffer_release_impl);
+    struct vt_wayland_buffer_release_t *wl_release =
+        wl_container_of(state->buffer_release, wl_release, base);
+
+    return wl_release;
+  }
+
+  struct vt_wayland_buffer_release_t *wl_release =
+      calloc(1, sizeof(*wl_release));
+
+  if (!wl_release) {
+    VT_ERROR(comp->log, "Out of memory.");
+    return NULL;
+  }
+
+  vt_buffer_release_init_and_ref(&wl_release->base, comp, &buffer_release_impl);
+
+  state->buffer_release = &wl_release->base;
+
+  return wl_release;
+}
+
 void _linux_surface_sync_v1_get_release(struct wl_client   *client,
                                         struct wl_resource *resource,
                                         uint32_t            id) {
@@ -287,51 +327,43 @@ void _linux_surface_sync_v1_get_release(struct wl_client   *client,
     return;
   }
 
-  struct vt_buffer_release_t *release =
-      vt_surface_state_get_or_create_buffer_release(_proto.comp->renderer,
-                                                    &surf->pending);
+  struct vt_buffer_release_t* previous_release = surf->pending.buffer_release;
 
-  if (!release) {
+  struct vt_wayland_buffer_release_t *wl_release =
+      _get_or_create_buffer_release(surf->comp, &surf->pending);
+
+  if (!wl_release) {
     VT_WL_OUT_OF_MEMORY(_proto.comp, client);
     return;
   }
 
-  if (release->explicit) {
+  bool release_created = previous_release == NULL;
+
+  if (wl_release->explicit_release) {
     wl_resource_post_error(
         resource, ZWP_LINUX_SURFACE_SYNCHRONIZATION_V1_ERROR_DUPLICATE_RELEASE,
         "already has a buffer release");
     return;
   }
 
-  struct wl_resource *res =
+  struct wl_resource *explicit_release =
       wl_resource_create(client, &zwp_linux_buffer_release_v1_interface,
                          wl_resource_get_version(resource), id);
 
-  if (!res) {
-    VT_WL_OUT_OF_MEMORY(_proto.comp, client);
-    return;
-  }
-
-  struct vt_linux_explicit_sync_v1_buffer_release_t *explicit_release =
-      calloc(1, sizeof(*explicit_release));
-
   if (!explicit_release) {
-    wl_resource_destroy(res);
+    /* Rollback */
+    if (release_created) {
+      vt_buffer_release_unref(&surf->pending.buffer_release);
+    }
+
     VT_WL_OUT_OF_MEMORY(_proto.comp, client);
     return;
   }
 
-  explicit_release->release = release;
-  explicit_release->res = res;
-  release->explicit = explicit_release;
+  wl_release->explicit_release = explicit_release;
 
-  wl_resource_set_implementation(res, NULL, explicit_release,
+  wl_resource_set_implementation(explicit_release, NULL, wl_release,
                                  _handle_explict_release_destroy);
-
-  VT_TRACE(_proto.comp->log,
-           "get_release: Pending release=%p explicit=%p res=%p",
-           &surf->pending.buffer_release,
-           surf->pending.buffer_release->explicit, res);
 }
 
 void _linux_surface_sync_handle_destroy(struct wl_resource *resource) {
@@ -348,19 +380,16 @@ void _linux_surface_sync_handle_destroy(struct wl_resource *resource) {
 }
 
 void _handle_explict_release_destroy(struct wl_resource *resource) {
-  struct vt_linux_explicit_sync_v1_buffer_release_t *explicit =
+  struct vt_wayland_buffer_release_t*wl_release =
       resource ? wl_resource_get_user_data(resource) : NULL;
 
-  if (!explicit) {
+  if (!wl_release) {
     return;
   }
 
-  if (explicit->release) {
-    explicit->release->explicit = NULL;
-    explicit->release = NULL;
-  }
+  wl_release->explicit_release = NULL;
 
-  free(explicit);
+  free(wl_release);
 }
 
 /* ===================================================

@@ -24,6 +24,10 @@
 
 #include "src/core/surface.h"
 
+struct vt_wayland_buffer_attachment_t {
+  struct wl_resource *res;
+};
+
 bool vt_proto_wl_surface_init(struct vt_surface_t *surf,
                               struct wl_client *client, uint32_t id,
                               uint32_t version);

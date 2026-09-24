@@ -125,11 +125,13 @@
 #define VT_PARAM_CHECK_FAIL(comp)                                              \
   do {                                                                         \
     VT_ERROR((comp)->log, "Did not pass parameter check.");                    \
+    assert(false);                                                             \
   } while (0);
 
 #define VT_PARAM_CHECK_FAIL_HEADLESS()                                         \
   do {                                                                         \
     VT_ERROR_HEADLESS("Did not pass parameter check.");                        \
+    assert(false);                                                             \
   } while (0);
 
 #define VT_WL_OUT_OF_MEMORY(comp, client)                                      \

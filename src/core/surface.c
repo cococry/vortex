@@ -456,29 +456,12 @@ struct vt_content_update_t *vt_surface_last_scu(struct vt_surface_t *surf) {
   return NULL;
 }
 
-struct vt_buffer_release_t *vt_surface_state_get_or_create_buffer_release(
-    struct vt_renderer_t *renderer, struct vt_surface_state_pending_t *state) {
-  if (!renderer || !state)
-    return NULL;
+void vt_surface_set_pending_buffer_release(
+    struct vt_surface_t *surf, struct vt_buffer_release_t *release) {
+  if (!surf)
+    return;
 
-  if (state->buffer_release)
-    return state->buffer_release;
-
-  struct vt_buffer_release_t *release = calloc(1, sizeof(*release));
-
-  if (!release)
-    return NULL;
-  
-  release->renderer = renderer;
-
-  release->refcount = 1;
-  release->fence_fd = -1;
-  wl_list_init(&release->callbacks);
-
-  state->buffer_release = release;
-
-
-  return release;
+  surf->pending.buffer_release = release;
 }
 
 void vt_surface_frame_done(struct vt_surface_t *surf,
@@ -512,8 +495,8 @@ bool vt_surface_compute_final_size(const struct vt_surface_t *surf,
     return true;
   }
 
-  uint32_t buffer_w = buf->tex.width;
-  uint32_t buffer_h = buf->tex.height;
+  uint32_t buffer_w = buf->width;
+  uint32_t buffer_h = buf->height;
 
   switch (buffer_transform) {
   case WL_OUTPUT_TRANSFORM_90:

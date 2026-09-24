@@ -23,6 +23,7 @@
 #include "wl_surface.h"
 #include "pixman.h"
 #include "src/core/buffer.h"
+#include "src/core/buffer_orchestrator.h"
 #include "src/core/content_update.h"
 #include "src/core/scene.h"
 #include "src/core/surface.h"
@@ -137,7 +138,7 @@ void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
 
   if (buffer) {
     /* Lazily allocate vt_buffer_t wrapper */
-    new_buf = vt_buffer_get_or_create_from_resource(surf->comp->renderer, buffer);
+    new_buf = vt_buffer_get_or_create_from_wayland_resource(buffer);
 
     if (!new_buf) {
       VT_WL_OUT_OF_MEMORY(surf->comp, client);
@@ -145,11 +146,8 @@ void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
     }
 
     new_buf = vt_buffer_ref(new_buf);
-
-    VT_TRACE(surf->comp->log,
-             "attach: res=%p id=%u wrapper=%p refs=%u active_uses=%u", resource,
-             wl_resource_get_id(resource), new_buf, new_buf->refcount,
-             new_buf->uses);
+    VT_TRACE(surf->comp->log, "attach: buffer_res=%p id=%u wrapper=%p refs=%u",
+             buffer, wl_resource_get_id(buffer), new_buf, new_buf->refcount);
   }
 
   /* Modify pending state after everything succeeded */
@@ -160,7 +158,8 @@ void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
   }
 
   /* Replace any previously pending buffer */
-  vt_buffer_unref(&surf->pending.buf);
+  if (surf->pending.buf)
+    vt_buffer_unref(&surf->pending.buf);
 
   surf->pending.buf = new_buf;
   surf->pending.buffer_attached = true;

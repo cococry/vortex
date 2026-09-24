@@ -23,83 +23,111 @@
 #pragma once
 
 #include <wayland-server-core.h>
-#include <runara/runara.h>
 
 #include "core_types.h"
-#include "pixman.h"
-#include "../render/renderer.h"
+#include "../render/dmabuf_attr.h"
+#include "../render/shm.h"
 
+struct vt_buffer_t;
 
-struct vt_buffer_t {
-  struct wl_resource *res;
-  struct wl_listener  destroy;
-  bool                destroy_linked;
-
-  RnTexture tex;
-  void     *render_tex_handle;
-
-  uint32_t refcount;
-  uint32_t uses;
-
-  struct vt_renderer_t* renderer;
+struct vt_buffer_implementation_t {
+  bool (*get_dmabuf)(struct vt_buffer_t *buf, struct vt_dmabuf_attr_t *o_attr);
+  bool (*get_shm)(struct wlr_buffer *buffer, struct vt_shm_attr_t *attr);
 };
 
-struct vt_linux_explicit_sync_v1_buffer_release_t {
-  struct wl_resource* res;
-  struct vt_buffer_release_t* release;
+struct vt_buffer_release_implementation_t {
+  void (*finish)(struct vt_buffer_release_t *release, int release_fence_fd);
+  void (*destroy)(struct vt_buffer_release_t *release);
+};
+
+struct vt_buffer_attachment_implementation_t {
+  void (*destroy)(struct vt_buffer_t* buf, void *owner, void *data);
+};
+
+struct vt_buffer_attachment_t {
+  struct vt_buffer_t *buf;
+  const void *owner;
+  void *data;
+
+  const struct vt_buffer_attachment_implementation_t *impl;
+
+  struct wl_list link_buf;
+  struct wl_list link_owner;
+};
+
+struct vt_buffer_t {
+  struct vt_compositor_t* comp;
+
+  uint32_t refcount;
+
+  uint32_t width, height;
+
+  const struct vt_buffer_implementation_t *impl;
+
+  struct wl_list attachments;
 };
 
 struct vt_buffer_release_t {
+  struct vt_compositor_t *comp;
+
   uint32_t refcount;
+  bool finished;
 
-  struct wl_list callbacks;
-
-  struct vt_linux_explicit_sync_v1_buffer_release_t *explicit;
-
-  int fence_fd;
-
-  struct vt_renderer_t* renderer;
+  const struct vt_buffer_release_implementation_t* impl;
 };
 
 struct vt_buffer_use_t {
+  struct vt_compositor_t *comp;
+
   uint32_t refcount;
 
   struct vt_buffer_t *buf;
+  const void         *owner;
 
   struct vt_buffer_release_t *release;
 
   int acquire_fence_fd;
-
-  bool release_sent;
-
   int release_fence_fd;
-  
-  struct vt_renderer_t* renderer;
 };
 
-bool vt_buffer_import(struct vt_buffer_t *buf, const pixman_region32_t *damage);
+struct vt_buffer_t *vt_buffer_create(struct vt_compositor_t *comp,
+                                     uint32_t width, uint32_t height,
+                                     const struct vt_buffer_implementation_t *impl);
 
-struct vt_buffer_t* vt_buffer_get_or_create_from_resource(struct vt_renderer_t* renderer, struct wl_resource* res);
-
-struct vt_buffer_t* vt_buffer_ref(struct vt_buffer_t *buf);
+struct vt_buffer_t *vt_buffer_ref(struct vt_buffer_t *buf);
 
 void vt_buffer_unref(struct vt_buffer_t **buf);
 
-void vt_buffer_start_use(struct vt_buffer_t *buf);
+struct vt_buffer_attachment_t *
+vt_buffer_add_attachment(struct vt_buffer_t *buf, const void *owner, void *data,
+                         const struct vt_buffer_attachment_implementation_t *impl);
 
-void vt_buffer_end_use(struct vt_buffer_t *buf);
+void vt_buffer_remove_attachment(struct vt_buffer_attachment_t *attachment);
 
-struct vt_buffer_release_t *vt_buffer_release_ref(struct vt_buffer_release_t *release);
+struct vt_buffer_attachment_t *
+vt_buffer_find_attachment(struct vt_buffer_t *buf, const void *owner,
+                          const struct vt_buffer_attachment_implementation_t *impl);
+
+void vt_buffer_release_init_and_ref(
+    struct vt_buffer_release_t *release, struct vt_compositor_t *comp,
+    struct vt_buffer_release_implementation_t *impl);
+
+struct vt_buffer_release_t *
+vt_buffer_release_ref(struct vt_buffer_release_t *release);
 
 void vt_buffer_release_unref(struct vt_buffer_release_t **release);
+
+void vt_buffer_release_finish(struct vt_buffer_release_t *release,
+                              int                         release_fence_fd);
 
 struct vt_buffer_use_t *vt_buffer_use_ref(struct vt_buffer_use_t *use);
 
 void vt_buffer_use_unref(struct vt_buffer_use_t **use);
 
 struct vt_buffer_use_t *vt_buffer_use_create_take(
-    struct vt_renderer_t *renderer, struct vt_buffer_t **buf,
+    struct vt_compositor_t *comp, const void* owner, struct vt_buffer_t **buf,
     struct vt_buffer_release_t **release, int *acquire_fence_fd);
 
 bool vt_buffer_use_set_release_fence_fd(struct vt_buffer_use_t *use,
                                         int                     release_fd);
+

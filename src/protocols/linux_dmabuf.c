@@ -34,6 +34,7 @@
 #include <unistd.h>
 #include <wayland-server-core.h>
 #include <wayland-util.h>
+#include "src/core/buffer.h"
 
 #include "../core/util.h"
 
@@ -87,6 +88,7 @@ struct vt_linux_dmabuf_v1_params_t {
   struct vt_dmabuf_attr_t attr;
   bool                    has_mod;
 };
+
 
 static void
 _linux_dmabuf_surface_destroy_addon(struct vt_surface_addon_t *addon);
@@ -174,6 +176,12 @@ static void _linux_dmabuf_send_feedback(
 
 static void _linux_dmabuf_legacy_send_default_formats(struct wl_resource *res);
 
+static bool _dmabuf_buffer_get_dmabuf(struct vt_buffer_t      *buf,
+                                      struct vt_dmabuf_attr_t *attr);
+
+static void _dmabuf_buffer_attachment_destroy(struct vt_buffer_t *buf,
+                                              void *owner, void *data);
+
 static struct vt_proto_linux_dmabuf_v1_t *_proto;
 
 static const struct zwp_linux_dmabuf_v1_interface _proto_dmabuf_impl = {
@@ -216,6 +224,13 @@ static const struct vt_surface_addon_impl_t dmabuf_surface_addon_impl = {
     .name = "linux-dmabuf-v1",
     .destroy = _linux_dmabuf_surface_destroy_addon,
 };
+
+struct vt_buffer_implementation_t dmabuf_buffer_impl = {
+  .get_dmabuf = _dmabuf_buffer_get_dmabuf 
+};
+
+struct vt_buffer_attachment_implementation_t dmabuf_buffer_attachment_impl = {
+    .destroy = _dmabuf_buffer_attachment_destroy};
 
 // ===================================================
 // ================ GLOBAL PROTOCOL ==================
@@ -760,14 +775,12 @@ void _linux_dmabuf_v1_buffer_handle_res_destroy(struct wl_resource *resource) {
     return;
   }
 
-  for (size_t i = 0; i < VT_DMABUF_PLANES_CAP; i++) {
-    if (buf->attr.fds[i] >= 0)
-      close(buf->attr.fds[i]);
-  }
-
   buf->res = NULL;
   wl_resource_set_user_data(resource, NULL);
-  free(buf);
+
+  if (buf->buf) {
+    vt_buffer_unref(&buf->buf);
+  }
 }
 
 void _linux_dmabuf_v1_surf_feedback_handle_res_destroy(
@@ -1352,6 +1365,53 @@ void _linux_dmabuf_legacy_send_default_formats(struct wl_resource *res) {
   }
 }
 
+static bool _dmabuf_buffer_get_dmabuf(struct vt_buffer_t      *buf,
+                                      struct vt_dmabuf_attr_t *attr) {
+  if (!buf || !attr || !buf->comp) {
+    VT_PARAM_CHECK_FAIL(_proto->comp);
+    return false;
+  }
+
+  struct vt_buffer_attachment_t *attachment =
+      vt_buffer_find_attachment(buf, NULL, &dmabuf_buffer_impl);
+
+  if (!attachment) {
+    VT_ERROR(buf->comp->log,
+             "Requested dmabuf backing of buffer %p but cannot find dmabuf "
+             "attachment",
+             buf)
+    return false;
+  }
+
+  struct vt_linux_dmabuf_v1_buffer_t *dmabuf = attachment->data;
+  if(!dmabuf) {
+    VT_PARAM_CHECK_FAIL(_proto->comp);
+    return false;
+  }
+
+  *attr = dmabuf->attr;
+
+  return true;
+}
+
+static void _dmabuf_buffer_attachment_destroy(struct vt_buffer_t *buf,
+                                              void *owner, void *data) {
+  (void)buf;
+  (void)owner;
+  if(!data) {
+    VT_PARAM_CHECK_FAIL(_proto->comp);
+    return;
+  }
+
+  struct vt_linux_dmabuf_v1_buffer_t *dmabuf = data;
+  for (size_t i = 0; i < VT_DMABUF_PLANES_CAP; i++) {
+    if (dmabuf->attr.fds[i] >= 0)
+      close(dmabuf->attr.fds[i]);
+  }
+
+  free(dmabuf);
+}
+
 // ===================================================
 // =================== PUBLIC API ====================
 // ===================================================
@@ -1477,4 +1537,31 @@ bool vt_proto_linux_dmabuf_v1_set_surface_feedback(struct vt_surface_t *surf) {
   }
 
   return true;
+}
+
+struct vt_buffer_t *
+vt_proto_linux_dmabuf_v1_get_buffer(struct wl_resource *res) {
+  struct vt_linux_dmabuf_v1_buffer_t *dmabuf =
+      vt_proto_linux_dmabuf_v1_from_buffer_res(res);
+
+  if (!dmabuf)
+    return NULL;
+
+  if (!dmabuf->buf) {
+    dmabuf->buf = vt_buffer_create(_proto->comp, dmabuf->w, dmabuf->h,
+                                   &dmabuf_buffer_impl);
+
+    if (!dmabuf->buf)
+      return NULL;
+
+    struct vt_buffer_attachment_t *attachment = vt_buffer_add_attachment(
+        dmabuf->buf, dmabuf, dmabuf, &dmabuf_buffer_attachment_impl);
+
+    if (!attachment) {
+      vt_buffer_unref(&dmabuf->buf);
+      return NULL;
+    }
+  }
+
+  return dmabuf->buf;
 }

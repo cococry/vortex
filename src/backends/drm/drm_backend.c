@@ -60,102 +60,11 @@
 #include "render/dmabuf.h"
 
 #include "drm_backend.h"
+#include "drm_types.h"
 
 #include <linux/input-event-codes.h>
 
 #define _SUBSYS_NAME "DRM"
-
-struct drm_backend_state_t {
-  int                drm_fd;
-  drmEventContext    evctx;
-  drmModeRes        *res;
-  struct gbm_device *gbm_dev;
-
-  struct wl_list outputs;
-
-  struct vt_compositor_t *comp;
-  struct gbm_device      *native_handle;
-
-  struct wl_list link;
-
-  struct vt_backend_t *root_backend;
-
-  struct vt_device_t *dev;
-
-  struct wl_event_source *event_source;
-
-  bool have_atomic_modeset;
-};
-
-struct drm_backend_master_state_t {
-  struct wl_list          backends;
-  uint32_t                x_ptr;
-  int32_t                 vt_fd;
-  struct vt_compositor_t *comp;
-
-  struct wl_listener session_terminate_listener, seat_disable_listener,
-      seat_enable_listener;
-
-  struct drm_backend_state_t *main_drm;
-  uint32_t                    n_drm;
-};
-
-struct drm_connector_props {
-  uint32_t crtc_id;
-};
-
-struct drm_crtc_props {
-  uint32_t mode_id;
-  uint32_t active;
-};
-
-struct drm_plane_props {
-  uint32_t fb_id;
-  uint32_t crtc_id;
-
-  uint32_t src_x;
-  uint32_t src_y;
-  uint32_t src_w;
-  uint32_t src_h;
-
-  uint32_t crtc_x;
-  uint32_t crtc_y;
-  uint32_t crtc_w;
-  uint32_t crtc_h;
-
-  uint32_t type;
-};
-
-struct drm_output_state_t {
-  struct gbm_bo *current_bo;
-  struct gbm_bo *pending_bo;
-  struct gbm_bo *prev_bo;
-  struct gbm_bo *older_bo;
-  uint32_t       older_fb;
-  uint32_t       current_fb;
-  uint32_t       pending_fb;
-  uint32_t       prev_fb;
-
-  struct drm_backend_state_t *drm_backend;
-
-  bool needs_modeset;
-  bool flip_inflight;
-  bool modeset_bootstrapped;
-  bool renderable_setup;
-
-  struct gbm_surface *gbm_surf;
-
-  drmModeModeInfo mode;
-  uint32_t        conn_id;
-  uint32_t        crtc_id;
-  uint32_t        primary_plane_id;
-
-  struct drm_connector_props conn_props;
-  struct drm_crtc_props      crtc_props;
-  struct drm_plane_props     primary_props;
-
-  uint32_t mode_blob_id;
-};
 
 static void _drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec,
                                    unsigned int usec, void *data);

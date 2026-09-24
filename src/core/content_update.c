@@ -339,7 +339,7 @@ bool vt_content_update_finish_create(struct vt_content_update_t *cu) {
     /* Transfers ownership of a potentially pending acquire_fence_fd to the
      * buffer use */
     cu->buffer_use = vt_buffer_use_create_take(
-        cu->surf->comp->renderer, &cu->state.buf, &cu->state.buffer_release,
+        cu->surf->comp, &cu->state.buf, &cu->state.buffer_release,
         &cu->acquire_fence_fd);
 
     if (!cu->buffer_use)
