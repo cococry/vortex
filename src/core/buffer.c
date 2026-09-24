@@ -23,6 +23,7 @@
 #include "buffer.h"
 #include "src/core/core_types.h"
 #include "src/core/util.h"
+#include "src/render/dmabuf_attr.h"
 #include "src/render/renderer.h"
 #include <errno.h>
 #include <string.h>
@@ -36,6 +37,26 @@
 #define _SUBSYS_NAME "BUFFERS"
 
 static void _buffer_destroy(struct vt_buffer_t *buf);
+static void _buffer_remove_attachment(struct vt_buffer_attachment_t *attachment);
+
+
+static void _buffer_remove_attachment(struct vt_buffer_attachment_t *attachment) {
+  if (!attachment || !attachment->buf) {
+    VT_PARAM_CHECK_FAIL_HEADLESS();
+    return;
+  }
+
+  struct vt_buffer_t *buf = attachment->buf;
+
+  wl_list_remove(&attachment->link_buf);
+  wl_list_remove(&attachment->link_owner);
+
+  if (attachment->impl && attachment->impl->destroy) {
+    attachment->impl->destroy(buf, attachment->owner, attachment->data);
+  }
+
+  free(attachment);
+}
 
 static void _buffer_destroy(struct vt_buffer_t *buf) {
   if (!buf || !buf->impl || !buf->comp) {
@@ -48,7 +69,7 @@ static void _buffer_destroy(struct vt_buffer_t *buf) {
   struct vt_buffer_attachment_t *attachment, *tmp;
 
   wl_list_for_each_safe(attachment, tmp, &buf->attachments, link_buf) {
-    vt_buffer_remove_attachment(attachment);
+    _buffer_remove_attachment(attachment);
   }
 
   VT_TRACE(buf->comp->log, "Destroyed buffer %p", buf);
@@ -117,6 +138,13 @@ void vt_buffer_unref(struct vt_buffer_t **buf_ptr) {
   _buffer_destroy(buf);
 }
 
+struct vt_dmabuf_attr_t *vt_buffer_get_dmabuf(struct vt_buffer_t *buf) {
+  if (!buf || !buf->impl || !buf->impl->get_dmabuf)
+    return NULL;
+
+  return buf->impl->get_dmabuf(buf);
+}
+
 struct vt_buffer_attachment_t *
 vt_buffer_add_attachment(struct vt_buffer_t *buf, const void *owner, void *data,
                          const struct vt_buffer_attachment_implementation_t *impl) {
@@ -144,24 +172,6 @@ vt_buffer_add_attachment(struct vt_buffer_t *buf, const void *owner, void *data,
   wl_list_insert(&buf->attachments, &attachment->link_buf);
 
   return attachment;
-}
-
-void vt_buffer_remove_attachment(struct vt_buffer_attachment_t *attachment) {
-  if (!attachment || !attachment->buf) {
-    VT_PARAM_CHECK_FAIL_HEADLESS();
-    return;
-  }
-
-  struct vt_buffer_t *buf = attachment->buf;
-
-  wl_list_remove(&attachment->link_buf);
-  wl_list_remove(&attachment->link_owner);
-
-  if (attachment->impl && attachment->impl->destroy) {
-    attachment->impl->destroy(buf, attachment->owner, attachment->data);
-  }
-
-  free(attachment);
 }
 
 struct vt_buffer_attachment_t *
@@ -250,6 +260,16 @@ void vt_buffer_release_finish(struct vt_buffer_release_t *release,
 
   if (release->impl->finish)
     release->impl->finish(release, release_fence_fd);
+}
+
+bool vt_buffer_release_needs_fence(struct vt_buffer_release_t *release) {
+  if (!release || !release->impl)
+    return false;
+
+  if (!release->impl->needs_release_fence)
+    return false;
+
+  return release->impl->needs_release_fence(release);
 }
 
 struct vt_buffer_use_t *vt_buffer_use_ref(struct vt_buffer_use_t *use) {

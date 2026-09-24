@@ -24,6 +24,7 @@
 #include "src/core/core_types.h"
 #include "src/core/surface.h"
 #include "src/core/util.h"
+#include "src/render/renderer.h"
 #include <wayland-util.h>
 
 #include <stdlib.h>
@@ -68,8 +69,9 @@ static void _content_update_dependency_destroy(
 }
 
 static bool _content_update_prepare_buffer(struct vt_content_update_t *cu) {
-  if (!cu || !cu->surf)
-    return false;
+  assert(cu && cu->surf && cu->surf->comp && cu->surf->comp->renderer);
+
+  struct vt_renderer_t *r = cu->surf->comp->renderer;
 
   if (!cu->state.buffer_attached)
     return true;
@@ -78,9 +80,11 @@ static bool _content_update_prepare_buffer(struct vt_content_update_t *cu) {
   if (!cu->buffer_use)
     return true;
 
-  if (!vt_buffer_import(cu->buffer_use->buf, &cu->state.damage_surface)) {
+  assert(cu->buffer_use->buf);
+
+  if (r->impl.import_buffer &&
+      !r->impl.import_buffer(r, cu->buffer_use->buf, &cu->state.damage_surface))
     return false;
-  }
 
   return true;
 }
@@ -332,14 +336,15 @@ vt_content_update_create(struct vt_surface_t               *surf,
 }
 
 bool vt_content_update_finish_create(struct vt_content_update_t *cu) {
-  if (!cu || !cu->surf)
-    return false;
+  assert(cu && cu->surf && cu->surf->comp && cu->surf->comp->renderer);
+
+  struct vt_renderer_t *r = cu->surf->comp->renderer;
 
   if (cu->state.buffer_attached && cu->state.buf) {
     /* Transfers ownership of a potentially pending acquire_fence_fd to the
      * buffer use */
     cu->buffer_use = vt_buffer_use_create_take(
-        cu->surf->comp, &cu->state.buf, &cu->state.buffer_release,
+        cu->surf->comp, r, &cu->state.buf, &cu->state.buffer_release,
         &cu->acquire_fence_fd);
 
     if (!cu->buffer_use)
@@ -379,7 +384,8 @@ void vt_content_update_destroy(struct vt_content_update_t *cu) {
     cu->acquire_fence_fd = -1;
   }
 
-  vt_buffer_use_unref(&cu->buffer_use);
+  if (cu->buffer_use)
+    vt_buffer_use_unref(&cu->buffer_use);
 
   free(cu);
 }

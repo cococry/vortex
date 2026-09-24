@@ -52,8 +52,6 @@ bool vt_proto_linux_dmabuf_v1_init(
 struct vt_linux_dmabuf_v1_buffer_t *
 vt_proto_linux_dmabuf_v1_from_buffer_res(struct wl_resource *res);
 
-void vt_proto_linux_dmabuf_v1_surface_destroy(struct vt_surface_t *surf);
-
 bool vt_proto_linux_dmabuf_v1_set_surface_feedback(struct vt_surface_t *surf);
 struct vt_buffer_t *
 vt_proto_linux_dmabuf_v1_get_buffer(struct wl_resource *res);

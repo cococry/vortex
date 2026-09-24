@@ -176,8 +176,8 @@ static void _linux_dmabuf_send_feedback(
 
 static void _linux_dmabuf_legacy_send_default_formats(struct wl_resource *res);
 
-static bool _dmabuf_buffer_get_dmabuf(struct vt_buffer_t      *buf,
-                                      struct vt_dmabuf_attr_t *attr);
+static struct vt_dmabuf_attr_t* _dmabuf_buffer_get_dmabuf(struct vt_buffer_t      *buf);
+                                      
 
 static void _dmabuf_buffer_attachment_destroy(struct vt_buffer_t *buf,
                                               void *owner, void *data);
@@ -207,17 +207,35 @@ static const struct wl_buffer_interface _dmabuf_wl_buffer_impl = {
     .destroy = _linux_dmabuf_v1_buffer_destroy,
 };
 
-static void
-_linux_dmabuf_surface_destroy_addon(struct vt_surface_addon_t *addon) {
+  static void
+_linux_dmabuf_surface_destroy_addon(struct vt_surface_addon_t *addon)
+{
   struct vt_linux_dmabuf_v1_surface_state_t *state =
       wl_container_of(addon, state, addon);
 
-  vt_proto_linux_dmabuf_v1_surface_destroy(state->surf);
+  /* Detach feedback resources from our list. */
+  struct wl_resource *resource, *tmp;
+  wl_resource_for_each_safe(resource, tmp, &state->res_feedback) {
+    struct wl_list *link = wl_resource_get_link(resource);
+    wl_list_remove(link);
+    wl_list_init(link);
+  }
+
+  if (state->feedback) {
+    _linux_dmabuf_free_feedback(state->feedback);
+    state->feedback = NULL;
+  }
+
+  /* Remove from protocol-wide state list. */
+  wl_list_remove(&state->link);
+  wl_list_init(&state->link);
 
   if (state->surf) {
     state->surf->proto_state.linux_dmabuf_v1 = NULL;
     state->surf = NULL;
   }
+
+  free(state);
 }
 
 static const struct vt_surface_addon_impl_t dmabuf_surface_addon_impl = {
@@ -303,7 +321,7 @@ void _proto_linux_dmabuf_v1_destroy(struct vt_proto_linux_dmabuf_v1_t *dmabuf) {
   struct vt_linux_dmabuf_v1_surface_state_t *surface_tmp;
   wl_list_for_each_safe(surface, surface_tmp, &dmabuf->dmabuf_surface_states,
                         link) {
-    vt_proto_linux_dmabuf_v1_surface_destroy(surface->surf);
+    vt_surface_addon_destroy(&surface->addon);
   }
 
   _free_formats(&dmabuf->default_formats);
@@ -1365,15 +1383,14 @@ void _linux_dmabuf_legacy_send_default_formats(struct wl_resource *res) {
   }
 }
 
-static bool _dmabuf_buffer_get_dmabuf(struct vt_buffer_t      *buf,
-                                      struct vt_dmabuf_attr_t *attr) {
-  if (!buf || !attr || !buf->comp) {
+static struct vt_dmabuf_attr_t * _dmabuf_buffer_get_dmabuf(struct vt_buffer_t      *buf) {
+  if (!buf || !buf->comp) {
     VT_PARAM_CHECK_FAIL(_proto->comp);
     return false;
   }
 
   struct vt_buffer_attachment_t *attachment =
-      vt_buffer_find_attachment(buf, NULL, &dmabuf_buffer_impl);
+      vt_buffer_find_attachment(buf, NULL, &dmabuf_buffer_attachment_impl);
 
   if (!attachment) {
     VT_ERROR(buf->comp->log,
@@ -1389,9 +1406,7 @@ static bool _dmabuf_buffer_get_dmabuf(struct vt_buffer_t      *buf,
     return false;
   }
 
-  *attr = dmabuf->attr;
-
-  return true;
+  return &dmabuf->attr;
 }
 
 static void _dmabuf_buffer_attachment_destroy(struct vt_buffer_t *buf,
@@ -1479,46 +1494,6 @@ vt_proto_linux_dmabuf_v1_from_buffer_res(struct wl_resource *res) {
            "linux_dmabuf.from_buffer_res: resolved wl_buffer %p to %p.", res,
            buf);
   return buf;
-}
-
-void vt_proto_linux_dmabuf_v1_surface_destroy(struct vt_surface_t *surf) {
-  /* 1. Validate surface pointer */
-  if (!surf) {
-    VT_PARAM_CHECK_FAIL(_proto->comp);
-    return;
-  }
-
-  /* 2. Retrieve associated DMABUF surface */
-  struct vt_linux_dmabuf_v1_surface_state_t *dmabuf_surf =
-      _linux_dmabuf_surface_from_surf(surf);
-
-  if (!dmabuf_surf)
-    return;
-
-  VT_TRACE(_proto->comp->log,
-           "linux_dmabuf.surface_destroy: destroying surface.", dmabuf_surf);
-
-  /* 3. Unlink all feedback resources */
-  struct wl_resource *resource;
-  struct wl_resource *resource_tmp;
-  wl_resource_for_each_safe(resource, resource_tmp,
-                            &dmabuf_surf->res_feedback) {
-    struct wl_list *link = wl_resource_get_link(resource);
-    wl_list_remove(link);
-    wl_list_init(link);
-  }
-
-  /* 4. Free feedback data and unlink from protocol list */
-  _linux_dmabuf_free_feedback(dmabuf_surf->feedback);
-  wl_list_remove(&dmabuf_surf->link);
-
-  /* 5. Free allocated surface state */
-  free(dmabuf_surf);
-  surf->proto_state.linux_dmabuf_v1 = NULL;
-
-  VT_TRACE(_proto->comp->log,
-           "linux_dmabuf.surface_destroy: completed destruction of surface %p.",
-           surf);
 }
 
 bool vt_proto_linux_dmabuf_v1_set_surface_feedback(struct vt_surface_t *surf) {

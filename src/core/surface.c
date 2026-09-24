@@ -253,8 +253,10 @@ void vt_surface_pending_state_fini(struct vt_surface_state_pending_t *state) {
   if (!state)
     return;
 
-  vt_buffer_unref(&state->buf);
-  vt_buffer_release_unref(&state->buffer_release);
+  if (state->buf)
+    vt_buffer_unref(&state->buf);
+  if (state->buffer_release)
+    vt_buffer_release_unref(&state->buffer_release);
 
   struct vt_surface_frame_callback_t *frame_cb, *frame_tmp;
   wl_list_for_each_safe(frame_cb, frame_tmp, &state->frame_callbacks, link) {

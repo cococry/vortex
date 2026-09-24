@@ -21,18 +21,18 @@
  */
 
 #include "src/core/buffer.h"
-#include "src/core/wl_buffer_release.h"
+#include "src/core/buffer_orchestrator.h"
 #include <stdlib.h>
 #include <wayland-server.h>
 #define _GNU_SOURCE
 
 #include "linux_explicit_sync.h"
+#include "src/core/content_update.h"
 #include "src/core/core_types.h"
 #include "src/core/surface.h"
-#include "src/core/content_update.h"
+#include "src/core/surface_addon.h"
 #include "src/core/util.h"
 #include <sys/stat.h>
-#include "src/core/surface_addon.h"
 #include <wayland-server-core.h>
 
 #include <assert.h>
@@ -70,6 +70,14 @@ static void _handle_explict_release_destroy(struct wl_resource *resource);
 static void
 _linux_explicit_sync_destroy_addon(struct vt_surface_addon_t *addon);
 
+static bool
+_buffer_release_needs_release_fence(struct vt_buffer_release_t *base);
+
+static void _buffer_release_finish(struct vt_buffer_release_t *base,
+                                   int release_fence_fd);
+
+static void _buffer_release_destroy(struct vt_buffer_release_t *base);
+
 static const struct zwp_linux_explicit_synchronization_v1_interface
     _linux_explicit_sync_v1_impl = {
         .get_synchronization = _linux_explicit_sync_v1_get_synchronization,
@@ -84,18 +92,16 @@ static const struct zwp_linux_surface_synchronization_v1_interface
 };
 
 static const struct vt_buffer_release_implementation_t buffer_release_impl = {
-  .destroy = NULL,
-  .finish = NULL,
-};
+    .destroy = _buffer_release_destroy,
+    .finish = _buffer_release_finish,
+    .needs_release_fence = _buffer_release_needs_release_fence};
 
 struct vt_proto_linux_explicit_sync_v1_t {
   struct vt_compositor_t *comp;
 };
 
-static bool
-_linux_explicit_sync_addon_commit(struct vt_surface_t *surf,
-                                    struct vt_content_update_t *cu)
-{
+static bool _linux_explicit_sync_addon_commit(struct vt_surface_t        *surf,
+                                              struct vt_content_update_t *cu) {
   if (!surf || !cu)
     return false;
   struct vt_linux_explicit_sync_v1_surface_state_t *sync =
@@ -119,8 +125,7 @@ _linux_explicit_sync_addon_commit(struct vt_surface_t *surf,
 static const struct vt_surface_addon_impl_t explicit_sync_surface_addon_impl = {
     .name = "linux-explicit-synchronization-v1",
     .destroy = _linux_explicit_sync_destroy_addon,
-    .commit = _linux_explicit_sync_addon_commit
-};
+    .commit = _linux_explicit_sync_addon_commit};
 
 static struct vt_proto_linux_explicit_sync_v1_t _proto;
 
@@ -272,9 +277,9 @@ void _linux_surface_sync_v1_set_acquire_fence(struct wl_client   *client,
            fd, state->surf);
 }
 
-static struct vt_wayland_buffer_release_t *_get_or_create_buffer_release(
-    struct vt_compositor_t* comp,
-    struct vt_surface_state_pending_t *state) {
+static struct vt_wayland_buffer_release_t *
+_get_or_create_buffer_release(struct vt_compositor_t            *comp,
+                              struct vt_surface_state_pending_t *state) {
   if (!state || !comp) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return NULL;
@@ -317,7 +322,7 @@ void _linux_surface_sync_v1_get_release(struct wl_client   *client,
     return;
   }
 
-  struct vt_surface_t* surf = state->surf;
+  struct vt_surface_t *surf = state->surf;
 
   if (!surf) {
     VT_PARAM_CHECK_FAIL(_proto.comp);
@@ -327,7 +332,7 @@ void _linux_surface_sync_v1_get_release(struct wl_client   *client,
     return;
   }
 
-  struct vt_buffer_release_t* previous_release = surf->pending.buffer_release;
+  struct vt_buffer_release_t *previous_release = surf->pending.buffer_release;
 
   struct vt_wayland_buffer_release_t *wl_release =
       _get_or_create_buffer_release(surf->comp, &surf->pending);
@@ -379,17 +384,15 @@ void _linux_surface_sync_handle_destroy(struct wl_resource *resource) {
   vt_surface_addon_destroy(&state->addon);
 }
 
-void _handle_explict_release_destroy(struct wl_resource *resource) {
-  struct vt_wayland_buffer_release_t*wl_release =
+static void _handle_explict_release_destroy(struct wl_resource *resource) {
+  struct vt_wayland_buffer_release_t *wl_release =
       resource ? wl_resource_get_user_data(resource) : NULL;
 
-  if (!wl_release) {
+  if (!wl_release)
     return;
-  }
 
-  wl_release->explicit_release = NULL;
-
-  free(wl_release);
+  if (wl_release->explicit_release == resource)
+    wl_release->explicit_release = NULL;
 }
 
 /* ===================================================
@@ -456,4 +459,46 @@ _linux_explicit_sync_destroy_addon(struct vt_surface_addon_t *addon) {
   }
 
   free(state);
+}
+
+static bool
+_buffer_release_needs_release_fence(struct vt_buffer_release_t *base) {
+  struct vt_wayland_buffer_release_t *release =
+      wl_container_of(base, release, base);
+
+  return release->explicit_release != NULL;
+}
+
+static void _buffer_release_finish(struct vt_buffer_release_t *base,
+                                   int release_fence_fd) {
+  struct vt_wayland_buffer_release_t *release =
+      wl_container_of(base, release, base);
+
+  if (!release->explicit_release)
+    return;
+
+  struct wl_resource *res = release->explicit_release;
+  release->explicit_release = NULL;
+
+  if (release_fence_fd >= 0) {
+    zwp_linux_buffer_release_v1_send_fenced_release(res, release_fence_fd);
+  } else {
+    zwp_linux_buffer_release_v1_send_immediate_release(res);
+  }
+
+  wl_resource_destroy(res);
+}
+
+static void _buffer_release_destroy(struct vt_buffer_release_t *base) {
+  struct vt_wayland_buffer_release_t *release =
+      wl_container_of(base, release, base);
+
+  if (release->explicit_release) {
+    struct wl_resource *res = release->explicit_release;
+    release->explicit_release = NULL;
+
+    wl_resource_destroy(res);
+  }
+
+  free(release);
 }

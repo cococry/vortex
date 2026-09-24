@@ -83,9 +83,22 @@ static void _wl_surface_destroy(struct wl_client   *client,
 
 static void _wl_surface_handle_resource_destroy(struct wl_resource *resource);
 
-static void _wl_surface_associate_with_output(struct vt_compositor_t *c,
-                                              struct vt_surface_t    *surf,
-                                              struct vt_output_t     *output);
+static void _wayland_buffer_attachment_destroy(struct vt_buffer_t *buf,
+                                               void *owner, void *data) {
+  (void)buf;
+  (void)owner;
+
+  struct vt_wayland_buffer_attachment_t *wl_buf = data;
+  if (!wl_buf)
+    return;
+  if (wl_buf->resource && !wl_buf->released) {
+    wl_buffer_send_release(wl_buf->resource);
+    wl_buf->released = true;
+  }
+  printf("sent release.\n");
+
+  free(wl_buf);
+}
 
 static const struct wl_surface_interface surface_impl = {
     .attach = _wl_surface_attach,
@@ -99,6 +112,10 @@ static const struct wl_surface_interface surface_impl = {
     .offset = _wl_surface_offset,
     .destroy = _wl_surface_destroy,
     .damage_buffer = _wl_surface_damage_buffer,
+};
+
+static const struct vt_buffer_attachment_implementation_t wayland_buffer_attachment_impl = {
+  .destroy = _wayland_buffer_attachment_destroy
 };
 
 struct vt_proto_wl_surface_t {
@@ -148,6 +165,30 @@ void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
     new_buf = vt_buffer_ref(new_buf);
     VT_TRACE(surf->comp->log, "attach: buffer_res=%p id=%u wrapper=%p refs=%u",
              buffer, wl_resource_get_id(buffer), new_buf, new_buf->refcount);
+  }
+
+  struct vt_buffer_attachment_t *wl_attachment =
+      vt_buffer_find_attachment(new_buf, NULL, &wayland_buffer_attachment_impl);
+
+  if (!wl_attachment) {
+    struct vt_wayland_buffer_attachment_t *wl_data =
+        calloc(1, sizeof(*wl_data));
+
+    if (!wl_data) {
+      VT_WL_OUT_OF_MEMORY(surf->comp, client);
+      return;
+    }
+
+    wl_data->resource = buffer;
+
+    wl_attachment = vt_buffer_add_attachment(new_buf, NULL, wl_data,
+                                             &wayland_buffer_attachment_impl);
+
+    if (!wl_attachment) {
+      free(wl_data);
+      VT_WL_OUT_OF_MEMORY(surf->comp, client);
+      return;
+    }
   }
 
   /* Modify pending state after everything succeeded */

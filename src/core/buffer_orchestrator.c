@@ -21,11 +21,12 @@
  */
 
 #include "buffer_orchestrator.h"
+#include "src/core/util.h"
 #include "src/protocols/linux_dmabuf.h"
 
 
 struct vt_buffer_t *
-vt_get_or_create_buffer_from_wl_resource(struct wl_resource *res) {
+vt_buffer_get_or_create_from_wayland_resource(struct wl_resource *res) {
   if(!res) return NULL;
 
   struct vt_buffer_t *dmabuf_buf = vt_proto_linux_dmabuf_v1_get_buffer(res);

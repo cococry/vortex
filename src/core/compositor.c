@@ -765,6 +765,8 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
     return false;
   memset(c->renderer, 0, sizeof(*c->renderer));
   c->renderer->comp = c;
+
+  wl_list_init(&c->renderer->buffer_attachments);
   vt_renderer_implement(c->renderer, VT_RENDERING_BACKEND_EGL_OPENGL);
 
   c->input_backend = VT_ALLOC(c, sizeof(*c->input_backend));

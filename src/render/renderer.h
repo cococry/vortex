@@ -49,8 +49,6 @@ struct vt_renderer_interface_t {
                                     struct vt_output_t   *output);
   bool (*import_buffer)(struct vt_renderer_t *r, struct vt_buffer_t *buf,
                         const pixman_region32_t *damage);
-  bool (*destroy_buffer_texture)(struct vt_renderer_t *r,
-                                 struct vt_buffer_t   *buf);
   bool (*drop_context)(struct vt_renderer_t *r);
   void (*set_vsync)(struct vt_renderer_t *r, bool vsync);
   void (*set_clear_color)(struct vt_renderer_t *r, struct vt_output_t *output,
@@ -83,6 +81,8 @@ struct vt_renderer_t {
   struct vt_backend_t *backend;
 
   uint32_t _desired_render_buffer_format;
+
+  struct wl_list buffer_attachments;
 };
 
 void vt_renderer_implement(struct vt_renderer_t       *renderer,

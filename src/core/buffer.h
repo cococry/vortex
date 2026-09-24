@@ -31,13 +31,15 @@
 struct vt_buffer_t;
 
 struct vt_buffer_implementation_t {
-  bool (*get_dmabuf)(struct vt_buffer_t *buf, struct vt_dmabuf_attr_t *o_attr);
-  bool (*get_shm)(struct wlr_buffer *buffer, struct vt_shm_attr_t *attr);
+  struct vt_dmabuf_attr_t *(*get_dmabuf)(struct vt_buffer_t *buf);
+  struct vt_shm_attr_t *(*get_shm)(struct wlr_buffer *buffer);
 };
 
 struct vt_buffer_release_implementation_t {
   void (*finish)(struct vt_buffer_release_t *release, int release_fence_fd);
   void (*destroy)(struct vt_buffer_release_t *release);
+
+  bool (*needs_release_fence)(struct vt_buffer_release_t *release);
 };
 
 struct vt_buffer_attachment_implementation_t {
@@ -98,11 +100,12 @@ struct vt_buffer_t *vt_buffer_ref(struct vt_buffer_t *buf);
 
 void vt_buffer_unref(struct vt_buffer_t **buf);
 
+struct vt_dmabuf_attr_t *
+vt_buffer_get_dmabuf(struct vt_buffer_t *buf);
+
 struct vt_buffer_attachment_t *
 vt_buffer_add_attachment(struct vt_buffer_t *buf, const void *owner, void *data,
                          const struct vt_buffer_attachment_implementation_t *impl);
-
-void vt_buffer_remove_attachment(struct vt_buffer_attachment_t *attachment);
 
 struct vt_buffer_attachment_t *
 vt_buffer_find_attachment(struct vt_buffer_t *buf, const void *owner,
@@ -119,6 +122,8 @@ void vt_buffer_release_unref(struct vt_buffer_release_t **release);
 
 void vt_buffer_release_finish(struct vt_buffer_release_t *release,
                               int                         release_fence_fd);
+
+bool vt_buffer_release_needs_fence(struct vt_buffer_release_t *release);
 
 struct vt_buffer_use_t *vt_buffer_use_ref(struct vt_buffer_use_t *use);
 

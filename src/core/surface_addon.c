@@ -26,5 +26,6 @@ void vt_surface_addon_destroy(struct vt_surface_addon_t *addon) {
   if (!addon || !addon->impl.destroy)
     return;
 
+  wl_list_remove(&addon->link);
   addon->impl.destroy(addon);
 }

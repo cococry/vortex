@@ -27,7 +27,6 @@
 struct vt_wayland_buffer_release_t {
   struct vt_buffer_release_t base;
 
-  struct wl_resource *wl_buffer;
   struct wl_resource *explicit_release;
 };
 
