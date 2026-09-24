@@ -91,13 +91,21 @@ static void _wayland_buffer_attachment_destroy(struct vt_buffer_t *buf,
   struct vt_wayland_buffer_attachment_t *wl_buf = data;
   if (!wl_buf)
     return;
-  if (wl_buf->resource && !wl_buf->released) {
-    wl_buffer_send_release(wl_buf->resource);
-    wl_buf->released = true;
-  }
-  printf("sent release.\n");
 
   free(wl_buf);
+}
+
+static void _wayland_buffer_attachment_end_use(struct vt_buffer_t *buf,
+                                               void *owner, void *data) {
+  (void)buf;
+  (void)owner;
+
+  struct vt_wayland_buffer_attachment_t *wl_buf = data;
+  if (!wl_buf)
+    return;
+
+  if (wl_buf->resource)
+    wl_buffer_send_release(wl_buf->resource);
 }
 
 static const struct wl_surface_interface surface_impl = {
@@ -115,8 +123,9 @@ static const struct wl_surface_interface surface_impl = {
 };
 
 static const struct vt_buffer_attachment_implementation_t
-    wayland_buffer_attachment_impl = {.destroy =
-                                          _wayland_buffer_attachment_destroy};
+    wayland_buffer_attachment_impl = {
+        .end_use = _wayland_buffer_attachment_end_use,
+        .destroy = _wayland_buffer_attachment_destroy};
 
 struct vt_proto_wl_surface_t {
   struct vt_compositor_t *comp;

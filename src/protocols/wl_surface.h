@@ -26,7 +26,6 @@
 
 struct vt_wayland_buffer_attachment_t {
   struct wl_resource *resource;
-  bool                released;
 };
 
 bool vt_proto_wl_surface_init(struct vt_surface_t *surf,

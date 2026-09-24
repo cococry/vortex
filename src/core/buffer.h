@@ -26,13 +26,13 @@
 
 #include "core_types.h"
 #include "../render/dmabuf_attr.h"
-#include "../render/shm.h"
+#include "../render/shm_attr.h"
 
 struct vt_buffer_t;
 
 struct vt_buffer_implementation_t {
-  struct vt_dmabuf_attr_t *(*get_dmabuf)(struct vt_buffer_t *buf);
-  struct vt_shm_attr_t *(*get_shm)(struct wlr_buffer *buffer);
+  bool (*get_dmabuf)(struct vt_buffer_t *buf, struct vt_dmabuf_attr_t *o_attr);
+  bool (*get_shm)(struct vt_buffer_t *buffer, struct vt_shm_attr_t *o_attr);
 };
 
 struct vt_buffer_release_implementation_t {
@@ -43,13 +43,14 @@ struct vt_buffer_release_implementation_t {
 };
 
 struct vt_buffer_attachment_implementation_t {
-  void (*destroy)(struct vt_buffer_t* buf, void *owner, void *data);
+  void (*destroy)(struct vt_buffer_t *buf, void *owner, void *data);
+  void (*end_use)(struct vt_buffer_t *buf, void *owner, void *data);
 };
 
 struct vt_buffer_attachment_t {
   struct vt_buffer_t *buf;
-  const void *owner;
-  void *data;
+  const void         *owner;
+  void               *data;
 
   const struct vt_buffer_attachment_implementation_t *impl;
 
@@ -60,7 +61,7 @@ struct vt_buffer_attachment_t {
 struct vt_buffer_t {
   struct vt_compositor_t* comp;
 
-  uint32_t refcount;
+  uint32_t refcount, uses;
 
   uint32_t width, height;
 
@@ -100,8 +101,13 @@ struct vt_buffer_t *vt_buffer_ref(struct vt_buffer_t *buf);
 
 void vt_buffer_unref(struct vt_buffer_t **buf);
 
-struct vt_dmabuf_attr_t *
-vt_buffer_get_dmabuf(struct vt_buffer_t *buf);
+bool vt_buffer_get_dmabuf(struct vt_buffer_t *buf, struct vt_dmabuf_attr_t * o_attr);
+
+bool vt_buffer_get_shm(struct vt_buffer_t *buf, struct vt_shm_attr_t* o_attr);
+
+void vt_buffer_begin_use(struct vt_buffer_t *buf); 
+
+void vt_buffer_end_use(struct vt_buffer_t *buf); 
 
 struct vt_buffer_attachment_t *
 vt_buffer_add_attachment(struct vt_buffer_t *buf, const void *owner, void *data,

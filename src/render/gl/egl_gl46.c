@@ -35,6 +35,7 @@
 #include "src/render/dmabuf.h"
 #include "src/render/dmabuf_attr.h"
 #include "src/render/renderer.h"
+#include "src/render/shm_attr.h"
 
 #include <wayland-egl.h>
 #include <wayland-server.h>
@@ -103,11 +104,12 @@ struct egl_output_state_t {
 };
 
 static const char *_egl_err_str(EGLint error);
-bool _egl_gl_import_buffer_shm(struct vt_renderer_t *r,
-                                             struct vt_buffer_t*buf,
-                                             struct vt_egl_buffer_t*egl_buf,
-                                             struct wl_shm_buffer *shm_buf,
+static bool        _egl_gl_import_buffer_shm(struct vt_renderer_t    *r,
+                                             struct vt_shm_attr_t    *a,
+                                             struct vt_buffer_t      *buf,
+                                             struct vt_egl_buffer_t  *egl_buf,
                                              const pixman_region32_t *damage);
+
 static bool        _egl_pick_config_from_format(struct vt_compositor_t     *c,
                                                 struct egl_backend_state_t *egl,
                                                 uint32_t                    format);
@@ -165,17 +167,17 @@ const char *_egl_err_str(EGLint error) {
   }
 }
 
-bool _egl_gl_import_buffer_shm(struct vt_renderer_t *r,
-                               struct vt_buffer_t *buf,
-                               struct vt_egl_buffer_t*egl_buf,
-                               struct wl_shm_buffer *shm_buf,
+bool _egl_gl_import_buffer_shm(struct vt_renderer_t *r, struct vt_shm_attr_t *a,
+                               struct vt_buffer_t      *buf,
+                               struct vt_egl_buffer_t  *egl_buf,
                                const pixman_region32_t *damage) {
-  if(!buf) return false;
+  if (!buf || !a || !r || !egl_buf || !a->data)
+    return false;
 
-  int      width = wl_shm_buffer_get_width(shm_buf);
-  int      height = wl_shm_buffer_get_height(shm_buf);
-  int      stride = wl_shm_buffer_get_stride(shm_buf);
-  uint32_t fmt = wl_shm_buffer_get_format(shm_buf);
+  int      width = a->width;
+  int      height = a->height;
+  int      stride = a->stride;
+  uint32_t fmt = a->format;
 
   GLenum format = GL_BGRA;
   GLenum type = GL_UNSIGNED_INT_8_8_8_8_REV;
@@ -190,22 +192,26 @@ bool _egl_gl_import_buffer_shm(struct vt_renderer_t *r,
     return false;
   }
 
-  wl_shm_buffer_begin_access(shm_buf);
+  if (width <= 0 || height <= 0 || stride < width * 4 || (stride % 4) != 0)
+    return false;
 
-  void *data = wl_shm_buffer_get_data(shm_buf);
+  void *data = a->data;
 
-  bool need_buf_regen =
-      buf->width != width || buf->height != height || egl_buf->tex.id == 0;
+  bool need_buf_regen = egl_buf->tex.id == 0 || egl_buf->tex.width != width ||
+                        egl_buf->tex.height != height;
+
+  if (egl_buf->tex.id == 0)
+    glGenTextures(1, &egl_buf->tex.id);
+
+  glBindTexture(GL_TEXTURE_2D, egl_buf->tex.id);
+
+  glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+  glPixelStorei(GL_UNPACK_ROW_LENGTH, stride / 4);
+
+  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A,
+                  fmt == WL_SHM_FORMAT_XRGB8888 ? GL_ONE : GL_ALPHA);
 
   if (need_buf_regen) {
-    if (egl_buf->tex.id == 0)
-      glGenTextures(1, &egl_buf->tex.id);
-
-    glBindTexture(GL_TEXTURE_2D, egl_buf->tex.id);
-
-    if (fmt == WL_SHM_FORMAT_XRGB8888)
-      glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_SWIZZLE_A, GL_ONE);
-
     glTexImage2D(GL_TEXTURE_2D, 0, internal_format, width, height, 0, format,
                  type, data);
 
@@ -216,26 +222,11 @@ bool _egl_gl_import_buffer_shm(struct vt_renderer_t *r,
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  }
-
-  glBindTexture(GL_TEXTURE_2D, egl_buf->tex.id);
-
-  glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-  glPixelStorei(GL_UNPACK_ROW_LENGTH, stride / 4);
-
-  if (!need_buf_regen) {
-    /*pixman_box32_t ext = *pixman_region32_extents(damage);
-    glTexSubImage2D(GL_TEXTURE_2D, 0, ext.x1, ext.y1, ext.x2 - ext.x1,
-                    ext.y2 - ext.y1, format, type,
-                    data + ext.y1 * stride + ext.x1 * 4);*/
-
+  } else {
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, format, type, data);
   }
 
   glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-
-  wl_shm_buffer_end_access(shm_buf);
-
   glBindTexture(GL_TEXTURE_2D, 0);
 
   return true;
@@ -1258,6 +1249,35 @@ _egl_get_or_create_egl_buffer(struct vt_renderer_t *r,
   return egl;
 }
 
+static bool _egl_import_buffer_by_deduced_type(struct vt_renderer_t    *r,
+                                               struct vt_buffer_t      *buf,
+                                               struct vt_egl_buffer_t  *egl_buf,
+                                               const pixman_region32_t *damage,
+                                               bool has_dmabuf_support) {
+  struct vt_dmabuf_attr_t dmabuf_attr = {0};
+
+  bool have_dmabuf = vt_buffer_get_dmabuf(buf, &dmabuf_attr);
+
+  if (have_dmabuf && has_dmabuf_support) {
+    // import dmabuf
+    VT_TRACE(r->comp->log, "Importing buffer as DMABUF.");
+    return _egl_gl_import_buffer_dmabuf(r, &dmabuf_attr, buf, egl_buf);
+  }
+
+  struct vt_shm_attr_t shm_attr = {0};
+
+  bool have_shm = vt_buffer_get_shm(buf, &shm_attr);
+
+  if (have_shm) {
+    // import shm
+    VT_TRACE(r->comp->log, "Importing buffer as SHM.");
+    return _egl_gl_import_buffer_shm(r, &shm_attr, buf, egl_buf, damage);
+  }
+
+  VT_WARN(r->comp->log, "Unknown buffer import type for buffer %p", buf);
+  return false;
+}
+
 bool renderer_import_buffer_egl(struct vt_renderer_t    *r,
                                 struct vt_buffer_t      *buf,
                                 const pixman_region32_t *damage) {
@@ -1268,25 +1288,10 @@ bool renderer_import_buffer_egl(struct vt_renderer_t    *r,
 
   VT_TRACE(r->comp->log, "Importing buffer to handle %p", buf);
 
-  struct vt_egl_buffer_t* egl_buf = _egl_get_or_create_egl_buffer(r, buf); 
+  struct vt_egl_buffer_t *egl_buf = _egl_get_or_create_egl_buffer(r, buf);
 
-  /*struct wl_shm_buffer       *shmbuf = wl_shm_buffer_get(buf->res);*/
-
-  /*if (shmbuf) {
-    VT_TRACE(r->comp->log, "Importing buffer as SHM.");
-    return _egl_gl_import_buffer_shm(r, buf, shmbuf, damage);
-  }*/
-
-  struct vt_dmabuf_attr_t *dmabuf = vt_buffer_get_dmabuf(buf); 
-
-  if (dmabuf && egl->has_dmabuf_support) {
-    // import dmabuf
-    VT_TRACE(r->comp->log, "Importing buffer as DMABUF.");
-    return _egl_gl_import_buffer_dmabuf(r, dmabuf, buf, egl_buf);
-  }
-
-  VT_WARN(r->comp->log, "Unknown buffer import type for buffer %p", buf);
-  return false;
+  return _egl_import_buffer_by_deduced_type(r, buf, egl_buf, damage,
+                                            egl->has_dmabuf_support);
 }
 
 bool renderer_destroy_buffer_texture_egl(struct vt_renderer_t *r,

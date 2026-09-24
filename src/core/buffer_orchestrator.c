@@ -22,20 +22,26 @@
 
 #include "buffer_orchestrator.h"
 #include "src/protocols/linux_dmabuf.h"
+#include "src/protocols/wl_shm.h"
 
+#define _SUBSYS_NAME "BUFFER_ORCHESTRATOR"
 
 struct vt_buffer_t *
 vt_buffer_get_or_create_from_wayland_resource(struct wl_resource *res) {
-  if(!res) return NULL;
+  if (!res)
+    return NULL;
 
   struct vt_buffer_t *dmabuf_buf = vt_proto_linux_dmabuf_v1_get_buffer(res);
 
   if (dmabuf_buf)
     return dmabuf_buf;
 
-  printf("Dmabuf returned NULL\n");
+  struct vt_buffer_t *shm_buf = vt_proto_wl_shm_get_buffer(res);
 
-  // TODO: SHM
+  if (shm_buf)
+    return shm_buf;
+
+  VT_ERROR_HEADLESS("Encountered unhandled buffer type");
 
   return NULL;
 }

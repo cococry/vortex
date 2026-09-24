@@ -23,6 +23,7 @@
 #define _GNU_SOURCE
 #include "linux_dmabuf.h"
 #include "../render/dmabuf.h"
+#include "../render/dmabuf_attr.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -176,8 +177,8 @@ static void _linux_dmabuf_send_feedback(
 
 static void _linux_dmabuf_legacy_send_default_formats(struct wl_resource *res);
 
-static struct vt_dmabuf_attr_t* _dmabuf_buffer_get_dmabuf(struct vt_buffer_t      *buf);
-                                      
+static bool _dmabuf_buffer_get_dmabuf(struct vt_buffer_t      *buf,
+                                      struct vt_dmabuf_attr_t *o_attr);
 
 static void _dmabuf_buffer_attachment_destroy(struct vt_buffer_t *buf,
                                               void *owner, void *data);
@@ -1395,7 +1396,8 @@ void _linux_dmabuf_legacy_send_default_formats(struct wl_resource *res) {
   }
 }
 
-static struct vt_dmabuf_attr_t * _dmabuf_buffer_get_dmabuf(struct vt_buffer_t      *buf) {
+static bool _dmabuf_buffer_get_dmabuf(struct vt_buffer_t      *buf,
+                                      struct vt_dmabuf_attr_t *o_attr) {
   if (!buf || !buf->comp) {
     VT_PARAM_CHECK_FAIL(_proto->comp);
     return false;
@@ -1413,12 +1415,14 @@ static struct vt_dmabuf_attr_t * _dmabuf_buffer_get_dmabuf(struct vt_buffer_t   
   }
 
   struct vt_linux_dmabuf_v1_buffer_t *dmabuf = attachment->data;
-  if(!dmabuf) {
+  if (!dmabuf) {
     VT_PARAM_CHECK_FAIL(_proto->comp);
     return false;
   }
 
-  return &dmabuf->attr;
+  *o_attr = dmabuf->attr;
+
+  return true; 
 }
 
 static void _dmabuf_buffer_attachment_destroy(struct vt_buffer_t *buf,

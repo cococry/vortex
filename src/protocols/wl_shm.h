@@ -1,3 +1,4 @@
+
 /*
  * Copyright (c) 2026 Luca Machiedo
  *
@@ -24,5 +25,14 @@
 
 #include "../core/core_types.h"
 
-bool vt_proto_wl_shm_init(struct vt_compositor_t *comp, uint32_t *drm_formats,
-                          uint32_t n_formats);
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <wayland-server-core.h>
+
+struct vt_buffer_t;
+bool vt_proto_wl_shm_init(struct vt_compositor_t *comp,
+                          const uint32_t *drm_formats, uint32_t n_formats);
+
+struct vt_buffer_t *vt_proto_wl_shm_get_buffer(struct wl_resource *res);
+

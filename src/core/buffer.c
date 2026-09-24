@@ -138,12 +138,50 @@ void vt_buffer_unref(struct vt_buffer_t **buf_ptr) {
   _buffer_destroy(buf);
 }
 
-struct vt_dmabuf_attr_t *vt_buffer_get_dmabuf(struct vt_buffer_t *buf) {
+bool vt_buffer_get_dmabuf(struct vt_buffer_t *buf, struct vt_dmabuf_attr_t * o_attr) {
   if (!buf || !buf->impl || !buf->impl->get_dmabuf)
     return NULL;
 
-  return buf->impl->get_dmabuf(buf);
+  return buf->impl->get_dmabuf(buf, o_attr);
 }
+
+bool vt_buffer_get_shm(struct vt_buffer_t *buf, struct vt_shm_attr_t* o_attr) {
+  if (!buf || !buf->impl || !buf->impl->get_shm)
+    return NULL;
+
+  return buf->impl->get_shm(buf, o_attr);
+}
+
+void vt_buffer_begin_use(struct vt_buffer_t *buf) {
+  if (!buf || !buf->comp) {
+    VT_PARAM_CHECK_FAIL_HEADLESS();
+    return;
+  }
+
+  buf->uses++;
+
+  VT_TRACE(buf->comp->log, "Began buffer use: buf=%p uses=%u", buf, buf->uses);
+}
+
+void vt_buffer_end_use(struct vt_buffer_t *buf) {
+  if (!buf || !buf->comp) { 
+    VT_PARAM_CHECK_FAIL_HEADLESS();
+    return;
+  }
+
+  assert(buf->uses > 0);
+
+  VT_TRACE(buf->comp->log, "Ending buffer use: buf=%p uses=%u", buf, buf->uses);
+
+  if (--buf->uses != 0)
+    return;
+
+  struct vt_buffer_attachment_t *attachment;
+  wl_list_for_each(attachment, &buf->attachments, link_buf) {
+    if (attachment->impl && attachment->impl->end_use)
+      attachment->impl->end_use(buf, attachment->owner, attachment->data);
+  }
+} 
 
 struct vt_buffer_attachment_t *
 vt_buffer_add_attachment(struct vt_buffer_t *buf, const void *owner, void *data,
@@ -312,8 +350,10 @@ static void _buffer_use_destroy(struct vt_buffer_use_t *use) {
   if (use->release)
     vt_buffer_release_unref(&use->release);
 
-  vt_buffer_unref(&use->buf);
+  vt_buffer_end_use(use->buf);
 
+  vt_buffer_unref(&use->buf);
+  
   free(use);
 }
 
@@ -355,6 +395,8 @@ struct vt_buffer_use_t *vt_buffer_use_create_take(
 
   use->buf = *buf;
   *buf = NULL;
+
+  vt_buffer_begin_use(use->buf);
 
   if (release) {
     use->release = *release;
