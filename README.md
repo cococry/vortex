@@ -6,7 +6,7 @@
 
 ## Overview
 
-Vortex is currently under active development as a high-performance, modern Wayland compositor
+vortex is currently under active development as a high-performance, modern Wayland compositor
 focused on creating a visually appealing Wayland desktop experience. 
 The project's goal is to create a self-contained, independent platform dedicated entirely to desktop compositing. 
 In other words, the compositor is responsible only for compositing and its related aspects (such as window animations and IPC), 
@@ -29,10 +29,11 @@ meson compile -C build
 sudo meson install -C build
 ```
 
-To run Vortex:
+Simple test of vortex:
 ```
-./build/vortex # Start the compositor
-WAYLAND_DISPLAY=wayland-1 weston-simple-shm # Start a simple client 
+./build/vortex &
+sleep 1
+WAYLAND_DISPLAY=wayland-1 weston-simple-shm
 ```
 
 Note: Use the wayland display that is logged by the output of **./vortex --verbose** as the WAYLAND_DISPLAY variable 
