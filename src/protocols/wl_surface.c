@@ -83,30 +83,15 @@ static void _wl_surface_destroy(struct wl_client   *client,
 
 static void _wl_surface_handle_resource_destroy(struct wl_resource *resource);
 
+static struct vt_buffer_attachment_t *_wayland_buffer_attachment_get_or_create(
+    struct vt_buffer_t *buf, struct wl_resource *res);
+
 static void _wayland_buffer_attachment_destroy(struct vt_buffer_t *buf,
-                                               void *owner, void *data) {
-  (void)buf;
-  (void)owner;
-
-  struct vt_wayland_buffer_attachment_t *wl_buf = data;
-  if (!wl_buf)
-    return;
-
-  free(wl_buf);
-}
-
+                                               void *owner, void *data);
 static void _wayland_buffer_attachment_end_use(struct vt_buffer_t *buf,
-                                               void *owner, void *data) {
-  (void)buf;
-  (void)owner;
-
-  struct vt_wayland_buffer_attachment_t *wl_buf = data;
-  if (!wl_buf)
-    return;
-
-  if (wl_buf->resource)
-    wl_buffer_send_release(wl_buf->resource);
-}
+                                               void *owner, void *data);
+static void
+_wayland_buffer_handle_res_destroy(struct wl_listener *listener, void *data);
 
 static const struct wl_surface_interface surface_impl = {
     .attach = _wl_surface_attach,
@@ -142,7 +127,7 @@ void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
     return;
   }
 
-  VT_TRACE(surf->comp->log, "Got compositor.surface_attach.");
+  VT_TRACE(surf->comp->log, "Got compositor.surface_attach");
 
   bool legacy_offset = false;
 
@@ -175,30 +160,10 @@ void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
     VT_TRACE(surf->comp->log, "attach: buffer_res=%p id=%u wrapper=%p refs=%u",
              buffer, wl_resource_get_id(buffer), new_buf, new_buf->refcount);
 
-    struct vt_buffer_attachment_t *wl_attachment = vt_buffer_find_attachment(
-        new_buf, NULL, &wayland_buffer_attachment_impl);
-
-    if (!wl_attachment) {
-      struct vt_wayland_buffer_attachment_t *wl_data =
-          calloc(1, sizeof(*wl_data));
-
-      if (!wl_data) {
-        vt_buffer_unref(&new_buf);
-        VT_WL_OUT_OF_MEMORY(surf->comp, client);
-        return;
-      }
-
-      wl_data->resource = buffer;
-
-      wl_attachment = vt_buffer_add_attachment(new_buf, NULL, wl_data,
-                                               &wayland_buffer_attachment_impl);
-
-      if (!wl_attachment) {
-        vt_buffer_unref(&new_buf);
-        free(wl_data);
-        VT_WL_OUT_OF_MEMORY(surf->comp, client);
-        return;
-      }
+    if(!_wayland_buffer_attachment_get_or_create(new_buf, buffer)) {
+      VT_WL_OUT_OF_MEMORY(surf->comp, client);
+      vt_buffer_unref(&new_buf);
+      return;
     }
   }
 
@@ -225,7 +190,7 @@ void _wl_surface_commit(struct wl_client   *client,
     return;
   }
 
-  VT_TRACE(surf->comp->log, "Got wl_surface.commit for surface %p.", surf)
+  VT_TRACE(surf->comp->log, "Got wl_surface.commit for surface %p", surf)
 
   if (!vt_surface_validate_commit(surf)) {
     VT_ERROR(surf->comp->log, "wl_surface.commit: Commit validation failed");
@@ -542,6 +507,77 @@ void _wl_surface_handle_resource_destroy(struct wl_resource *resource) {
 
   wl_resource_set_user_data(resource, NULL);
   free(surf);
+}
+
+static struct vt_buffer_attachment_t *
+_wayland_buffer_attachment_get_or_create(struct vt_buffer_t *buf,
+                                         struct wl_resource *res) {
+  struct vt_buffer_attachment_t *wl_attachment =
+      vt_buffer_find_attachment(buf, NULL, &wayland_buffer_attachment_impl);
+
+  if (!wl_attachment) {
+    struct vt_wayland_buffer_attachment_t *wl_data =
+        calloc(1, sizeof(*wl_data));
+
+    if (!wl_data) {
+      return NULL;
+    }
+
+    wl_data->resource = res;
+
+    wl_attachment = vt_buffer_add_attachment(buf, NULL, wl_data,
+                                             &wayland_buffer_attachment_impl);
+
+    wl_data->resource_destroy_listener.notify = _wayland_buffer_handle_res_destroy;
+
+    wl_resource_add_destroy_listener(wl_data->resource,
+                                     &wl_data->resource_destroy_listener);
+
+    if (!wl_attachment) {
+      free(wl_data);
+      return NULL;
+    }
+  }
+
+  return wl_attachment;
+}
+
+static void _wayland_buffer_attachment_destroy(struct vt_buffer_t *buf,
+                                               void *owner, void *data) {
+  (void)buf;
+  (void)owner;
+
+  struct vt_wayland_buffer_attachment_t *wl_buf = data;
+  if (!wl_buf)
+    return;
+
+  free(wl_buf);
+}
+
+static void _wayland_buffer_attachment_end_use(struct vt_buffer_t *buf,
+                                               void *owner, void *data) {
+  (void)buf;
+  (void)owner;
+
+  struct vt_wayland_buffer_attachment_t *wl_buf = data;
+  if (!wl_buf)
+    return;
+
+  if (wl_buf->resource)
+    wl_buffer_send_release(wl_buf->resource);
+}
+
+static void _wayland_buffer_handle_res_destroy(struct wl_listener *listener,
+                                             void               *data) {
+  (void)data;
+
+  struct vt_wayland_buffer_attachment_t *wl_buf =
+      wl_container_of(listener, wl_buf, resource_destroy_listener);
+
+  wl_buf->resource = NULL;
+
+  wl_list_remove(&wl_buf->resource_destroy_listener.link);
+  wl_list_init(&wl_buf->resource_destroy_listener.link);
 }
 
 bool vt_proto_wl_surface_init(struct vt_surface_t *surf,

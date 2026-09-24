@@ -346,11 +346,11 @@ static void _buffer_use_destroy(struct vt_buffer_use_t *use) {
     close(use->acquire_fence_fd);
     use->acquire_fence_fd = -1;
   }
+ 
+  vt_buffer_end_use(use->buf);
 
   if (use->release)
     vt_buffer_release_unref(&use->release);
-
-  vt_buffer_end_use(use->buf);
 
   vt_buffer_unref(&use->buf);
   
