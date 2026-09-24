@@ -114,9 +114,9 @@ static const struct wl_surface_interface surface_impl = {
     .damage_buffer = _wl_surface_damage_buffer,
 };
 
-static const struct vt_buffer_attachment_implementation_t wayland_buffer_attachment_impl = {
-  .destroy = _wayland_buffer_attachment_destroy
-};
+static const struct vt_buffer_attachment_implementation_t
+    wayland_buffer_attachment_impl = {.destroy =
+                                          _wayland_buffer_attachment_destroy};
 
 struct vt_proto_wl_surface_t {
   struct vt_compositor_t *comp;
@@ -165,29 +165,31 @@ void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
     new_buf = vt_buffer_ref(new_buf);
     VT_TRACE(surf->comp->log, "attach: buffer_res=%p id=%u wrapper=%p refs=%u",
              buffer, wl_resource_get_id(buffer), new_buf, new_buf->refcount);
-  }
 
-  struct vt_buffer_attachment_t *wl_attachment =
-      vt_buffer_find_attachment(new_buf, NULL, &wayland_buffer_attachment_impl);
-
-  if (!wl_attachment) {
-    struct vt_wayland_buffer_attachment_t *wl_data =
-        calloc(1, sizeof(*wl_data));
-
-    if (!wl_data) {
-      VT_WL_OUT_OF_MEMORY(surf->comp, client);
-      return;
-    }
-
-    wl_data->resource = buffer;
-
-    wl_attachment = vt_buffer_add_attachment(new_buf, NULL, wl_data,
-                                             &wayland_buffer_attachment_impl);
+    struct vt_buffer_attachment_t *wl_attachment = vt_buffer_find_attachment(
+        new_buf, NULL, &wayland_buffer_attachment_impl);
 
     if (!wl_attachment) {
-      free(wl_data);
-      VT_WL_OUT_OF_MEMORY(surf->comp, client);
-      return;
+      struct vt_wayland_buffer_attachment_t *wl_data =
+          calloc(1, sizeof(*wl_data));
+
+      if (!wl_data) {
+        vt_buffer_unref(&new_buf);
+        VT_WL_OUT_OF_MEMORY(surf->comp, client);
+        return;
+      }
+
+      wl_data->resource = buffer;
+
+      wl_attachment = vt_buffer_add_attachment(new_buf, NULL, wl_data,
+                                               &wayland_buffer_attachment_impl);
+
+      if (!wl_attachment) {
+        vt_buffer_unref(&new_buf);
+        free(wl_data);
+        VT_WL_OUT_OF_MEMORY(surf->comp, client);
+        return;
+      }
     }
   }
 

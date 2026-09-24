@@ -21,7 +21,6 @@
  */
 
 #include "buffer_orchestrator.h"
-#include "src/core/util.h"
 #include "src/protocols/linux_dmabuf.h"
 
 
@@ -33,6 +32,8 @@ vt_buffer_get_or_create_from_wayland_resource(struct wl_resource *res) {
 
   if (dmabuf_buf)
     return dmabuf_buf;
+
+  printf("Dmabuf returned NULL\n");
 
   // TODO: SHM
 

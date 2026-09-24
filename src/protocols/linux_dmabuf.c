@@ -605,6 +605,7 @@ void _linux_dmabuf_params_create(struct wl_resource *resource, uint32_t buf_id,
                            ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INCOMPLETE,
                            "gap in dmabuf planes");
     _linux_dmabuf_close_params(params);
+        free(params);
     return;
   }
 
@@ -706,6 +707,8 @@ void _linux_dmabuf_params_create(struct wl_resource *resource, uint32_t buf_id,
                              "importing the supplied dmabufs failed");
     }
     _linux_dmabuf_close_params(params);
+        free(params);
+    return;
   }
 
   /* 11. Allocate DMABUF internal handle */
@@ -720,13 +723,13 @@ void _linux_dmabuf_params_create(struct wl_resource *resource, uint32_t buf_id,
 
   buf->w = width;
   buf->h = height;
-  buf->attr = params->attr;
 
   /* 12. Create Wayland buffer resource */
   struct wl_client *client = wl_resource_get_client(resource);
   buf->res = wl_resource_create(client, &wl_buffer_interface, 1, buf_id);
   if (!buf->res) {
     free(buf);
+    free(params);
     _linux_dmabuf_close_params(params);
     VT_WL_OUT_OF_MEMORY(_proto->comp, client);
     return;
@@ -741,8 +744,16 @@ void _linux_dmabuf_params_create(struct wl_resource *resource, uint32_t buf_id,
     zwp_linux_buffer_params_v1_send_created(resource, buf->res);
   }
 
-  /* 15. Clean up temporary params handle */
-  free(params);
+  buf->attr = params->attr;
+
+  /*
+   * Ownership of the FDs moved into buf->attr.
+   * The params object must no longer close them.
+   */
+  for (size_t i = 0; i < VT_DMABUF_PLANES_CAP; i++)
+    params->attr.fds[i] = -1;
+
+  params->attr.num_planes = 0;
 
   VT_TRACE(_proto->comp->log,
            "linux_dmabuf.params_create: successfully created wl_buffer %p "
@@ -768,18 +779,19 @@ void _linux_dmabuf_v1_params_create_immed(struct wl_client   *client,
                               flags);
 }
 
-void _linux_dmabuf_v1_params_handle_res_destroy(struct wl_resource *resource) {
-  if (!resource)
-    return;
-  VT_TRACE(_proto->comp->log, "_linux_dmabuf_v1_params_handle_res_destroy");
+static void
+_linux_dmabuf_v1_params_handle_res_destroy(struct wl_resource *resource) {
   struct vt_linux_dmabuf_v1_params_t *params =
-      resource ? wl_resource_get_user_data(resource) : NULL;
-  if (!params) {
+      wl_resource_get_user_data(resource);
+
+  if (!params)
     return;
-  }
 
   _linux_dmabuf_close_params(params);
+
   wl_resource_set_user_data(resource, NULL);
+  params->res = NULL;
+
   free(params);
 }
 
