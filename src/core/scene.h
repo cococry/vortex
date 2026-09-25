@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "../core/buffer.h"
 #include "core_types.h"
 
 enum vt_scene_node_type_t {
@@ -57,6 +58,20 @@ struct vt_scene_node_t {
   struct vt_surface_t *surf;
 
   enum vt_scene_node_type_t type;
+};
+
+enum vt_layer_type_t {
+  VT_LAYER_DIRECT = 0,
+  VT_LAYER_COMPOSITE = 1,
+};
+
+struct vt_layer_t {
+  int32_t  x_global, y_global;
+  uint32_t w, h;
+
+  struct vt_buffer_t *buf;
+
+  enum vt_layer_type_t type;
 };
 
 typedef bool (*vt_scene_node_filter_func_t)(struct vt_scene_node_t *node);

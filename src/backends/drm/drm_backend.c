@@ -107,7 +107,7 @@ static void _drm_on_seat_enable(struct wl_listener *listener, void *data);
 static bool _drm_handle_frame_for_device(struct drm_backend_state_t *drm,
                                          struct vt_output_t         *output);
 
-static bool _verify_drm_capibilites(struct drm_backend_state_t *drm);
+static bool _drm_verify_caps(struct drm_backend_state_t *drm);
 
 static bool _added_global_keybinds = false;
 
@@ -667,7 +667,7 @@ static int _drm_dispatch(int fd, uint32_t mask, void *data) {
 static bool _drm_init_for_device(struct vt_compositor_t     *comp,
                                  struct drm_backend_state_t *drm,
                                  struct vt_device_t         *dev) {
-  if (!comp || !drm || !dev || dev->fd < 0 || !drm->root_backend)
+  if (!comp || !drm || !dev || dev->fd < 0 || !drm->backend)
     return false;
   drm->drm_fd = -1;
   drm->res = NULL;
@@ -681,13 +681,6 @@ static bool _drm_init_for_device(struct vt_compositor_t     *comp,
   drm->comp = comp;
 
   VT_TRACE(comp->log, "Initializing DRM/KMS backend...");
-
-  int ret = drmSetClientCap(drm->drm_fd, DRM_CLIENT_CAP_ATOMIC, 1);
-  drm->have_atomic_modeset = ret != 0;
-  if (!drm->have_atomic_modeset) {
-    VT_WARN(comp->log, "DRM device does not support atomic modesetting: %s",
-            strerror(errno));
-  }
 
   if (!(drm->gbm_dev = gbm_create_device(drm->drm_fd))) {
     VT_ERROR(comp->log, "cannot create GBM device (fd: %i)", drm->drm_fd);
@@ -713,7 +706,7 @@ static bool _drm_init_for_device(struct vt_compositor_t     *comp,
   drm->native_handle = drm->gbm_dev;
 
   struct drm_backend_master_state_t *drm_master =
-      BACKEND_DATA(drm->root_backend, struct drm_backend_master_state_t);
+      BACKEND_DATA(drm->backend, struct drm_backend_master_state_t);
 
   if (!drm_master || !comp->renderer || !comp->renderer->impl.init ||
       !comp->renderer->impl.is_handle_renderable) {
@@ -721,6 +714,14 @@ static bool _drm_init_for_device(struct vt_compositor_t     *comp,
     _drm_terminate_for_device(drm);
     return false;
   }
+
+  drm->main_drm = drm_master->main_drm;
+
+  if (!_drm_verify_caps(drm)) {
+    _drm_terminate_for_device(drm);
+    return false;
+  }
+
   if (!drm_master->main_drm && comp->renderer->impl.is_handle_renderable(
                                    comp->renderer, drm->native_handle)) {
     comp->renderer->impl.init(comp->backend, comp->renderer,
@@ -1188,9 +1189,9 @@ static bool _drm_terminate_for_device(struct drm_backend_state_t *drm) {
   }
 
   struct drm_backend_master_state_t *drm_master = NULL;
-  if (drm->root_backend)
+  if (drm->backend)
     drm_master =
-        BACKEND_DATA(drm->root_backend, struct drm_backend_master_state_t);
+        BACKEND_DATA(drm->backend, struct drm_backend_master_state_t);
 
   if (drm_master && drm_master->main_drm == drm && comp->renderer &&
       comp->renderer->impl.destroy) {
@@ -1444,8 +1445,54 @@ static bool _drm_handle_frame_for_device(struct drm_backend_state_t *drm,
   return true;
 }
 
-static bool _verify_drm_capibilites(struct drm_backend_state_t *drm) {
-  if(!drm) return false;
+static bool _drm_verify_caps(struct drm_backend_state_t *drm) {
+  if(!drm || !drm->comp) return false;
+
+  if (drmGetCap(drm->drm_fd, DRM_CAP_CURSOR_WIDTH, &drm->cursor_w)) {
+    drm->cursor_w = 64;
+  }
+  if (drmGetCap(drm->drm_fd, DRM_CAP_CURSOR_HEIGHT, &drm->cursor_h)) {
+    drm->cursor_h = 64;
+  }
+
+  uint64_t cap;
+  if (drmGetCap(drm->drm_fd, DRM_CAP_PRIME, &cap) ||
+      !(cap & DRM_PRIME_CAP_IMPORT)) {
+    VT_ERROR(drm->comp->log, "PRIME buffer import not supported");
+    return false;
+  }
+
+  /* drm cannot be main_drm; it's own parent */
+  assert(drm != drm->main_drm);
+
+  if (drm->main_drm) {
+    if (drmGetCap(drm->main_drm->drm_fd, DRM_CAP_PRIME, &cap) ||
+        !(cap & DRM_PRIME_CAP_EXPORT)) {
+      VT_ERROR(drm->comp->log, "PRIME export not supported on primary GPU");
+      return false;
+    }
+  }
+
+  if (drmSetClientCap(drm->drm_fd, DRM_CLIENT_CAP_UNIVERSAL_PLANES, 1)) {
+    VT_ERROR(drm->comp->log, "DRM universal planes unsupported");
+    return false;
+  }
+
+  if (drmGetCap(drm->drm_fd, DRM_CAP_CRTC_IN_VBLANK_EVENT, &cap) || !cap) {
+    VT_ERROR(drm->comp->log, "DRM_CRTC_IN_VBLANK_EVENT unsupported");
+    return false;
+  }
+
+  if (drmGetCap(drm->drm_fd, DRM_CAP_TIMESTAMP_MONOTONIC, &cap) || !cap) {
+    VT_ERROR(drm->comp->log, "DRM_CAP_TIMESTAMP_MONOTONIC unsupported");
+    return false;
+  }
+
+  if (drmSetClientCap(drm->drm_fd, DRM_CLIENT_CAP_ATOMIC, 1)) {
+    VT_ERROR(drm->comp->log,
+             "Atomic modesetting unsupported");
+    return false;
+  }
 
   return true;
 }
@@ -1494,6 +1541,7 @@ bool backend_init_drm(struct vt_backend_t *backend) {
   wl_signal_add(&session_drm->ev_seat_disable,
                 &drm_master->seat_disable_listener);
 
+
   // Create a DRM backend state for all the enumerated GPUs
   enum { max_gpus = 16 };
   struct vt_device_t *gpus[max_gpus];
@@ -1519,7 +1567,7 @@ bool backend_init_drm(struct vt_backend_t *backend) {
     }
 
     memset(drm_backend, 0, sizeof(*drm_backend));
-    drm_backend->root_backend = backend;
+    drm_backend->backend = backend;
 
     if (!_drm_init_for_device(backend->comp, drm_backend, gpus[i])) {
       VT_ERROR(backend->comp->log,

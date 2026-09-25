@@ -28,6 +28,8 @@
 #include <wayland-util.h>
 #include <wayland-server-core.h>
 
+struct drm_backend_master_state_t;
+
 struct drm_backend_state_t {
   int                drm_fd;
   drmEventContext    evctx;
@@ -41,13 +43,17 @@ struct drm_backend_state_t {
 
   struct wl_list link;
 
-  struct vt_backend_t *root_backend;
+  struct vt_backend_t *backend;
+
+  struct drm_backend_state_t *main_drm;
 
   struct vt_device_t *dev;
 
   struct wl_event_source *event_source;
 
   bool have_atomic_modeset;
+
+	uint64_t cursor_w, cursor_h;
 };
 
 struct drm_backend_master_state_t {
