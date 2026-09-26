@@ -20,6 +20,8 @@
  * SOFTWARE.
  */
 
+#include "core/util.h"
+#include "props.h"
 #define _GNU_SOURCE
 
 #include "core/core_types.h"
@@ -86,9 +88,6 @@ static int  _drm_dispatch(int fd, uint32_t mask, void *data);
 static bool _drm_init_for_device(struct vt_compositor_t     *comp,
                                  struct drm_backend_state_t *drm,
                                  struct vt_device_t         *dev);
-static bool
-_drm_init_active_outputs_for_device(struct drm_backend_state_t *drm);
-
 static struct vt_output_mode_t *
 _drm_create_output_mode(struct wl_list *list, drmModeModeInfo *mode_info);
 static uint32_t    _drm_subpixel_to_wl(drmModeSubPixel subpixel);
@@ -108,6 +107,7 @@ static bool _drm_handle_frame_for_device(struct drm_backend_state_t *drm,
                                          struct vt_output_t         *output);
 
 static bool _drm_verify_caps(struct drm_backend_state_t *drm);
+static bool _drm_resources_init(struct drm_backend_state_t *drm);
 
 static bool _added_global_keybinds = false;
 
@@ -731,8 +731,9 @@ static bool _drm_init_for_device(struct vt_compositor_t     *comp,
              drm->drm_fd);
   }
 
-  if (!_drm_init_active_outputs_for_device(drm))
-    VT_WARN(comp->log, "No active outputs initialized for GPU %s.", dev->path);
+  if (!_drm_resources_init(drm))
+    VT_WARN(comp->log, "Resource initialization failed for GPU %s (FD: %i)", dev->path,
+        drm->drm_fd);
 
   VT_TRACE(comp->log,
            "Successfully initialized DRM/KMS backend for GPU %s (FD: %i).",
@@ -741,75 +742,80 @@ static bool _drm_init_for_device(struct vt_compositor_t     *comp,
   return true;
 }
 
-static bool
-_drm_init_active_outputs_for_device(struct drm_backend_state_t *drm) {
-  if (!drm || !drm->comp)
+static bool _drm_init_crtc(struct vt_compositor_t *comp,
+                           struct drm_crtc_t *crtc, int drm_fd, uint32_t id) {
+  if (!crtc)
     return false;
-  struct vt_compositor_t *comp = drm->comp;
 
-  VT_TRACE(comp->log, "Initializing active outputs.");
+  crtc->id = id;
 
-  if (!comp->renderer || !comp->renderer->impl.setup_renderable_output) {
+  if (!drm_get_crtc_props(drm_fd, id, crtc->props)) {
     VT_ERROR(comp->log,
-             "Renderer backend not initialized before output setup.");
-    return false;
-  }
-
-  drm->res = drmModeGetResources(drm->drm_fd);
-  if (!drm->res) {
-    VT_ERROR(comp->log, "drmModeGetResources() failed: %s", strerror(errno));
-    return false;
-  }
-
-  for (int i = 0; i < drm->res->count_connectors; i++) {
-    drmModeConnector *conn =
-        drmModeGetConnector(drm->drm_fd, drm->res->connectors[i]);
-    if (!conn)
-      continue;
-    if (conn->connection == DRM_MODE_CONNECTED && conn->count_modes > 0) {
-      struct vt_output_t *output = VT_ALLOC(comp, sizeof(struct vt_output_t));
-      if (!output) {
-        VT_ERROR(comp->log, "Allocation failed for output.");
-        drmModeFreeConnector(conn);
-        continue;
-      }
-      memset(output, 0, sizeof(*output));
-      output->needs_damage_rebuild = true;
-      wl_list_init(&output->link_local);
-      wl_list_init(&output->link_global);
-      pixman_region32_init(&output->damage);
-      output->backend = comp->backend;
-      if (!_drm_create_output_for_device(drm, output, conn)) {
-        VT_ERROR(comp->log, "Failed to setup internal DRM output output.");
-        _drm_destroy_output_for_device(drm, output);
-        drmModeFreeConnector(conn);
-        continue;
-      }
-      struct drm_output_state_t *drm_output =
-          BACKEND_DATA(output, struct drm_output_state_t);
-      drm_output->renderable_setup = true;
-      if (!comp->renderer->impl.setup_renderable_output(comp->renderer,
-                                                        output)) {
-        VT_ERROR(
-            comp->log,
-            "Failed to setup renderable output for DRM output (%ix%i@%.2f)",
-            output->width, output->height, output->refresh_rate);
-        _drm_destroy_output_for_device(drm, output);
-        drmModeFreeConnector(conn);
-        continue;
-      }
-    }
-    drmModeFreeConnector(conn);
-  }
-
-  if (wl_list_empty(&drm->outputs)) {
-    VT_ERROR(comp->log, "No connected connector found");
-    drmModeFreeResources(drm->res);
-    drm->res = NULL;
+             "Failed to populate DRM properties of CRTC with ID: %" PRIu32 "\n",
+             id);
     return false;
   }
 
   return true;
+}
+
+static bool
+_drm_init_crtcs(struct drm_backend_state_t *drm) {
+  if (!drm || !drm->comp)
+    return false;
+
+  struct vt_compositor_t *comp = drm->comp;
+
+  VT_TRACE(comp->log, "Initializing CRTCs");
+
+  drmModeRes* res = drmModeGetResources(drm->drm_fd);
+
+  if (!res) {
+    VT_ERROR(comp->log, "drmModeGetResources() failed: %s", strerror(errno));
+    return false;
+  }
+
+  wl_array_init(&drm->crtcs);
+
+	if (res->count_crtcs == 0) {
+    VT_WARN(comp->log, "No CRTCs are available"); 
+		drmModeFreeResources(res);
+		return true;
+	}
+
+  size_t crtc_bytes = res->count_crtcs * sizeof(struct drm_crtc_t);
+
+  struct drm_crtc_t *crtcs =
+      wl_array_add(&drm->crtcs, crtc_bytes);
+
+  if (!crtcs) {
+    VT_ERROR(comp->log, "Out of memory");
+    goto fail_resources;
+  }
+
+  assert(drm->crtcs.size / sizeof(*crtcs) == res->count_crtcs);
+
+  memset(crtcs, 0, crtc_bytes);
+
+  for (int i = 0; i < res->count_crtcs; ++i) {
+    uint32_t crtc_id = res->crtcs[i];
+
+    if (!_drm_init_crtc(comp, &crtcs[i], drm->drm_fd, crtc_id)) {
+      VT_ERROR(comp->log, "Failed to initialize CRTC with ID: %" PRIu32 "\n",
+               crtc_id);
+      goto fail_crtc;
+    }
+  }
+
+  drmModeFreeResources(res);
+  return true;
+
+fail_crtc:
+  wl_array_release(&drm->crtcs);
+
+fail_resources:
+	drmModeFreeResources(res);
+	return false;
 }
 
 static struct vt_output_mode_t *

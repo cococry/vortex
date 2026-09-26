@@ -23,6 +23,9 @@
 #pragma once
 
 
+#include "core/buffer.h"
+#include "core/session.h"
+#include "props.h"
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <wayland-util.h>
@@ -30,10 +33,31 @@
 
 struct drm_backend_master_state_t;
 
+struct drm_framebuffer_t {
+  struct vt_buffer_t *buf;
+  uint32_t            id;
+};
+
+struct drm_plane_t {
+  uint32_t id, type;
+
+  struct drm_framebuffer_t *buf_pending;
+  struct drm_framebuffer_t *buf_current;
+
+  struct wl_array formats;
+
+  /*uint32_t props[VT_DRM_PLANE__COUNT];*/
+};
+
+struct drm_crtc_t {
+  uint32_t id;
+
+  uint32_t props[VT_DRM_CRTC__COUNT];
+};
+
 struct drm_backend_state_t {
   int                drm_fd;
   drmEventContext    evctx;
-  drmModeRes        *res;
   struct gbm_device *gbm_dev;
 
   struct wl_list outputs;
@@ -54,6 +78,8 @@ struct drm_backend_state_t {
   bool have_atomic_modeset;
 
 	uint64_t cursor_w, cursor_h;
+
+  struct wl_array crtcs;
 };
 
 struct drm_backend_master_state_t {
