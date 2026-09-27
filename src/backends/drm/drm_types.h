@@ -53,6 +53,9 @@ struct drm_crtc_t {
   uint32_t id;
 
   uint32_t props[VT_DRM_CRTC__COUNT];
+
+  struct drm_plane_t *plane_cursor;
+  struct drm_plane_t *plane_primary;
 };
 
 struct drm_backend_state_t {

@@ -742,14 +742,108 @@ static bool _drm_init_for_device(struct vt_compositor_t     *comp,
   return true;
 }
 
+static bool _drm_add_plane(struct drm_backend_state_t *drm,
+                           struct drm_crtc_t          *crtc,
+                           const drmModePlane *drm_plane, uint32_t type,
+                           uint32_t plane_props[VT_DRM_PLANE__COUNT]) {}
+
+static bool _drm_planes_init(struct drm_backend_state_t *drm) {
+  assert(drm && drm->comp);
+
+  drmModePlaneRes *plane_res = drmModeGetPlaneResources(drm->drm_fd);
+
+  if (!plane_res) {
+    int err = errno;
+    VT_ERROR(drm->comp->log, "drmModeGetPlaneResources() failed: %s (%d)",
+             strerror(err), err);
+    return false;
+  }
+
+  const size_t n_crtcs = drm->crtcs.size / sizeof(struct drm_crtc_t);
+
+  for (uint32_t i = 0; i < plane_res->count_planes; i++) {
+    uint32_t      plane_id = plane_res->planes[i];
+    drmModePlane *plane = drmModeGetPlane(drm->drm_fd, plane_id);
+    if (!plane) {
+      int err = errno;
+      VT_ERROR(drm->comp->log,
+               "drmModeGetPlane() for plane ID %" PRIu32 " failed: %s (%d)",
+               plane_id, strerror(err), err);
+      goto fail_planes;
+    }
+
+    uint32_t plane_props[VT_DRM_PLANE__COUNT];
+    if (!drm_kms_props_get_plane(drm->drm_fd, plane_id, plane_props)) {
+      VT_ERROR(drm->comp->log,
+               "Failed to get properties of plane with ID %" PRIu32, plane_id);
+      goto fail_this_plane;
+    }
+
+    uint64_t plane_type;
+    if (!drm_kms_props_get_prop(drm->drm_fd, plane_id,
+                                plane_props[VT_DRM_PLANE_TYPE], &plane_type)) {
+      VT_ERROR(drm->comp->log,
+               "Failed to get 'type' property of plane with ID %" PRIu32,
+               plane_id);
+      goto fail_this_plane;
+    }
+
+    assert(n_crtcs <= 32);
+
+    struct drm_crtc_t *crtc;
+    struct drm_crtc_t *chosen_crtc = NULL;
+    size_t             j = 0;
+    wl_array_for_each(crtc, &drm->crtcs) {
+      if ((plane->possible_crtcs & (1u << j)) == 0) {
+        j++;
+        continue;
+      }
+
+      /* Plane (i) does support this CRTC (j) */
+      if ((plane_type == DRM_PLANE_TYPE_PRIMARY && !crtc->plane_primary) ||
+          (plane_type == DRM_PLANE_TYPE_CURSOR && !crtc->plane_cursor)) {
+        chosen_crtc = crtc;
+        break;
+      }
+
+      j++;
+    }
+
+    if (!chosen_crtc) {
+      goto next;
+    }
+
+    if (!_drm_add_plane(drm, chosen_crtc, plane, plane_type, plane_props)) {
+      goto fail_this_plane;
+    }
+
+  next:
+    drmModeFreePlane(plane);
+
+    continue;
+  fail_this_plane:
+    drmModeFreePlane(plane);
+    goto fail_planes;
+  }
+
+  drmModeFreePlaneResources(plane_res);
+  return true;
+
+fail_planes:
+  drmModeFreePlaneResources(plane_res);
+  return false;
+}
+
 static bool _drm_init_crtc(struct vt_compositor_t *comp,
                            struct drm_crtc_t *crtc, int drm_fd, uint32_t id) {
+  assert(comp);
+
   if (!crtc)
     return false;
 
   crtc->id = id;
 
-  if (!drm_get_crtc_props(drm_fd, id, crtc->props)) {
+  if (!drm_kms_props_get_crtc(drm_fd, id, crtc->props)) {
     VT_ERROR(comp->log,
              "Failed to populate DRM properties of CRTC with ID: %" PRIu32 "\n",
              id);
@@ -771,7 +865,9 @@ _drm_init_crtcs(struct drm_backend_state_t *drm) {
   drmModeRes* res = drmModeGetResources(drm->drm_fd);
 
   if (!res) {
-    VT_ERROR(comp->log, "drmModeGetResources() failed: %s", strerror(errno));
+    int err = errno;
+    VT_ERROR(comp->log, "drmModeGetResources() failed: %s (%d)", strerror(err),
+             err);
     return false;
   }
 
@@ -805,6 +901,10 @@ _drm_init_crtcs(struct drm_backend_state_t *drm) {
                crtc_id);
       goto fail_crtc;
     }
+  }
+
+  if(!_drm_planes_init()) {
+    goto fail_crtc;
   }
 
   drmModeFreeResources(res);

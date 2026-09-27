@@ -18,6 +18,25 @@ static const char *crtc_infos[VT_DRM_CRTC__COUNT] = {
     [VT_DRM_CRTC_VRR_ENABLED] = "VRR_ENABLED",
 };
 
+/* Needs to be sorted according to strcmp() for bsearch() */
+static const char *plane_infos[VT_DRM_PLANE__COUNT] = {
+	[VT_DRM_PLANE_CRTC_H]          = "CRTC_H",
+	[VT_DRM_PLANE_CRTC_ID]         = "CRTC_ID",
+	[VT_DRM_PLANE_CRTC_W]          = "CRTC_W",
+	[VT_DRM_PLANE_CRTC_X]          = "CRTC_X",
+	[VT_DRM_PLANE_CRTC_Y]          = "CRTC_Y",
+	[VT_DRM_PLANE_FB_DAMAGE_CLIPS] = "FB_DAMAGE_CLIPS",
+	[VT_DRM_PLANE_FB_ID]           = "FB_ID",
+	[VT_DRM_PLANE_IN_FORMATS]      = "IN_FORMATS",
+	[VT_DRM_PLANE_SRC_H]           = "SRC_H",
+	[VT_DRM_PLANE_SRC_W]           = "SRC_W",
+	[VT_DRM_PLANE_SRC_X]           = "SRC_X",
+	[VT_DRM_PLANE_SRC_Y]           = "SRC_Y",
+	[VT_DRM_PLANE_ROTATION]        = "rotation",
+	[VT_DRM_PLANE_TYPE]            = "type",
+};
+
+
 static int compare_prop_name(const void *key, const void *elem) {
   const char        *name = key;
   const char *const *entry = elem;
@@ -56,8 +75,38 @@ static bool _drm_get_props(int drm_fd, uint32_t id, uint32_t type,
   return true;
 }
 
-bool drm_get_crtc_props(int drm_fd, uint32_t id, uint32_t *o_props) {
-
+bool drm_kms_props_get_crtc(int drm_fd, uint32_t id, uint32_t *o_props) {
   return _drm_get_props(drm_fd, id, DRM_MODE_OBJECT_CRTC, crtc_infos,
                         VT_DRM_CRTC__COUNT, o_props);
+}
+
+bool drm_kms_props_get_plane(int drm_fd, uint32_t id, uint32_t *o_props) {
+  return _drm_get_props(drm_fd, id, DRM_MODE_OBJECT_PLANE, plane_infos,
+                        VT_DRM_PLANE__COUNT, o_props);
+
+}
+
+bool drm_kms_props_get_prop(int drm_fd, uint32_t id, uint32_t prop,
+                            uint64_t *o_prop) {
+  if (prop == 0 || o_prop == NULL) {
+    return false;
+  }
+
+  drmModeObjectProperties *props =
+      drmModeObjectGetProperties(drm_fd, id, DRM_MODE_OBJECT_ANY);
+
+  if (props == NULL) {
+    return false;
+  }
+
+  for (uint32_t i = 0; i < props->count_props; ++i) {
+    if (props->props[i] == prop) {
+      *o_prop = props->prop_values[i];
+      drmModeFreeObjectProperties(props);
+      return true;
+    }
+  }
+
+  drmModeFreeObjectProperties(props);
+  return false;
 }
