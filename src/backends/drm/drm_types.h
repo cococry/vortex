@@ -40,6 +40,7 @@ struct drm_framebuffer_t {
 
 struct drm_plane_t {
   uint32_t id, type;
+  uint32_t id_crtc_init;
 
   struct drm_framebuffer_t *buf_pending;
   struct drm_framebuffer_t *buf_current;
@@ -83,6 +84,7 @@ struct drm_backend_state_t {
 	uint64_t cursor_w, cursor_h;
 
   struct wl_array crtcs;
+  struct wl_array planes;
 };
 
 struct drm_backend_master_state_t {

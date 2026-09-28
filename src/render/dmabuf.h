@@ -43,16 +43,6 @@ struct vt_dmabuf_feedback_t {
 struct vt_dmabuf_tranche_t {
   struct vt_device_t            *target_device;
   enum vt_dmabuf_tranche_flags_t flags;
-  struct wl_array                formats; // array of vt_dmabuf_drm_format_t
+  struct wl_array                formats; // array of vt_drm_format 
 };
 
-struct vt_dmabuf_format_modifier_t {
-  uint64_t mod;
-  bool     _egl_ext_only;
-};
-
-struct vt_dmabuf_drm_format_t {
-  uint32_t                            format;
-  size_t                              len;
-  struct vt_dmabuf_format_modifier_t *mods;
-};
