@@ -1,3 +1,25 @@
+/*
+ * Copyright (c) 2026 Luca Machiedo
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
 #include "drm_format.h"
 #include <assert.h>
 #include <wayland-util.h>
@@ -13,15 +35,15 @@ struct vt_drm_format_modifier_t *
 vt_drm_format_get_mod(struct vt_drm_format_t *fmt, uint64_t mod) {
   /* 1. Validate input */
   if (!fmt)
-    return false;
+    return NULL;
 
   /* 2. Search for matching modifier */
   struct vt_drm_format_modifier_t *it;
   wl_array_for_each(it, &fmt->mods) {
     if (it->mod == mod)
-      return true;
+      return it;
   }
-  return false;
+  return NULL;
 }
 
 struct vt_drm_format_modifier_t *
@@ -88,7 +110,7 @@ struct vt_drm_format_t *vt_drm_format_array_push(struct wl_array *formats,
   if (!add)
     return NULL;
 
-  vt_drm_format_init(&add, fmt->format);
+  vt_drm_format_init(add, fmt->format);
 
   /* deep copy */
   if (!vt_drm_format_add_mods(add, &fmt->mods)) {
@@ -151,7 +173,7 @@ vt_drm_format_array_get_format(struct wl_array              *formats,
   return NULL;
 }
 
-void vt_drm_format_free_array(struct wl_array *formats) {
+void vt_drm_format_array_free(struct wl_array *formats) {
   /* 1. Validate input parameter */
   if (!formats)
     return;

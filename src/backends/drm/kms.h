@@ -22,14 +22,7 @@
 
 #pragma once
 
-#include <stdint.h>
-#include <stdlib.h>
+#include "drm_types.h"
 
-struct vt_shm_attr_t {
-  void    *data;
-  size_t   size;
-  int32_t  width;
-  int32_t  height;
-  int32_t  stride;
-  uint32_t format;
-};
+extern const struct drm_kms_impl_t drm_kms_atomic_impl;
+extern const struct drm_kms_impl_t drm_kms_legacy_impl;

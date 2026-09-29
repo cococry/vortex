@@ -40,6 +40,7 @@
 #include "../../protocols/linux_explicit_sync.h"
 #include "../../protocols/wl_output.h"
 #include "../../protocols/wl_shm.h"
+#include "../../render/drm_format.h"
 #include "../../render/renderer.h"
 #include "xdg-shell-client-protocol.h"
 
@@ -718,26 +719,37 @@ bool _wl_init_fake_dmabuf_feedback(struct vt_compositor_t      *comp,
   tranche->target_device = fb->dev_main;
 
   // add DRM_FORMAT_XRGB8888 + modifiers
-  struct vt_dmabuf_drm_format_t *fmt =
-      wl_array_add(&tranche->formats, sizeof(*fmt));
-  fmt->format = _VT_DRM_FORMAT_XRGB8888;
-  fmt->len = 2;
-  fmt->mods = calloc(fmt->len, sizeof(*fmt->mods));
-  fmt->mods[0].mod = _VT_DRM_FORMAT_MOD_LINEAR;
-  fmt->mods[0]._egl_ext_only = false;
-  fmt->mods[1].mod = _VT_DRM_FORMAT_MOD_INVALID;
-  fmt->mods[1]._egl_ext_only = false;
+  struct vt_drm_format_t fmt = {0};
+  vt_drm_format_init(&fmt, _VT_DRM_FORMAT_XRGB8888);
+
+  if (!vt_drm_format_add_mod(&fmt, _VT_DRM_FORMAT_MOD_LINEAR) ||
+      !vt_drm_format_add_mod(&fmt, _VT_DRM_FORMAT_MOD_INVALID)) {
+    vt_drm_format_fini(&fmt);
+    return false;
+  }
+
+  if (!vt_drm_format_array_push(&tranche->formats, &fmt)) {
+    vt_drm_format_fini(&fmt);
+    return false;
+  }
+
+  vt_drm_format_fini(&fmt);
 
   // also ARGB8888 (clients sometimes expect it)
-  struct vt_dmabuf_drm_format_t *fmt2 =
-      wl_array_add(&tranche->formats, sizeof(*fmt2));
-  fmt2->format = _VT_DRM_FORMAT_ARGB8888;
-  fmt2->len = 2;
-  fmt2->mods = calloc(fmt2->len, sizeof(*fmt2->mods));
-  fmt2->mods[0].mod = _VT_DRM_FORMAT_MOD_LINEAR;
-  fmt2->mods[0]._egl_ext_only = false;
-  fmt2->mods[1].mod = _VT_DRM_FORMAT_MOD_INVALID;
-  fmt2->mods[1]._egl_ext_only = false;
+  vt_drm_format_init(&fmt, _VT_DRM_FORMAT_ARGB8888);
+
+  if (!vt_drm_format_add_mod(&fmt, _VT_DRM_FORMAT_MOD_LINEAR) ||
+      !vt_drm_format_add_mod(&fmt, _VT_DRM_FORMAT_MOD_INVALID)) {
+    vt_drm_format_fini(&fmt);
+    return false;
+  }
+
+  if (!vt_drm_format_array_push(&tranche->formats, &fmt)) {
+    vt_drm_format_fini(&fmt);
+    return false;
+  }
+
+  vt_drm_format_fini(&fmt);
 
   return true;
 }
@@ -826,9 +838,7 @@ bool backend_init_wl(struct vt_backend_t *backend) {
     // cleanup the feedback
     struct vt_dmabuf_tranche_t *tranche;
     wl_array_for_each(tranche, &default_feedback->tranches) {
-      struct vt_dmabuf_drm_format_t *fmt;
-      wl_array_for_each(fmt, &tranche->formats) { free(fmt->mods); }
-      wl_array_release(&tranche->formats);
+      vt_drm_format_array_free(&tranche->formats);
     }
     wl_array_release(&default_feedback->tranches);
 

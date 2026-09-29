@@ -45,6 +45,13 @@ struct vt_xdg_toplevel_t {
   struct wl_list            childs;
   struct wl_list            link;
 
+  bool activated;
+  bool fullscreen;
+  bool maximized;
+  bool resizing;
+
+  struct vt_output_t* fullscreen_output;
+
   struct vt_xdg_surface_t *xdg_surf;
 };
 

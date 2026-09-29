@@ -161,6 +161,13 @@ struct vt_arena_t {
   size_t   capacity;
 };
 
+struct vt_box_t {
+  int32_t x;
+  int32_t y;
+  int32_t width;
+  int32_t height;
+};
+
 uint64_t vt_util_get_time_msec(void);
 
 void vt_util_arena_init(struct vt_arena_t *a, size_t capacity);

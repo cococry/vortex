@@ -287,8 +287,8 @@ void _proto_linux_dmabuf_v1_bind(struct wl_client *client, void *data,
     _linux_dmabuf_legacy_send_default_formats(res);
     VT_TRACE(
         _proto->comp->log,
-        "linux_dmabuf.bind: sending legacy formats for client %p (%i formats).",
-        client, _proto->default_formats.size);
+        "linux_dmabuf.bind: sending legacy formats for client %p (%zu formats).",
+        client, vt_drm_format_array_count(&_proto->default_formats));
   }
 }
 
@@ -828,11 +828,49 @@ static bool _accumulate_tranche_formats(struct vt_compositor_t *comp,
   wl_array_for_each(tranche, tranches) {
     struct vt_drm_format_t *fmt;
     wl_array_for_each(fmt, &tranche->formats) {
-      if (!vt_drm_format_array_push(all_formats, fmt)) {
-        VT_ERROR(comp->log,
-                 "Failed to push format %p (n mods: %zu) into format array.",
-                 fmt, vt_drm_format_mod_count(fmt));
-        return false;
+      struct vt_drm_format_t *dst = NULL;
+      struct vt_drm_format_t *it;
+      wl_array_for_each(it, all_formats) {
+        if (it->format == fmt->format) {
+          dst = it;
+          break;
+        }
+      }
+
+      if (!dst) {
+        struct vt_drm_format_t new_fmt = {0};
+        vt_drm_format_init(&new_fmt, fmt->format);
+
+        if (!(dst = vt_drm_format_array_push(all_formats, &new_fmt))) {
+          vt_drm_format_fini(&new_fmt);
+          VT_ERROR(comp->log,
+                   "Failed to push format %p (n mods: %zu) into format array.",
+                   fmt, vt_drm_format_mod_count(fmt));
+          return false;
+        }
+
+        vt_drm_format_fini(&new_fmt);
+      }
+
+      struct vt_drm_format_modifier_t *mod;
+      wl_array_for_each(mod, &fmt->mods) {
+        struct vt_drm_format_modifier_t *dst_mod =
+            vt_drm_format_get_mod(dst, mod->mod);
+        if (dst_mod) {
+          if (mod->_egl_ext_only)
+            dst_mod->_egl_ext_only = true;
+          continue;
+        }
+
+        dst_mod = vt_drm_format_add_mod(dst, mod->mod);
+        if (!dst_mod) {
+          VT_ERROR(comp->log,
+                   "Failed to add modifier 0x%016" PRIx64
+                   " to format 0x%08" PRIx32 ".",
+                   mod->mod, fmt->format);
+          return false;
+        }
+        dst_mod->_egl_ext_only = mod->_egl_ext_only;
       }
     }
   }
@@ -903,8 +941,8 @@ bool _linux_dmabuf_set_default_feedback(
   }
 
   /* 5. Accumulate formats from tranches */
-  if (!_accumulate_tranche_formats(&proto->default_formats, &feedback->tranches,
-                                   NULL)) {
+  if (!_accumulate_tranche_formats(feedback->comp, &proto->default_formats,
+                                   &feedback->tranches)) {
     VT_ERROR(feedback->comp->log, "Failed to accumulate default formats.");
     if (native_main_dev)
       s->impl.finish_native_handle(s, native_main_dev);
@@ -980,15 +1018,19 @@ bool _linux_dmabuf_pack_feedback(
 
   VT_TRACE(feedback->comp->log, "Accumulated all formats of all tranches.");
 
-  size_t n_formats = vt_drm_format_array_count(&all_formats);
+  size_t n_entries = 0;
+  struct vt_drm_format_t *fmt;
+  wl_array_for_each(fmt, &all_formats) {
+    n_entries += vt_drm_format_mod_count(fmt);
+  }
 
-  if (n_formats == 0) {
+  if (n_entries == 0) {
     VT_ERROR(feedback->comp->log,
              "Format entries of packed DMABUF feedback is empty.");
     goto fail_all_formats;
   }
   size_t entries_size =
-      n_formats * sizeof(struct vt_linux_dmabuf_v1_packed_feedback_entry_t);
+      n_entries * sizeof(struct vt_linux_dmabuf_v1_packed_feedback_entry_t);
 
   // Allocate a read-only-read-write pair of file descriptors for the feedback
   // data: We write our data into the readwrite FD once, then use the
@@ -1018,14 +1060,13 @@ bool _linux_dmabuf_pack_feedback(
   VT_TRACE(feedback->comp->log, "mmap()ed the packed feedback data.");
 
   // Fill the table
-  struct vt_drm_format_t *fmt;
-  uint32_t                n_entries = 0;
+  size_t entry_idx = 0;
   wl_array_for_each(fmt, &all_formats) {
     if (!fmt)
       continue;
     struct vt_drm_format_modifier_t *mod;
     wl_array_for_each(mod, &fmt->mods) {
-      entries[n_entries++] =
+      entries[entry_idx++] =
           (struct vt_linux_dmabuf_v1_packed_feedback_entry_t){
               .format = fmt->format,
               .mod = mod->mod,
@@ -1033,7 +1074,7 @@ bool _linux_dmabuf_pack_feedback(
     }
   }
 
-  if (n_entries != n_formats) {
+  if (entry_idx != n_entries) {
     VT_ERROR(feedback->comp->log, "Mapped entries of DMABUF feedback entries "
                                   "does not match internal format entries.");
     munmap(entries, entries_size);
@@ -1148,7 +1189,7 @@ fail_all_formats:
 
   VT_ERROR(feedback->comp->log, "Failed to pack default feedback.");
 
-  return true;
+  return false;
 }
 
 void _linux_dmabuf_free_feedback(
@@ -1297,7 +1338,7 @@ static void _send_mods(struct wl_resource            *resource,
      * correctly initialized: DRM: Invalid Modifier This modifier can be used as
      * a sentinel to terminate the format modifiers list [...]
      */
-    if (!vt_drm_format_get_mod(fmt, _VT_DRM_FORMAT_MOD_INVALID)) {
+    if (vt_drm_format_get_mod(fmt, _VT_DRM_FORMAT_MOD_INVALID)) {
       zwp_linux_dmabuf_v1_send_format(resource, fmt->format);
     }
     return;
@@ -1307,8 +1348,8 @@ static void _send_mods(struct wl_resource            *resource,
   // In case only INVALID and LINEAR are advertised, send INVALID only due to
   // XWayland: https://gitlab.freedesktop.org/xorg/xserver/-/issues/1166
   if (vt_drm_format_mod_count(fmt) == 2 &&
-      !vt_drm_format_get_mod(fmt, _VT_DRM_FORMAT_MOD_INVALID) &&
-      !vt_drm_format_get_mod(fmt, _VT_DRM_FORMAT_MOD_LINEAR)) {
+      vt_drm_format_get_mod(fmt, _VT_DRM_FORMAT_MOD_INVALID) &&
+      vt_drm_format_get_mod(fmt, _VT_DRM_FORMAT_MOD_LINEAR)) {
 
     uint64_t mod = _VT_DRM_FORMAT_MOD_INVALID;
     zwp_linux_dmabuf_v1_send_modifier(resource, fmt->format, mod >> 32,
@@ -1493,3 +1534,4 @@ vt_proto_linux_dmabuf_v1_get_buffer(struct wl_resource *res) {
 
   return dmabuf->buf;
 }
+

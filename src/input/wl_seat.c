@@ -222,7 +222,7 @@ void _wl_seat_get_pointer(struct wl_client   *client,
     struct vt_surface_t *surf =
         seat->ptr_focus.surf;
 
-    struct vt_rect_t *bounds =
+    struct vt_box_t *bounds =
         vt_scene_node_get_global_bounds(surf->scene_node);
 
     if (bounds) {
@@ -566,7 +566,7 @@ void vt_seat_handle_pointer_motion(struct vt_seat_t *seat,
     return;
   }
 
-  struct vt_rect_t *global_bounds =
+  struct vt_box_t *global_bounds =
       vt_scene_node_get_global_bounds(surf->scene_node);
 
   if (!global_bounds)
@@ -876,7 +876,7 @@ void vt_seat_repick_pointer_focus(struct vt_seat_t *seat) {
     return;
   }
 
-  struct vt_rect_t *bounds = vt_scene_node_get_global_bounds(surf->scene_node);
+  struct vt_box_t *bounds = vt_scene_node_get_global_bounds(surf->scene_node);
 
   if (!bounds) {
     vt_seat_set_pointer_focus(seat, NULL, 0, 0);

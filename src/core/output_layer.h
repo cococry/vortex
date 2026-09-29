@@ -22,14 +22,14 @@
 
 #pragma once
 
-#include <stdint.h>
-#include <stdlib.h>
+#include "util.h"
+#include <stdbool.h>
 
-struct vt_shm_attr_t {
-  void    *data;
-  size_t   size;
-  int32_t  width;
-  int32_t  height;
-  int32_t  stride;
-  uint32_t format;
+struct vt_output_layer_state_t {
+  struct vt_surface_t *surface;
+
+  struct vt_box_t src;
+  struct vt_box_t dst;
+
+  bool accepted;
 };

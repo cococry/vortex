@@ -22,14 +22,18 @@
 
 #pragma once
 
-#include <stdint.h>
-#include <stdlib.h>
+#include <gbm.h>
+#include <stdbool.h>
 
-struct vt_shm_attr_t {
-  void    *data;
-  size_t   size;
-  int32_t  width;
-  int32_t  height;
-  int32_t  stride;
-  uint32_t format;
-};
+#include "drm_types.h"
+
+bool drm_fb_init_from_gbm(struct drm_backend_state_t *drm,
+                          struct drm_framebuffer_t   *fb,
+                          struct gbm_bo              *bo);
+
+bool drm_fb_init_from_buffer(struct drm_backend_state_t *drm,
+                             struct drm_framebuffer_t   *fb,
+                             struct vt_buffer_t          *buf);
+
+void drm_fb_finish(struct drm_backend_state_t *drm,
+                   struct drm_framebuffer_t   *fb);

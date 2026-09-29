@@ -22,19 +22,18 @@
 
 #pragma once
 
-#include "../core/buffer.h"
 #include "core_types.h"
+#include "util.h"
+#include "output_layer.h"
+
+struct vt_renderer_t;
+struct vt_output_t;
 
 enum vt_scene_node_type_t {
   VT_SCENE_NODE_ROOT = 0,
   VT_SCENE_NODE_SURFACE,
   VT_SCENE_NODE_RECT,
   VT_SCENE_NODE_INVISIBLE_GEOMETRY
-};
-
-struct vt_rect_t {
-    uint32_t width, height;
-    int32_t x, y;
 };
 
 struct vt_scene_node_t {
@@ -51,7 +50,7 @@ struct vt_scene_node_t {
   uint32_t rect_w, rect_h;
 
   /* resolved global bounds */
-  struct vt_rect_t cached_bounds;
+  struct vt_box_t cached_bounds;
 
   bool geom_dirty;
 
@@ -60,21 +59,14 @@ struct vt_scene_node_t {
   enum vt_scene_node_type_t type;
 };
 
-enum vt_layer_type_t {
-  VT_LAYER_DIRECT = 0,
-  VT_LAYER_COMPOSITE = 1,
+struct vt_scene_t {
+  struct vt_output_layer_state_t *layers;
+  size_t                          n_layers;
+  size_t                          layers_cap;
+
+  struct vt_scene_node_t *root;
+  struct vt_renderer_t   *renderer;
 };
-
-struct vt_layer_t {
-  int32_t  x_global, y_global;
-  uint32_t w, h;
-
-  struct vt_buffer_t *buf;
-
-  enum vt_layer_type_t type;
-};
-
-typedef bool (*vt_scene_node_filter_func_t)(struct vt_scene_node_t *node);
 
 struct vt_scene_node_t *vt_scene_node_create(struct vt_compositor_t *c,
                                              struct vt_surface_t    *surf);
@@ -102,17 +94,14 @@ bool vt_scene_node_reparent(struct vt_compositor_t *c,
 bool vt_scene_node_add_child(struct vt_compositor_t *c,
                              struct vt_scene_node_t *node,
                              struct vt_scene_node_t *child);
+
 bool vt_scene_node_remove_child(struct vt_scene_node_t *parent,
                                 struct vt_scene_node_t *child);
-struct vt_renderer_t;
-struct vt_output_t;
-void vt_scene_node_render(struct vt_renderer_t   *renderer,
-                          struct vt_output_t     *output,
-                          struct vt_scene_node_t *node, bool care_for_damage,
-                          vt_scene_node_filter_func_t filter);
 
-void vt_scene_render(struct vt_renderer_t *renderer, struct vt_output_t *output,
-                     struct vt_scene_node_t *root);
+struct vt_scene_t *vt_scene_create(struct vt_renderer_t   *renderer,
+                                   struct vt_scene_node_t *root);
+
+void vt_scene_render(struct vt_scene_t *scene, struct vt_output_t *output);
 
 void vt_scene_node_set_position(struct vt_scene_node_t *node, int32_t x,
                                 int32_t y);
@@ -121,6 +110,6 @@ void vt_scene_node_mark_geometry_dirty(struct vt_scene_node_t *node);
 
 void vt_scene_node_update_global_bounds(struct vt_scene_node_t *node); 
 
-struct vt_rect_t* vt_scene_node_get_global_bounds(struct vt_scene_node_t *node);
+struct vt_box_t* vt_scene_node_get_global_bounds(struct vt_scene_node_t *node);
 
 struct vt_output_t * vt_scene_node_primary_output(struct vt_compositor_t* comp, struct vt_scene_node_t *node);

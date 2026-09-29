@@ -39,3 +39,7 @@ bool backend_terminate_drm(struct vt_backend_t *backend);
 
 bool backend_prepare_output_frame_drm(struct vt_backend_t *backend,
                                       struct vt_output_t  *output);
+
+bool backend_test_output_layers_drm(
+    struct vt_backend_t *backend, struct vt_output_t *output,
+    struct vt_output_layer_state_t *layers, size_t layer_count);

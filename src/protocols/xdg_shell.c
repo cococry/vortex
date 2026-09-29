@@ -25,8 +25,8 @@
 #include "xdg_shell.h"
 #include "src/core/util.h"
 
-#include "src/core/core_types.h"
 #include "src/core/content_update.h"
+#include "src/core/core_types.h"
 #include "src/core/scene.h"
 #include "src/core/surface.h"
 #include "xdg-shell-protocol.h"
@@ -178,13 +178,13 @@ static void _xdg_popup_reposition(struct wl_client   *client,
                                   struct wl_resource *positioner,
                                   uint32_t            token);
 
-static bool _xdg_toplevel_send_state(struct vt_xdg_toplevel_t *top,
-                                     uint32_t state, bool activated);
-
-static bool _xdg_surface_commit(struct vt_surface_t *surf, struct vt_content_update_t* cu);
+static bool _xdg_surface_commit(struct vt_surface_t        *surf,
+                                struct vt_content_update_t *cu);
 
 static void _xdg_toplevel_mapping_changed(struct vt_surface_t *surf,
                                           bool                 mapped);
+static bool _xdg_toplevel_configure(struct vt_xdg_toplevel_t *top,
+                                    int32_t width, int32_t height);
 
 struct vt_xdg_positioner_t {
   struct wl_resource *res;
@@ -261,18 +261,17 @@ static const struct xdg_wm_base_interface xdg_wm_base_impl = {
 };
 
 static const struct vt_surface_role_impl_t xdg_toplevel_role_impl = {
-  .type = VT_SURFACE_ROLE_XDG_TOPLEVEL,
-  .commit = _xdg_surface_commit,
-  .validate_commit = NULL,
+    .type = VT_SURFACE_ROLE_XDG_TOPLEVEL,
+    .commit = _xdg_surface_commit,
+    .validate_commit = NULL,
 };
 
 static const struct vt_surface_role_impl_t xdg_popup_role_impl = {
-  .type = VT_SURFACE_ROLE_XDG_POPUP,
-  .commit = _xdg_surface_commit,
-  .validate_commit = NULL,
-  .apply = NULL,
-  .mapping_changed = _xdg_toplevel_mapping_changed
-};
+    .type = VT_SURFACE_ROLE_XDG_POPUP,
+    .commit = _xdg_surface_commit,
+    .validate_commit = NULL,
+    .apply = NULL,
+    .mapping_changed = _xdg_toplevel_mapping_changed};
 
 static struct vt_proto_xdg_shell_t _proto;
 
@@ -360,10 +359,7 @@ void _xdg_wm_base_positioner_handle_resource_destroy(
   wl_resource_set_user_data(resource, NULL);
 }
 
-
-void
-_xdg_toplevel_handle_resource_destroy(struct wl_resource *resource)
-{
+void _xdg_toplevel_handle_resource_destroy(struct wl_resource *resource) {
   struct vt_xdg_toplevel_t *top =
       resource ? wl_resource_get_user_data(resource) : NULL;
 
@@ -393,9 +389,7 @@ _xdg_toplevel_handle_resource_destroy(struct wl_resource *resource)
   free(top);
 }
 
-  void
-_xdg_surface_handle_resource_destroy(struct wl_resource *resource)
-{
+void _xdg_surface_handle_resource_destroy(struct wl_resource *resource) {
   struct vt_xdg_surface_t *xdg =
       resource ? wl_resource_get_user_data(resource) : NULL;
 
@@ -511,6 +505,54 @@ static void _xdg_toplevel_mapping_changed(struct vt_surface_t *surf,
   }
 }
 
+static bool _xdg_toplevel_configure(struct vt_xdg_toplevel_t *top,
+                                    int32_t width, int32_t height) {
+  if (!top || !top->xdg_surf || !top->xdg_toplevel_res)
+    return false;
+
+  struct wl_array states;
+  wl_array_init(&states);
+
+  if (top->activated) {
+    uint32_t *state = wl_array_add(&states, sizeof(*state));
+    if (!state)
+      goto fail;
+
+    *state = XDG_TOPLEVEL_STATE_ACTIVATED;
+  }
+
+  if (top->fullscreen) {
+    uint32_t *state = wl_array_add(&states, sizeof(*state));
+    if (!state)
+      goto fail;
+
+    *state = XDG_TOPLEVEL_STATE_FULLSCREEN;
+  }
+
+  if (top->maximized) {
+    uint32_t *state = wl_array_add(&states, sizeof(*state));
+    if (!state)
+      goto fail;
+
+    *state = XDG_TOPLEVEL_STATE_MAXIMIZED;
+  }
+
+  xdg_toplevel_send_configure(top->xdg_toplevel_res, width, height, &states);
+
+  wl_array_release(&states);
+
+  uint32_t serial = wl_display_next_serial(top->xdg_surf->surf->comp->wl.dsp);
+
+  xdg_surface_send_configure(top->xdg_surf->xdg_surf_res, serial);
+  top->xdg_surf->last_configure_serial = serial;
+
+  return true;
+
+fail:
+  wl_array_release(&states);
+  return false;
+}
+
 void _xdg_wm_base_get_xdg_surface(struct wl_client   *client,
                                   struct wl_resource *resource, uint32_t id,
                                   struct wl_resource *surface_res) {
@@ -537,14 +579,11 @@ void _xdg_wm_base_get_xdg_surface(struct wl_client   *client,
     return;
   }
 
-  xdg_surf->geom_node =
-      vt_scene_node_create_container(surf->comp); 
-  
-  xdg_surf->subsurface_layer =
-      vt_scene_node_create_container(surf->comp); 
+  xdg_surf->geom_node = vt_scene_node_create_container(surf->comp);
 
-  xdg_surf->popup_layer =
-      vt_scene_node_create_container(surf->comp);
+  xdg_surf->subsurface_layer = vt_scene_node_create_container(surf->comp);
+
+  xdg_surf->popup_layer = vt_scene_node_create_container(surf->comp);
 
   vt_scene_node_add_child(surf->comp, surf->scene_node,
                           xdg_surf->subsurface_layer);
@@ -776,7 +815,7 @@ void send_initial_configure(struct vt_xdg_surface_t *surf) {
     return;
   }
   /* Send empty state request to trigger initial configure. */
-  _xdg_toplevel_send_state(surf->toplevel, 0, false);
+  _xdg_toplevel_configure(surf->toplevel, 0, 0);
 }
 
 void _xdg_surface_get_toplevel(struct wl_client   *client,
@@ -851,8 +890,7 @@ void _xdg_surface_get_toplevel(struct wl_client   *client,
 }
 
 void _xdg_surface_get_popup(struct wl_client   *client,
-                            struct wl_resource *resource,
-                            uint32_t            id,
+                            struct wl_resource *resource, uint32_t id,
                             struct wl_resource *parent_surface,
                             struct wl_resource *positioner) {
 
@@ -873,8 +911,7 @@ void _xdg_surface_get_popup(struct wl_client   *client,
      * assigns the popup parent before the initial commit. Vortex currently
      * does not support that case.
      */
-    VT_WARN(_proto.comp->log,
-            "Parentless xdg_popup is not supported.");
+    VT_WARN(_proto.comp->log, "Parentless xdg_popup is not supported.");
     return;
   }
 
@@ -1137,9 +1174,57 @@ void _xdg_toplevel_set_maximized(struct wl_client   *client,
 void _xdg_toplevel_unset_maximized(struct wl_client   *client,
                                    struct wl_resource *resource) {}
 
-void _xdg_toplevel_set_fullscreen(struct wl_client   *client,
-                                  struct wl_resource *resource,
-                                  struct wl_resource *output) {}
+static void _xdg_toplevel_set_fullscreen(struct wl_client   *client,
+                                         struct wl_resource *resource,
+                                         struct wl_resource *output_res) {
+  struct vt_xdg_toplevel_t *top =
+      resource ? wl_resource_get_user_data(resource) : NULL;
+  if (!top || !top->xdg_surf || !top->xdg_surf->surf)
+    return;
+
+  struct vt_surface_t *surf = top->xdg_surf->surf;
+
+  struct vt_output_t *output =
+      output_res ? wl_resource_get_user_data(output_res) : NULL;
+
+  if (!output) {
+
+    if (wl_list_empty(&surf->comp->outputs))
+      return;
+
+    output = wl_container_of(surf->comp->outputs.next, output, link_global);
+  }
+
+  if (!output)
+    return;
+
+  struct wl_array states;
+  wl_array_init(&states);
+
+  uint32_t *state = wl_array_add(&states, sizeof(*state));
+  if (!state) {
+    wl_array_release(&states);
+    VT_WL_OUT_OF_MEMORY(surf->comp, client);
+    return;
+  }
+
+  *state = XDG_TOPLEVEL_STATE_FULLSCREEN;
+
+  xdg_toplevel_send_configure(top->xdg_toplevel_res, output->width,
+                              output->height, &states);
+
+  wl_array_release(&states);
+
+  uint32_t serial = wl_display_next_serial(wl_client_get_display(client));
+
+  top->fullscreen = true;
+  top->fullscreen_output = output;
+
+  vt_scene_node_set_position(surf->scene_node, output->x, output->y);
+
+  _xdg_toplevel_configure(top, output->width, output->height);
+
+}
 
 void _xdg_toplevel_unset_fullscreen(struct wl_client   *client,
                                     struct wl_resource *resource) {}
@@ -1448,10 +1533,10 @@ static bool _popup_resolve_pos(struct vt_xdg_popup_t       *popup,
     return false;
   }
 
-  struct vt_rect_t *rect =
+  struct vt_box_t *rect =
       vt_scene_node_get_global_bounds(popup->parent_xdg_surf->geom_node);
 
-  if(!rect) {
+  if (!rect) {
     return false;
   }
 
@@ -1511,64 +1596,6 @@ void _xdg_popup_reposition(struct wl_client   *client,
            serial, geom.x, geom.y, geom.w, geom.h);
 }
 
-bool _xdg_toplevel_send_state(struct vt_xdg_toplevel_t *top, uint32_t state,
-                              bool activated) {
-  /* [0]: The function returns whether or not the state has been sent
-   * successfully */
-  /* The 'state' parameter is a XDG_TOPLEVEL_STATE_* value. */
-  if (!top || !top->xdg_surf || !top->xdg_surf->surf ||
-      !top->xdg_toplevel_res) {
-    return false;
-  }
-
-  struct wl_client *client = wl_resource_get_client(top->xdg_toplevel_res);
-  if (!client)
-    return false;
-  struct wl_display *dsp = wl_client_get_display(client);
-
-  uint32_t serial = wl_display_next_serial(dsp);
-
-  /* 1. Populate the states array with the single given state */
-  struct wl_array states;
-  wl_array_init(&states);
-
-  /* 2. If the requested state should be activated, add it
-   * to the array of states. In the case of deactivation,
-   * the array stays empty which results in the requested
-   * state being cleared (removed).
-   * */
-  if (activated) {
-    uint32_t *state_elem = wl_array_add(&states, sizeof(*state_elem));
-    if (!state_elem) {
-      wl_array_release(&states);
-      VT_WL_OUT_OF_MEMORY(top->xdg_surf->surf->comp, client);
-      return false;
-    }
-    *state_elem = state;
-  }
-
-  /* 3. Issue the configure request with the changed state
-   * (width, height: 0, 0 -> unchanged)*/
-  xdg_toplevel_send_configure(top->xdg_toplevel_res, 0, 0, &states);
-
-  /* Deallocate the states array */
-  wl_array_release(&states);
-
-  if (!top->xdg_surf->xdg_surf_res) {
-    VT_ERROR(top->xdg_surf->surf->comp->log,
-             "Toplevel %p has no associated "
-             "XDG surface resource.",
-             top);
-    return false;
-  }
-
-  /* 4. Send the corresponding xdg_surface.configure with a fresh serial
-   * to the xdg surface associated with the toplevel */
-  xdg_surface_send_configure(top->xdg_surf->xdg_surf_res, serial);
-
-  return true;
-}
-
 // ===================================================
 // =================== PUBLIC API ====================
 // ===================================================
@@ -1587,21 +1614,48 @@ bool vt_proto_xdg_shell_init(struct vt_compositor_t *c, uint32_t version) {
 
 bool vt_proto_xdg_toplevel_set_state_maximized(struct vt_xdg_toplevel_t *top,
                                                bool activated) {
-  return _xdg_toplevel_send_state(top, XDG_TOPLEVEL_STATE_MAXIMIZED, activated);
+  if (!top)
+    return false;
+
+  top->maximized = activated;
+  return _xdg_toplevel_configure(top, 0, 0);
 }
 
 bool vt_proto_xdg_toplevel_set_state_fullscreen(struct vt_xdg_toplevel_t *top,
                                                 bool activated) {
-  return _xdg_toplevel_send_state(top, XDG_TOPLEVEL_STATE_FULLSCREEN,
-                                  activated);
+  if (!top)
+    return false;
+
+  top->fullscreen = activated;
+
+  if (activated && top->fullscreen_output) {
+    return _xdg_toplevel_configure(top, top->fullscreen_output->width,
+                                   top->fullscreen_output->height);
+  }
+
+  return _xdg_toplevel_configure(top, 0, 0);
 }
 
 bool vt_proto_xdg_toplevel_set_state_resizing(struct vt_xdg_toplevel_t *top,
                                               bool activated) {
-  return _xdg_toplevel_send_state(top, XDG_TOPLEVEL_STATE_RESIZING, activated);
+  if (!top)
+    return false;
+
+  top->resizing = activated;
+  return _xdg_toplevel_configure(top, 0, 0);
 }
 
 bool vt_proto_xdg_toplevel_set_state_activated(struct vt_xdg_toplevel_t *top,
                                                bool activated) {
-  return _xdg_toplevel_send_state(top, XDG_TOPLEVEL_STATE_ACTIVATED, activated);
+  if (!top)
+    return false;
+
+  top->activated = activated;
+
+  if (top->fullscreen && top->fullscreen_output) {
+    return _xdg_toplevel_configure(top, top->fullscreen_output->width,
+                                   top->fullscreen_output->height);
+  }
+
+  return _xdg_toplevel_configure(top, 0, 0);
 }

@@ -491,8 +491,7 @@ void _vt_comp_wl_surface_create(struct wl_client   *client,
                                 struct wl_resource *resource, uint32_t id) {
   struct vt_compositor_t *c =
       resource ? wl_resource_get_user_data(resource) : NULL;
-  if (!c)
-    return;
+  assert(c && c->scene);
 
   VT_TRACE(c->log,
            "Got wl_compositor.surface_create: Started managing surface.");
@@ -523,7 +522,7 @@ void _vt_comp_wl_surface_create(struct wl_client   *client,
     return;
   }
 
-  vt_scene_node_add_child(c, c->root_node, node);
+  vt_scene_node_add_child(c, c->scene->root, node);
 }
 
 void _vt_comp_wl_region_handle_resource_destroy(struct wl_resource *resource) {
@@ -717,10 +716,10 @@ static void _sig_handler(int sig) {
 static void _handle_output_changed_backend(struct vt_backend_t *backend,
                                            struct vt_output_t  *output) {
   (void)output;
-  if (!backend || !backend->comp)
+  if (!backend || !backend->comp || !backend->comp->scene)
     return;
 
-  if (backend->comp->root_node) {
+  if (backend->comp->scene->root) {
     uint32_t            root_w = 0, root_h = 0;
     struct vt_output_t *output;
     wl_list_for_each(output, &backend->comp->outputs, link_global) {
@@ -728,9 +727,9 @@ static void _handle_output_changed_backend(struct vt_backend_t *backend,
       root_h += output->height;
     }
 
-    backend->comp->root_node->rect_w = root_w;
-    backend->comp->root_node->rect_h = root_h;
-    vt_scene_node_update_global_bounds(backend->comp->root_node);
+    backend->comp->scene->root->rect_w = root_w;
+    backend->comp->scene->root->rect_h = root_h;
+    vt_scene_node_update_global_bounds(backend->comp->scene->root);
   }
 }
 
@@ -849,13 +848,20 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
     root_h += output->height;
   }
 
-  c->root_node = vt_scene_node_create_rect(c, 0, 0, root_w, root_h, 0x181818);
-  if (!c->root_node) {
+  struct vt_scene_node_t *root_node =
+      vt_scene_node_create_rect(c, 0, 0, root_w, root_h, 0x181818);
+  if (!root_node) {
     VT_ERROR(c->log, "Failed to create root scene node.");
     return false;
   }
 
-  c->root_node->type = VT_SCENE_NODE_ROOT;
+  root_node->type = VT_SCENE_NODE_ROOT;
+
+  c->scene = vt_scene_create(c->renderer, root_node);
+  if (!c->scene) {
+    VT_ERROR(c->log, "Failed to create scene.");
+    return false;
+  }
 
   if (!c->have_proto_dmabuf) {
     VT_WARN(c->log, "Running vortex without support for linux-dmabuf protocol");
@@ -970,10 +976,10 @@ void vt_comp_schedule_repaint(struct vt_compositor_t *c,
 
 void vt_comp_repaint_scene(struct vt_compositor_t *c,
                            struct vt_output_t     *output) {
-  if (!c || !output || !c->backend || !c->renderer || !c->root_node)
+  if (!c || !output || !c->backend || !c->renderer || !c->scene)
     return;
 
-  vt_scene_render(c->renderer, output, c->root_node);
+  vt_scene_render(c->scene, output);
 }
 
 static bool _surface_accepts_input(struct vt_surface_t *surf, double sx,
@@ -1043,10 +1049,12 @@ static struct vt_surface_t *_scene_pick_surface(struct vt_scene_node_t *node,
 
 struct vt_surface_t *vt_comp_pick_surface(struct vt_compositor_t *comp,
                                           double x, double y) {
-  if (!comp || !comp->root_node || !isfinite(x) || !isfinite(y))
+  if (!comp || !comp->scene || !comp->scene->root || !isfinite(x) ||
+      !isfinite(y))
     return NULL;
 
-  struct vt_surface_t *surf = _scene_pick_surface(comp->root_node, 0, 0, x, y);
+  struct vt_surface_t *surf =
+      _scene_pick_surface(comp->scene->root, 0, 0, x, y);
 
   return surf;
 }

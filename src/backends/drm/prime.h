@@ -22,14 +22,17 @@
 
 #pragma once
 
+#include "render/dmabuf_attr.h"
+#include <gbm.h>
+#include <stdbool.h>
 #include <stdint.h>
-#include <stdlib.h>
 
-struct vt_shm_attr_t {
-  void    *data;
-  size_t   size;
-  int32_t  width;
-  int32_t  height;
-  int32_t  stride;
-  uint32_t format;
-};
+void drm_prime_close_handles(int drm_fd, uint32_t handles[4]);
+
+bool drm_prime_test_import(int drm_fd, struct vt_dmabuf_attr_t *attr);
+
+bool drm_prime_import_dmabuf(int drm_fd, struct vt_dmabuf_attr_t *attr,
+                             uint32_t handles[4]);
+
+bool drm_prime_import_gbm_bo(int drm_fd, struct gbm_bo *bo,
+                             uint32_t handles[4]);

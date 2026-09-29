@@ -26,6 +26,7 @@ struct vt_renderer_t;
 struct vt_surface_t;
 struct vt_backend_t;
 struct vt_output_t;
+struct vt_scene_t;
 
 #include <stdbool.h>
 
@@ -34,10 +35,11 @@ struct vt_output_t;
 
 #include "../input/input.h"
 #include "../input/wl_seat.h"
+#include "../render/dmabuf_attr.h"
+
 #include "session.h"
 #include "util.h"
-
-#include "../render/dmabuf_attr.h"
+#include "output_layer.h"
 
 #define BACKEND_DATA(b, type) ((type *)((b)->user_data))
 #define VT_MAX_DAMAGE_RECTS   64
@@ -76,6 +78,11 @@ struct vt_backend_interface_t {
                        struct vt_output_t  *output);
   bool (*prepare_output_frame)(struct vt_backend_t *backend,
                                struct vt_output_t  *output);
+
+  bool (*test_output_layers)(struct vt_backend_t            *backend,
+                             struct vt_output_t             *output,
+                             struct vt_output_layer_state_t *layers,
+                             size_t                          layer_count);
   bool (*terminate)(struct vt_backend_t *backend);
 };
 
@@ -179,6 +186,8 @@ struct vt_compositor_t {
   struct vt_renderer_t *renderer;
   struct log_state_t    log;
 
+  struct vt_scene_t *scene;
+
   struct wl_list surfaces;
   struct wl_list focus_stack;
 
@@ -197,8 +206,6 @@ struct vt_compositor_t {
   bool have_proto_dmabuf, have_proto_dmabuf_explicit_sync;
 
   struct vt_surface_t *root_cursor;
-
-  struct vt_scene_node_t *root_node;
 };
 
 typedef bool (*backend_implement_func_t)(struct vt_compositor_t *comp);

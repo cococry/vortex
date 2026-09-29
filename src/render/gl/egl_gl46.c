@@ -1101,6 +1101,7 @@ bool renderer_setup_renderable_output_egl(struct vt_renderer_t *r,
   EGLSurface egl_surf =
       eglCreateWindowSurface(egl->egl_dsp, egl->egl_conf,
                              (EGLNativeWindowType)output->native_window, NULL);
+
   if (egl_surf == EGL_NO_SURFACE) {
     EGLint err = eglGetError();
     VT_ERROR(r->comp->log, "eglCreateWindowSurface failed: 0x%04x (%s)", err,
