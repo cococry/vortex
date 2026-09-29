@@ -24,6 +24,7 @@
 
 
 #include "core/buffer.h"
+#include "core/core_types.h"
 #include "core/session.h"
 #include "props.h"
 #include <xf86drm.h>
@@ -47,6 +48,9 @@ struct drm_plane_t {
 
   struct wl_array formats;
 
+  struct vt_output_cursor_size_t* cursor_sizes; 
+  size_t n_cursor_sizes;
+
   /*uint32_t props[VT_DRM_PLANE__COUNT];*/
 };
 
@@ -57,6 +61,13 @@ struct drm_crtc_t {
 
   struct drm_plane_t *plane_cursor;
   struct drm_plane_t *plane_primary;
+};
+
+enum {
+  VT_DRM_CAP_ATOMIC_MODESET = 0,
+  VT_DRM_CAP_ADDFB2_MODIFIERS,
+  VT_DRM_CAP_TEARING_PAGE_FLIPS,
+  VT_DRM_CAP__COUNT,
 };
 
 struct drm_backend_state_t {
@@ -85,6 +96,8 @@ struct drm_backend_state_t {
 
   struct wl_array crtcs;
   struct wl_array planes;
+
+  bool caps[VT_DRM_CAP__COUNT];
 };
 
 struct drm_backend_master_state_t {

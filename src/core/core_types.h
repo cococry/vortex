@@ -115,6 +115,10 @@ struct vt_rendered_surface_t {
   struct vt_buffer_use_t *buffer_use;
 };
 
+struct vt_output_cursor_size_t {
+  uint16_t width, height;
+};
+
 struct vt_output_t {
   struct wl_list       rendered_surfaces;
   struct wl_list       link_local, link_global;

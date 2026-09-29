@@ -20,22 +20,22 @@ static const char *crtc_infos[VT_DRM_CRTC__COUNT] = {
 
 /* Needs to be sorted according to strcmp() for bsearch() */
 static const char *plane_infos[VT_DRM_PLANE__COUNT] = {
-	[VT_DRM_PLANE_CRTC_H]          = "CRTC_H",
-	[VT_DRM_PLANE_CRTC_ID]         = "CRTC_ID",
-	[VT_DRM_PLANE_CRTC_W]          = "CRTC_W",
-	[VT_DRM_PLANE_CRTC_X]          = "CRTC_X",
-	[VT_DRM_PLANE_CRTC_Y]          = "CRTC_Y",
-	[VT_DRM_PLANE_FB_DAMAGE_CLIPS] = "FB_DAMAGE_CLIPS",
-	[VT_DRM_PLANE_FB_ID]           = "FB_ID",
-	[VT_DRM_PLANE_IN_FORMATS]      = "IN_FORMATS",
-	[VT_DRM_PLANE_SRC_H]           = "SRC_H",
-	[VT_DRM_PLANE_SRC_W]           = "SRC_W",
-	[VT_DRM_PLANE_SRC_X]           = "SRC_X",
-	[VT_DRM_PLANE_SRC_Y]           = "SRC_Y",
-	[VT_DRM_PLANE_ROTATION]        = "rotation",
-	[VT_DRM_PLANE_TYPE]            = "type",
+    [VT_DRM_PLANE_CRTC_H] = "CRTC_H",
+    [VT_DRM_PLANE_CRTC_ID] = "CRTC_ID",
+    [VT_DRM_PLANE_CRTC_W] = "CRTC_W",
+    [VT_DRM_PLANE_CRTC_X] = "CRTC_X",
+    [VT_DRM_PLANE_CRTC_Y] = "CRTC_Y",
+    [VT_DRM_PLANE_FB_DAMAGE_CLIPS] = "FB_DAMAGE_CLIPS",
+    [VT_DRM_PLANE_FB_ID] = "FB_ID",
+    [VT_DRM_PLANE_IN_FORMATS] = "IN_FORMATS",
+    [VT_DRM_PLANE_SIZE_HINTS] = "SIZE_HINTS",
+    [VT_DRM_PLANE_SRC_H] = "SRC_H",
+    [VT_DRM_PLANE_SRC_W] = "SRC_W",
+    [VT_DRM_PLANE_SRC_X] = "SRC_X",
+    [VT_DRM_PLANE_SRC_Y] = "SRC_Y",
+    [VT_DRM_PLANE_ROTATION] = "rotation",
+    [VT_DRM_PLANE_TYPE] = "type",
 };
-
 
 static int compare_prop_name(const void *key, const void *elem) {
   const char        *name = key;

@@ -3,7 +3,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-/* Needs to be sorted alphabetically for bsearch() */
+/* Needs to be sorted according to strcmp() for bsearch() */
 enum drm_crtc_property_t {
 	VT_DRM_CRTC_ACTIVE = 0,
 	VT_DRM_CRTC_BACKGROUND_COLOR,
@@ -18,6 +18,8 @@ enum drm_crtc_property_t {
 	VT_DRM_CRTC__COUNT
 };
 
+/* Needs to be sorted according to strcmp() for bsearch() */
+
 enum drm_plane_property_t {
 	VT_DRM_PLANE_CRTC_H = 0,
 	VT_DRM_PLANE_CRTC_ID,
@@ -27,6 +29,7 @@ enum drm_plane_property_t {
 	VT_DRM_PLANE_FB_DAMAGE_CLIPS,
 	VT_DRM_PLANE_FB_ID,
 	VT_DRM_PLANE_IN_FORMATS,
+	VT_DRM_PLANE_SIZE_HINTS,
 	VT_DRM_PLANE_SRC_H,
 	VT_DRM_PLANE_SRC_W,
 	VT_DRM_PLANE_SRC_X,

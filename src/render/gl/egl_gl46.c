@@ -32,8 +32,8 @@
 #include "src/core/surface.h"
 #include "src/core/util.h"
 #include "src/protocols/linux_dmabuf.h"
-#include "src/render/dmabuf.h"
 #include "src/render/dmabuf_attr.h"
+#include "src/render/drm_format.h"
 #include "src/render/renderer.h"
 #include "src/render/shm_attr.h"
 
@@ -100,7 +100,7 @@ struct egl_backend_state_t {
 };
 
 struct egl_output_state_t {
-  GLint      fbo_id, fbo_tex_id, rbo_tex_depth;
+  GLint fbo_id, fbo_tex_id, rbo_tex_depth;
 };
 
 static const char *_egl_err_str(EGLint error);
@@ -110,22 +110,22 @@ static bool        _egl_gl_import_buffer_shm(struct vt_renderer_t    *r,
                                              struct vt_egl_buffer_t  *egl_buf,
                                              const pixman_region32_t *damage);
 
-static bool        _egl_pick_config_from_format(struct vt_compositor_t     *c,
-                                                struct egl_backend_state_t *egl,
-                                                uint32_t                    format);
-static bool        _egl_pick_config(struct vt_compositor_t     *comp,
-                                    struct egl_backend_state_t *egl,
-                                    struct vt_backend_t        *backend);
+static bool _egl_pick_config_from_format(struct vt_compositor_t     *c,
+                                         struct egl_backend_state_t *egl,
+                                         uint32_t                    format);
+static bool _egl_pick_config(struct vt_compositor_t     *comp,
+                             struct egl_backend_state_t *egl,
+                             struct vt_backend_t        *backend);
 static bool _egl_record_surface_release_fences(struct vt_renderer_t *renderer,
-                                             struct vt_output_t   *output);
+                                               struct vt_output_t   *output);
 static bool _egl_gl_create_output_fbo(struct vt_output_t *output);
 
 static bool _egl_create_renderer(struct vt_renderer_t      *renderer,
                                  enum vt_backend_platform_t platform,
                                  void *native_handle, bool log_error);
 
-static void _egl_buffer_attachment_destroy(struct vt_buffer_t *buf,
-                                              void *owner, void *data);
+static void _egl_buffer_attachment_destroy(struct vt_buffer_t *buf, void *owner,
+                                           void *data);
 
 struct vt_buffer_attachment_implementation_t egl_buffer_attachment_impl = {
     .destroy = _egl_buffer_attachment_destroy};
@@ -235,10 +235,10 @@ bool _egl_gl_import_buffer_shm(struct vt_renderer_t *r, struct vt_shm_attr_t *a,
 #define _VT_DRM_FORMAT_MOD_INVALID 0x00FFFFFFFFFFFFFF
 #define _VT_DRM_FORMAT_MOD_LINEAR  0x0000000000000000
 
-bool _egl_gl_import_buffer_dmabuf(struct vt_renderer_t               *r,
+bool _egl_gl_import_buffer_dmabuf(struct vt_renderer_t    *r,
                                   struct vt_dmabuf_attr_t *a,
-                                  struct vt_buffer_t *buf,
-                                  struct vt_egl_buffer_t* egl_buf) {
+                                  struct vt_buffer_t      *buf,
+                                  struct vt_egl_buffer_t  *egl_buf) {
 
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
 
@@ -249,8 +249,7 @@ bool _egl_gl_import_buffer_dmabuf(struct vt_renderer_t               *r,
   if (a->mod != _VT_DRM_FORMAT_MOD_INVALID &&
       a->mod != _VT_DRM_FORMAT_MOD_LINEAR &&
       !egl->has_dmabuf_modifiers_support) {
-    VT_ERROR(r->comp->log,
-             "No support for DMABUF modifiers, skipping import.");
+    VT_ERROR(r->comp->log, "No support for DMABUF modifiers, skipping import.");
     return false;
   }
 
@@ -323,21 +322,18 @@ bool _egl_gl_import_buffer_dmabuf(struct vt_renderer_t               *r,
     return false;
   }
 
-  bool                           is_external_only = false;
-  struct vt_dmabuf_drm_format_t *fmt = NULL;
-  struct vt_dmabuf_drm_format_t *f;
-  wl_array_for_each(f, &egl->formats) {
-    if (f->format != a->format)
+  bool                    is_external_only = false;
+  struct vt_drm_format_t *fmt;
+  wl_array_for_each(fmt, &egl->formats) {
+    if (fmt->format != a->format)
       continue;
-    for (size_t i = 0; i < f->len; i++) {
-      if (f->mods[i].mod == a->mod) {
-        is_external_only = f->mods[i]._egl_ext_only;
-        fmt = f;
-        break;
-      }
-    }
-    if (fmt)
-      break;
+
+    struct vt_drm_format_modifier_t *mod = vt_drm_format_get_mod(fmt, a->mod);
+    if (!mod)
+      continue;
+
+    is_external_only = mod->_egl_ext_only;
+    break;
   }
 
   GLenum target = is_external_only ? GL_TEXTURE_EXTERNAL_OES : GL_TEXTURE_2D;
@@ -507,22 +503,20 @@ bool _egl_buffer_use_is_ready(struct vt_renderer_t   *renderer,
   return ret == EGL_TRUE;
 }
 
-static bool
-_output_needs_release_fence(struct vt_output_t *output)
-{
-    struct vt_rendered_surface_t *entry;
+static bool _output_needs_release_fence(struct vt_output_t *output) {
+  struct vt_rendered_surface_t *entry;
 
-    wl_list_for_each(entry, &output->rendered_surfaces, link) {
-      struct vt_buffer_use_t *use = entry->buffer_use;
+  wl_list_for_each(entry, &output->rendered_surfaces, link) {
+    struct vt_buffer_use_t *use = entry->buffer_use;
 
-      if (!use)
-        continue;
+    if (!use)
+      continue;
 
-      if (vt_buffer_release_needs_fence(use->release))
-        return true;
-    }
+    if (vt_buffer_release_needs_fence(use->release))
+      return true;
+  }
 
-    return false;
+  return false;
 }
 
 bool _egl_record_surface_release_fences(struct vt_renderer_t *renderer,
@@ -701,6 +695,8 @@ bool _egl_create_renderer(struct vt_renderer_t      *renderer,
       VT_ALLOC(renderer->comp, sizeof(struct egl_backend_state_t));
   struct egl_backend_state_t *egl =
       BACKEND_DATA(renderer, struct egl_backend_state_t);
+
+  wl_array_init(&egl->formats);
 
   if (!(egl->egl_dsp = _egl_create_display(renderer->comp, platform,
                                            native_handle, log_error))) {
@@ -893,11 +889,7 @@ bool renderer_is_handle_renderable_egl(struct vt_renderer_t *renderer,
                               native_handle, false);
 }
 
-bool renderer_query_dmabuf_formats_egl(struct vt_compositor_t *comp,
-                                       void                   *native_handle,
-                                       struct wl_array        *formats) {
-  if (!comp || !native_handle || !formats)
-    return false;
+static bool _egl_load_dmabuf_query_procs(void) {
   if (!eglQueryDmaBufFormatsEXT_ptr)
     eglQueryDmaBufFormatsEXT_ptr =
         (void *)eglGetProcAddress("eglQueryDmaBufFormatsEXT");
@@ -905,16 +897,13 @@ bool renderer_query_dmabuf_formats_egl(struct vt_compositor_t *comp,
     eglQueryDmaBufModifiersEXT_ptr =
         (void *)eglGetProcAddress("eglQueryDmaBufModifiersEXT");
 
-  if (!eglQueryDmaBufFormatsEXT_ptr || !eglQueryDmaBufModifiersEXT_ptr) {
-    return false;
-  }
+  return eglQueryDmaBufFormatsEXT_ptr && eglQueryDmaBufModifiersEXT_ptr;
+}
 
-  EGLDisplay egl_dsp;
-  if (!(egl_dsp = _egl_create_display(comp, comp->backend->platform,
-                                      native_handle, false))) {
-    VT_ERROR(comp->log, "Failed to create EGL display.");
-    return false;
-  }
+static bool _egl_query_dmabuf_formats(struct vt_compositor_t *comp,
+                                      EGLDisplay              egl_dsp,
+                                      struct wl_array        *formats) {
+  assert(comp && formats);
 
   wl_array_init(formats);
 
@@ -925,57 +914,126 @@ bool renderer_query_dmabuf_formats_egl(struct vt_compositor_t *comp,
    *      If <max_formats> is 0, no formats are returned, but the total number
           of formats is returned in <num_formats>, and no error is generated.
     */
-  eglQueryDmaBufFormatsEXT_ptr(egl_dsp, 0 /*max_formats*/, NULL, &n_formats);
-  if (n_formats <= 0) {
+  if (!eglQueryDmaBufFormatsEXT_ptr(egl_dsp, 0 /*max_formats*/, NULL,
+                                    &n_formats) ||
+      n_formats <= 0) {
     VT_ERROR(comp->log, "No DMABUF formats available, falling back to SHM.\n");
-    eglTerminate(egl_dsp);
     return false;
   }
 
-  EGLint *dmabuf_formats = calloc(n_formats, sizeof(EGLint));
-  eglQueryDmaBufFormatsEXT_ptr(egl_dsp, n_formats, dmabuf_formats, &n_formats);
+  EGLint *dmabuf_formats = calloc((size_t)n_formats, sizeof(*dmabuf_formats));
+  if (!dmabuf_formats)
+    return false;
+
+  EGLint returned_formats = 0;
+  if (!eglQueryDmaBufFormatsEXT_ptr(egl_dsp, n_formats, dmabuf_formats,
+                                    &returned_formats)) {
+    free(dmabuf_formats);
+    return false;
+  }
 
   // query the available modifiers of each format
-  for (uint32_t i = 0; i < n_formats; i++) {
+  for (EGLint i = 0; i < returned_formats; i++) {
+    struct wl_array mods;
+    wl_array_init(&mods);
+
     EGLint n_mods = 0;
     /* we set max_modifiers to 0 to count the modifiers without retrieving them:
      *    If <max_modifiers> is 0, no modifiers are returned, but the total
           number of modifiers is returned in <num_modifiers>, and no error is
           generated. */
-    eglQueryDmaBufModifiersEXT_ptr(egl_dsp, dmabuf_formats[i],
-                                   0 /*max_modifiers*/, NULL, NULL, &n_mods);
-    if (n_mods <= 0)
+    if (!eglQueryDmaBufModifiersEXT_ptr(egl_dsp, dmabuf_formats[i], 0, NULL,
+                                        NULL, &n_mods) ||
+        n_mods <= 0) {
+      wl_array_release(&mods);
       continue;
+    }
 
-    EGLuint64KHR *format_mods = calloc(n_mods, sizeof(EGLuint64KHR));
+    EGLuint64KHR *egl_mods = calloc((size_t)n_mods, sizeof(*egl_mods));
     // We need to store ext_only per modifier to know if
     // the requested format-modifier combination is only
     // supported for use with the GL_TEXTURE_EXTERNAL_OES flag when importing
     // the DMABUF into a GL texture later.
-    EGLBoolean *ext_only = calloc(n_mods, sizeof(EGLBoolean));
-    eglQueryDmaBufModifiersEXT_ptr(egl_dsp, dmabuf_formats[i], n_mods,
-                                   format_mods, ext_only, &n_mods);
 
-    // add the format to the array of available formats
-    struct vt_dmabuf_drm_format_t *fmt = wl_array_add(formats, sizeof(*fmt));
-    fmt->format = dmabuf_formats[i];
-    fmt->len = n_mods;
-    fmt->mods = malloc(sizeof(struct vt_dmabuf_format_modifier_t) * n_mods);
+    EGLBoolean *egl_ext_only = calloc((size_t)n_mods, sizeof(*egl_ext_only));
 
-    // populate the modifiers
-    for (uint32_t j = 0; j < n_mods; j++) {
-      fmt->mods[j].mod = format_mods[j];
-      fmt->mods[j]._egl_ext_only = ext_only[j] == EGL_TRUE;
+    if (!egl_mods || !egl_ext_only) {
+      free(egl_mods);
+      free(egl_ext_only);
+      wl_array_release(&mods);
+      continue;
     }
 
-    free(format_mods);
-    free(ext_only);
+    EGLint returned_mods = 0;
+
+    if (!eglQueryDmaBufModifiersEXT_ptr(egl_dsp, dmabuf_formats[i], n_mods,
+                                        egl_mods, egl_ext_only,
+                                        &returned_mods)) {
+      free(egl_mods);
+      free(egl_ext_only);
+      wl_array_release(&mods);
+      continue;
+    }
+
+    for (EGLint j = 0; j < returned_mods; j++) {
+      struct vt_drm_format_modifier_t *mod = wl_array_add(&mods, sizeof(*mod));
+
+      if (!mod) {
+        free(egl_mods);
+        free(egl_ext_only);
+        wl_array_release(&mods);
+        free(dmabuf_formats);
+        vt_drm_format_array_free(formats);
+        return false;
+      }
+
+      mod->mod = (uint64_t)egl_mods[j];
+      mod->_egl_ext_only = egl_ext_only[j] == EGL_TRUE;
+    }
+
+    free(egl_mods);
+    free(egl_ext_only);
+
+    struct vt_drm_format_t fmt = {0};
+    vt_drm_format_init(&fmt, dmabuf_formats[i]);
+    fmt.mods = mods;
+
+    /* deep copies fmt->mods */
+    if (!vt_drm_format_array_push(formats, &fmt)) {
+      vt_drm_format_fini(&fmt);
+      free(dmabuf_formats);
+      vt_drm_format_array_free(formats);
+      return false;
+    }
+
+    /* releases fmt->mods */
+    vt_drm_format_fini(&fmt);
   }
 
   free(dmabuf_formats);
+  return true;
+}
+
+bool renderer_query_dmabuf_formats_egl(struct vt_compositor_t *comp,
+                                       void                   *native_handle,
+                                       struct wl_array        *formats) {
+  if (!comp || !native_handle || !formats)
+    return false;
+
+  if (!_egl_load_dmabuf_query_procs())
+    return false;
+
+  EGLDisplay egl_dsp;
+  if (!(egl_dsp = _egl_create_display(comp, comp->backend->platform,
+                                      native_handle, false))) {
+    VT_ERROR(comp->log, "Failed to create EGL display.");
+    return false;
+  }
+
+  bool ret = _egl_query_dmabuf_formats(comp, egl_dsp, formats);
 
   eglTerminate(egl_dsp);
-  return true;
+  return ret;
 }
 
 bool renderer_query_dmabuf_formats_with_renderer_egl(
@@ -985,16 +1043,8 @@ bool renderer_query_dmabuf_formats_with_renderer_egl(
 
   struct egl_backend_state_t *egl =
       BACKEND_DATA(renderer, struct egl_backend_state_t);
-  wl_array_init(&egl->formats);
 
-  if (!eglQueryDmaBufFormatsEXT_ptr)
-    eglQueryDmaBufFormatsEXT_ptr =
-        (void *)eglGetProcAddress("eglQueryDmaBufFormatsEXT");
-  if (!eglQueryDmaBufModifiersEXT_ptr)
-    eglQueryDmaBufModifiersEXT_ptr =
-        (void *)eglGetProcAddress("eglQueryDmaBufModifiersEXT");
-
-  if (!eglQueryDmaBufFormatsEXT_ptr || !eglQueryDmaBufModifiersEXT_ptr) {
+  if (!_egl_load_dmabuf_query_procs()) {
     VT_ERROR(renderer->comp->log,
              "DMABUF extensions not supported, falling back to SHM.\n");
     egl->has_dmabuf_modifiers_support = false;
@@ -1002,92 +1052,24 @@ bool renderer_query_dmabuf_formats_with_renderer_egl(
     return false;
   }
 
+  vt_drm_format_array_free(&egl->formats);
+
+  if (!_egl_query_dmabuf_formats(renderer->comp, egl->egl_dsp, &egl->formats))
+    return false;
+
+  if (formats == &egl->formats)
+    return true;
+
   wl_array_init(formats);
 
-  // Query the available DMABUF formats
-  EGLint n_formats = 0;
-  /*
-    /* we set max_formats to 0 to count the formats without retrieving them:
-   *      If <max_formats> is 0, no formats are returned, but the total number
-          of formats is returned in <num_formats>, and no error is generated.
-    */
-  eglQueryDmaBufFormatsEXT_ptr(egl->egl_dsp, 0 /*max_formats*/, NULL,
-                               &n_formats);
-  if (n_formats <= 0) {
-    VT_ERROR(renderer->comp->log,
-             "No DMABUF formats available, falling back to SHM.\n");
-    return false;
-  }
-
-  EGLint *dmabuf_formats = calloc(n_formats, sizeof(EGLint));
-  eglQueryDmaBufFormatsEXT_ptr(egl->egl_dsp, n_formats, dmabuf_formats,
-                               &n_formats);
-
-  // query the available modifiers of each format
-  for (uint32_t i = 0; i < n_formats; i++) {
-    EGLint n_mods = 0;
-    /* we set max_modifiers to 0 to count the modifiers without retrieving them:
-     *    If <max_modifiers> is 0, no modifiers are returned, but the total
-          number of modifiers is returned in <num_modifiers>, and no error is
-          generated. */
-    eglQueryDmaBufModifiersEXT_ptr(egl->egl_dsp, dmabuf_formats[i],
-                                   0 /*max_modifiers*/, NULL, NULL, &n_mods);
-    if (n_mods <= 0)
-      continue;
-
-    EGLuint64KHR *format_mods = calloc(n_mods, sizeof(EGLuint64KHR));
-    // We need to store ext_only per modifier to know if
-    // the requested format-modifier combination is only
-    // supported for use with the GL_TEXTURE_EXTERNAL_OES flag when importing
-    // the DMABUF into a GL texture later.
-    EGLBoolean *ext_only = calloc(n_mods, sizeof(EGLBoolean));
-    eglQueryDmaBufModifiersEXT_ptr(egl->egl_dsp, dmabuf_formats[i], n_mods,
-                                   format_mods, ext_only, &n_mods);
-
-    // add the format to the array of available formats
-    struct vt_dmabuf_drm_format_t *fmt = wl_array_add(formats, sizeof(*fmt));
-    fmt->format = dmabuf_formats[i];
-    fmt->len = n_mods;
-    fmt->mods = malloc(sizeof(struct vt_dmabuf_format_modifier_t) * n_mods);
-
-    // populate the modifiers
-    for (uint32_t j = 0; j < n_mods; j++) {
-      fmt->mods[j].mod = format_mods[j];
-      fmt->mods[j]._egl_ext_only = ext_only[j] == EGL_TRUE;
-    }
-
-    free(format_mods);
-    free(ext_only);
-  }
-
-  struct vt_dmabuf_drm_format_t *fmt;
-  wl_array_for_each(fmt, formats) {
-    if (!fmt)
-      continue;
-    struct vt_dmabuf_drm_format_t *fmt_add =
-        wl_array_add(&egl->formats, sizeof(*fmt_add));
-    if (!fmt_add) {
+  struct vt_drm_format_t *fmt;
+  wl_array_for_each(fmt, &egl->formats) {
+    if (!vt_drm_format_array_push(formats, fmt)) {
+      vt_drm_format_array_free(formats);
       return false;
     }
-    // deep copy
-    fmt_add->format = fmt->format;
-    fmt_add->len = fmt->len;
-
-    if (fmt->len > 0 && fmt->mods) {
-      fmt_add->mods = calloc(fmt->len, sizeof(*fmt_add->mods));
-      if (!fmt_add->mods) {
-        // Rollback allocation
-        wl_array_release(&egl->formats);
-        if (n_formats)
-          return false;
-      }
-      memcpy(fmt_add->mods, fmt->mods, fmt->len * sizeof(*fmt->mods));
-    } else {
-      fmt_add->mods = NULL;
-    }
   }
 
-  free(dmabuf_formats);
   return true;
 }
 
@@ -1295,8 +1277,7 @@ bool renderer_import_buffer_egl(struct vt_renderer_t    *r,
 }
 
 bool renderer_destroy_buffer_texture_egl(struct vt_renderer_t *r,
-                                         struct vt_buffer_t   *buf) {
- }
+                                         struct vt_buffer_t   *buf) {}
 
 bool renderer_drop_context_egl(struct vt_renderer_t *r) {
   if (!r || !r->impl.drop_context || !r->user_data) {
@@ -1585,6 +1566,8 @@ bool renderer_destroy_egl(struct vt_renderer_t *r) {
     return false;
   }
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
+
+  vt_drm_format_array_free(&egl->formats);
 
   rn_terminate(egl->render);
 

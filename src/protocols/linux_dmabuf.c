@@ -310,7 +310,7 @@ void _proto_linux_dmabuf_v1_destroy(struct vt_proto_linux_dmabuf_v1_t *dmabuf) {
     vt_surface_addon_destroy(&surface->addon);
   }
 
-  vt_drm_format_free_array(&dmabuf->default_formats);
+  vt_drm_format_array_free(&dmabuf->default_formats);
 
   /* 4. Close main device FD if valid */
   if (dmabuf->fd_main_dev >= 0)
@@ -816,72 +816,23 @@ void _linux_dmabuf_v1_buffer_destroy(struct wl_client   *client,
   wl_resource_destroy(resource);
 }
 
-static bool _format_exists(struct wl_array               *fmts,
-                           struct vt_drm_format_t *find) {
-  struct vt_drm_format_t *fmt;
-  wl_array_for_each(fmt, fmts) {
-    if (fmt->format != find->format || fmt->len != find->len)
-      continue;
+static bool _accumulate_tranche_formats(struct vt_compositor_t *comp,
+                                        struct wl_array        *all_formats,
+                                        struct wl_array        *tranches) {
+  assert(comp);
 
-    bool match = true;
-    for (size_t i = 0; i < fmt->len; i++) {
-      if (fmt->mods[i].mod != find->mods[i].mod) {
-        match = false;
-        break;
-      }
-    }
-    if (match)
-      return true;
-  }
-  return false;
-}
-
-static bool _accumulate_tranche_formats(struct wl_array *all_formats,
-                                        struct wl_array *tranches,
-                                        size_t *n_formats, bool persistent) {
   if (!all_formats || !tranches)
     return false;
 
   struct vt_dmabuf_tranche_t *tranche;
   wl_array_for_each(tranche, tranches) {
-    if (!tranche)
-      continue;
     struct vt_drm_format_t *fmt;
     wl_array_for_each(fmt, &tranche->formats) {
-      if (!fmt)
-        continue;
-      if (!_format_exists(all_formats, fmt)) {
-        struct vt_drm_format_t *fmt_add =
-            wl_array_add(all_formats, sizeof(*fmt_add));
-        if (!fmt_add) {
-          if (n_formats)
-            *n_formats = 0;
-          return false;
-        }
-        if (persistent) {
-          // deep copy
-          fmt_add->format = fmt->format;
-          fmt_add->len = fmt->len;
-
-          if (fmt->len > 0 && fmt->mods) {
-            fmt_add->mods = calloc(fmt->len, sizeof(*fmt_add->mods));
-            if (!fmt_add->mods) {
-              // Rollback allocation
-              wl_array_release(all_formats);
-              if (n_formats)
-                *n_formats = 0;
-              return false;
-            }
-            memcpy(fmt_add->mods, fmt->mods, fmt->len * sizeof(*fmt->mods));
-          } else {
-            fmt_add->mods = NULL;
-          }
-        } else {
-          // shallow copy
-          memcpy(fmt_add, fmt, sizeof(*fmt_add));
-        }
-        if (n_formats)
-          *n_formats += fmt->len;
+      if (!vt_drm_format_array_push(all_formats, fmt)) {
+        VT_ERROR(comp->log,
+                 "Failed to push format %p (n mods: %zu) into format array.",
+                 fmt, vt_drm_format_mod_count(fmt));
+        return false;
       }
     }
   }
@@ -945,13 +896,15 @@ bool _linux_dmabuf_set_default_feedback(
 
   /* 4. Reinitialize default formats */
   if (proto->default_formats.size != 0) {
-    vt_drm_format_free_array(&proto->default_formats);
+    assert(proto->default_formats.size % sizeof(struct vt_drm_format_t) == 0);
+
+    vt_drm_format_array_free(&proto->default_formats);
     wl_array_init(&proto->default_formats);
   }
 
   /* 5. Accumulate formats from tranches */
   if (!_accumulate_tranche_formats(&proto->default_formats, &feedback->tranches,
-                                   NULL, true)) {
+                                   NULL)) {
     VT_ERROR(feedback->comp->log, "Failed to accumulate default formats.");
     if (native_main_dev)
       s->impl.finish_native_handle(s, native_main_dev);
@@ -974,27 +927,29 @@ bool _linux_dmabuf_set_default_feedback(
   proto->fd_main_dev = fd_main_dev;
 
   VT_TRACE(feedback->comp->log,
-           "linux_dmabuf.set_default_feedback: set new default feedback (%i "
+           "linux_dmabuf.set_default_feedback: set new default feedback (%zu "
            "formats).",
-           proto->default_formats.size /
-               (int)sizeof(struct vt_drm_format_t));
+           vt_drm_format_array_count(&proto->default_formats));
 
   return true;
 }
 
-static size_t find_absolute_format_index(const struct wl_array *all_formats,
-                                         uint32_t format, uint64_t modifier) {
-  size_t idx = 0;
+static ssize_t find_absolute_format_index(const struct wl_array *all_formats,
+                                          uint32_t format, uint64_t modifier) {
+  size_t outer_idx = 0;
 
   struct vt_drm_format_t *fmt;
   wl_array_for_each(fmt, all_formats) {
-    for (size_t i = 0; i < fmt->len; i++) {
-      if (fmt->format == format && fmt->mods[i].mod == modifier) {
-        return (ssize_t)(idx + i);
+    struct vt_drm_format_modifier_t *mod;
+    size_t                           inner_idx = 0;
+    wl_array_for_each(mod, &fmt->mods) {
+      if (fmt->format == format && mod->mod == modifier) {
+        return (ssize_t)(outer_idx + inner_idx);
       }
+      inner_idx++;
     }
 
-    idx += fmt->len;
+    outer_idx += vt_drm_format_mod_count(fmt);
   }
 
   return -1;
@@ -1003,6 +958,8 @@ static size_t find_absolute_format_index(const struct wl_array *all_formats,
 bool _linux_dmabuf_pack_feedback(
     struct vt_dmabuf_feedback_t                  *feedback,
     struct vt_linux_dmabuf_v1_packed_feedback_t **o_packed) {
+
+  assert(feedback->comp);
 
   if (!feedback)
     return false;
@@ -1016,19 +973,22 @@ bool _linux_dmabuf_pack_feedback(
 
   struct wl_array all_formats;
   wl_array_init(&all_formats);
-  size_t entries_len = 0, entries_size = 0;
-  _accumulate_tranche_formats(&all_formats, &feedback->tranches, &entries_len,
-                              false);
+  if (!_accumulate_tranche_formats(feedback->comp, &all_formats,
+                                   &feedback->tranches)) {
+    goto fail_all_formats;
+  }
 
   VT_TRACE(feedback->comp->log, "Accumulated all formats of all tranches.");
 
-  if (!entries_len) {
+  size_t n_formats = vt_drm_format_array_count(&all_formats);
+
+  if (n_formats == 0) {
     VT_ERROR(feedback->comp->log,
              "Format entries of packed DMABUF feedback is empty.");
     goto fail_all_formats;
   }
-  entries_size =
-      entries_len * sizeof(struct vt_linux_dmabuf_v1_packed_feedback_entry_t);
+  size_t entries_size =
+      n_formats * sizeof(struct vt_linux_dmabuf_v1_packed_feedback_entry_t);
 
   // Allocate a read-only-read-write pair of file descriptors for the feedback
   // data: We write our data into the readwrite FD once, then use the
@@ -1056,22 +1016,24 @@ bool _linux_dmabuf_pack_feedback(
   }
 
   VT_TRACE(feedback->comp->log, "mmap()ed the packed feedback data.");
-  // fill the table
+
+  // Fill the table
   struct vt_drm_format_t *fmt;
-  uint32_t                       n_entries = 0;
+  uint32_t                n_entries = 0;
   wl_array_for_each(fmt, &all_formats) {
     if (!fmt)
       continue;
-    for (uint32_t i = 0; i < fmt->len; i++) {
+    struct vt_drm_format_modifier_t *mod;
+    wl_array_for_each(mod, &fmt->mods) {
       entries[n_entries++] =
           (struct vt_linux_dmabuf_v1_packed_feedback_entry_t){
               .format = fmt->format,
-              .mod = fmt->mods[i].mod,
+              .mod = mod->mod,
           };
     }
   }
 
-  if (n_entries != entries_len) {
+  if (n_entries != n_formats) {
     VT_ERROR(feedback->comp->log, "Mapped entries of DMABUF feedback entries "
                                   "does not match internal format entries.");
     munmap(entries, entries_size);
@@ -1080,7 +1042,7 @@ bool _linux_dmabuf_pack_feedback(
 
   VT_TRACE(feedback->comp->log, "Filled the table of packed feedback data.");
 
-  // unmap the table (we are finished reading from it)
+  // unmap the table (we are finished writing to it)
   munmap(entries, entries_size);
 
   // seal the read-write FD so that clients cannot do weird shit
@@ -1147,16 +1109,17 @@ bool _linux_dmabuf_pack_feedback(
 
     n = 0;
     uint16_t                      *indices = tranche_packed->indices.data;
-    struct vt_drm_format_t *fmt = NULL;
+    struct vt_drm_format_t        *fmt = NULL;
     wl_array_for_each(fmt, &tranche->formats) {
-      for (size_t k = 0; k < fmt->len; k++) {
-        ssize_t index = find_absolute_format_index(&all_formats, fmt->format,
-                                                   fmt->mods[k].mod);
+      struct vt_drm_format_modifier_t *mod;
+      wl_array_for_each(mod, &fmt->mods) {
+        ssize_t index =
+            find_absolute_format_index(&all_formats, fmt->format, mod->mod);
         if (index < 0) {
           VT_ERROR(feedback->comp->log,
                    "Format 0x%" PRIX32 " modifier 0x%" PRIX64
                    " in tranche %u is missing from the global table",
-                   fmt->format, fmt->mods[k].mod, i);
+                   fmt->format, mod->mod, i);
           goto fail_ro_fd;
         }
         indices[n] = (uint16_t)index;
@@ -1168,7 +1131,7 @@ bool _linux_dmabuf_pack_feedback(
 
   *o_packed = packed;
 
-  wl_array_release(&all_formats);
+  vt_drm_format_array_free(&all_formats);
 
   VT_TRACE(feedback->comp->log, "Successfully packed default feedback.");
 
@@ -1181,7 +1144,7 @@ fail_rw_fd:
   if (rw_fd >= 0)
     close(rw_fd);
 fail_all_formats:
-  wl_array_release(&all_formats);
+  vt_drm_format_array_free(&all_formats);
 
   VT_ERROR(feedback->comp->log, "Failed to pack default feedback.");
 
@@ -1323,20 +1286,6 @@ void _linux_dmabuf_send_feedback(
            "linux_dmabuf.send_feedback: feedback transmission complete.");
 }
 
-static bool _format_has_mod(struct vt_drm_format_t *fmt, uint64_t mod) {
-  /* 1. Validate input */
-  if (!fmt)
-    return false;
-
-  /* 2. Search for matching modifier */
-  for (size_t i = 0; i < fmt->len; i++) {
-    if (fmt->mods[i].mod == mod)
-      return true;
-  }
-
-  return false;
-}
-
 #define _VT_DRM_FORMAT_MOD_INVALID 0x00FFFFFFFFFFFFFF
 #define _VT_DRM_FORMAT_MOD_LINEAR  0x0000000000000000
 
@@ -1348,7 +1297,7 @@ static void _send_mods(struct wl_resource            *resource,
      * correctly initialized: DRM: Invalid Modifier This modifier can be used as
      * a sentinel to terminate the format modifiers list [...]
      */
-    if (_format_has_mod(fmt, _VT_DRM_FORMAT_MOD_INVALID)) {
+    if (!vt_drm_format_get_mod(fmt, _VT_DRM_FORMAT_MOD_INVALID)) {
       zwp_linux_dmabuf_v1_send_format(resource, fmt->format);
     }
     return;
@@ -1357,16 +1306,19 @@ static void _send_mods(struct wl_resource            *resource,
   // https://gitlab.freedesktop.org/wlroots/wlroots/-/blob/master/types/wlr_linux_dmabuf_v1.c?ref_type=heads#L803
   // In case only INVALID and LINEAR are advertised, send INVALID only due to
   // XWayland: https://gitlab.freedesktop.org/xorg/xserver/-/issues/1166
-  if (fmt->len == 2 && _format_has_mod(fmt, _VT_DRM_FORMAT_MOD_INVALID) &&
-      _format_has_mod(fmt, _VT_DRM_FORMAT_MOD_LINEAR)) {
+  if (vt_drm_format_mod_count(fmt) == 2 &&
+      !vt_drm_format_get_mod(fmt, _VT_DRM_FORMAT_MOD_INVALID) &&
+      !vt_drm_format_get_mod(fmt, _VT_DRM_FORMAT_MOD_LINEAR)) {
+
     uint64_t mod = _VT_DRM_FORMAT_MOD_INVALID;
     zwp_linux_dmabuf_v1_send_modifier(resource, fmt->format, mod >> 32,
                                       mod & 0xFFFFFFFF);
     return;
   }
 
-  for (size_t i = 0; i < fmt->len; i++) {
-    uint64_t mod = fmt->mods[i].mod;
+  struct vt_drm_format_modifier_t *it;
+  wl_array_for_each(it, &fmt->mods) {
+    uint64_t mod = it->mod;
     zwp_linux_dmabuf_v1_send_modifier(resource, fmt->format, mod >> 32,
                                       mod & 0xFFFFFFFF);
   }

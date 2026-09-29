@@ -59,6 +59,7 @@
 #include "protocols/wl_output.h"
 #include "protocols/wl_shm.h"
 #include "render/dmabuf.h"
+#include "render/drm_format.h"
 
 #include "drm_backend.h"
 #include "drm_types.h"
@@ -340,24 +341,25 @@ static void _log_dmabuf_tranche(struct vt_compositor_t           *comp,
   VT_TRACE(comp->log, "      flags: 0x%x%s", tranche->flags,
            tranche->flags ? " (preferred/scanout)" : "");
 
-  size_t n_formats =
-      tranche->formats.size / sizeof(struct vt_dmabuf_drm_format_t);
+  size_t n_formats = vt_drm_format_array_count(&tranche->formats);
   VT_TRACE(comp->log, "      formats: %zu total", n_formats);
 
-  struct vt_dmabuf_drm_format_t *fmt;
+  struct vt_drm_format_t *fmt;
   wl_array_for_each(fmt, &tranche->formats) {
     const char *format_name = drmGetFormatName(fmt->format);
-    VT_TRACE(comp->log, "        • %s (%4.4s), %zu modifiers:",
-             format_name ? format_name : "UNKNOWN", _fourcc_to_str(fmt->format),
-             fmt->len);
 
-    if (!fmt->mods)
-      continue;
-    for (size_t j = 0; j < fmt->len; j++) {
+    VT_TRACE(comp->log, "        • %s (%4.4s), %zu modifiers:",
+             format_name ? format_name : "UNKNOWN",
+             _fourcc_to_str(fmt->format),
+             vt_drm_format_mod_count(fmt));
+
+    struct vt_drm_format_modifier_t *mod;
+    wl_array_for_each(mod, &fmt->mods) {
       char mod_str[32];
-      _modifier_to_str(fmt->mods[j].mod, mod_str, sizeof(mod_str));
+      _modifier_to_str(mod->mod, mod_str, sizeof(mod_str));
+
       VT_TRACE(comp->log, "            - %s%s", mod_str,
-               fmt->mods[j]._egl_ext_only ? " (EXT_ONLY)" : "");
+               mod->_egl_ext_only ? " (EXT_ONLY)" : "");
     }
   }
 
@@ -365,174 +367,6 @@ static void _log_dmabuf_tranche(struct vt_compositor_t           *comp,
            "=========================================================== ");
 }
 
-static bool
-_drm_build_dmabuf_feedback(struct drm_backend_master_state_t *master,
-                           struct vt_dmabuf_feedback_t       *feedback) {
-  if (!feedback || !master || !master->comp || !master->comp->renderer ||
-      !master->main_drm || !master->main_drm->dev)
-    return false;
-  drmDevicePtr dev_main_drm = NULL;
-  if (drmGetDevice(master->main_drm->dev->fd, &dev_main_drm) != 0 ||
-      !dev_main_drm)
-    return false;
-
-  feedback->dev_main = master->main_drm->dev;
-  wl_array_init(&feedback->tranches);
-
-  VT_TRACE(master->comp->log, "Building default DMABUF feedback...");
-
-  enum { max_shm_formats = 256 };
-  uint32_t n_shm_formats = 0;
-  uint32_t shm_formats[max_shm_formats];
-
-  uint32_t      n_devs = 0;
-  drmDevicePtr *devs = calloc(master->n_drm, sizeof(*devs));
-  if (master->n_drm > 0 && !devs) {
-    drmFreeDevice(&dev_main_drm);
-    return false;
-  }
-  // add the tranches
-  struct drm_backend_state_t *drm;
-  wl_list_for_each(drm, &master->backends, link) {
-    struct vt_device_t *dev = drm->dev;
-    if (!dev) {
-      VT_TRACE(master->comp->log,
-               "Skipping possible tranche device: No device associated.");
-      continue;
-    }
-    VT_TRACE(master->comp->log,
-             "Iterating possible DMABUF tranche device '%s' (FD: %i)...",
-             dev->path, dev->fd);
-    drmDevicePtr dev_drm = NULL;
-    if (drmGetDevice(dev->fd, &dev_drm) != 0) {
-      VT_WARN(
-          master->comp->log,
-          "Failed to retrieve DRM device pointer from internal DRM device '%s'",
-          dev->path);
-      if (dev_drm)
-        drmFreeDevice(&dev_drm);
-      continue;
-    }
-    devs[n_devs++] = dev_drm;
-
-    // skip devices without any render nodes
-    if (!(dev_drm->available_nodes & (1 << DRM_NODE_RENDER))) {
-      VT_TRACE(master->comp->log,
-               "Skipping possible tranche device '%s': Has no available render "
-               "nodes.",
-               dev->path);
-      continue;
-    }
-    // skip non-shareable GPUs
-    if (!_drm_can_share_dmabuf(master->main_drm->dev, dev)) {
-      VT_TRACE(master->comp->log,
-               "Skipping possible tranche device '%s': Cannot share DMABUFs "
-               "with main device '%s'.",
-               dev->path, master->main_drm->dev->path);
-      continue;
-    }
-
-    struct vt_dmabuf_tranche_t *tranche =
-        wl_array_add(&feedback->tranches, sizeof(*tranche));
-    if (!tranche)
-      goto fail;
-    memset(tranche, 0, sizeof(*tranche));
-    tranche->target_device = dev;
-    wl_array_init(&tranche->formats);
-
-    tranche->flags = _drm_devices_equal(dev_main_drm, dev_drm)
-                         ? VT_DMABUF_TRANCHE_FLAG_DIRECT_SCANOUT
-                         : 0;
-
-    // Add the formats that the device supports, as we got told by the
-    // renderer, to the tranche
-    struct vt_renderer_t *r = master->comp->renderer;
-    if (dev == master->main_drm->dev) {
-      if (r->impl.query_dmabuf_formats_with_renderer) {
-        if (!master->comp->renderer->impl.query_dmabuf_formats_with_renderer(
-                r, &tranche->formats)) {
-          VT_WARN(master->comp->log,
-                  "Cannot query DMABUF formats for main device '%s' from EGL.",
-                  dev->path);
-          continue;
-        }
-      }
-    } else {
-      if (r->impl.query_dmabuf_formats) {
-        if (!master->comp->renderer->impl.query_dmabuf_formats(
-                master->comp, drm->gbm_dev, &tranche->formats)) {
-          VT_WARN(
-              master->comp->log,
-              "Cannot query DMABUF formats for tranche device '%s' from EGL.",
-              dev->path);
-          continue;
-        }
-      }
-    }
-    struct vt_dmabuf_drm_format_t *fmt;
-    wl_array_for_each(fmt, &tranche->formats) {
-      if (!(n_shm_formats < max_shm_formats - 1)) {
-        VT_WARN(master->comp->log,
-                "Maximum number of SHM formats reached, not adding format %i.",
-                fmt->format);
-        break;
-      }
-      shm_formats[n_shm_formats++] = fmt->format;
-    }
-    _log_dmabuf_tranche(master->comp, tranche, dev->path);
-  }
-
-  // Adding a generic fallback tranche (LINEAR DRM_FORMAT_ARGB8888)
-  struct vt_dmabuf_tranche_t *fallback =
-      wl_array_add(&feedback->tranches, sizeof(*fallback));
-  if (!fallback)
-    goto fail;
-  memset(fallback, 0, sizeof(*fallback));
-
-  fallback->target_device = feedback->dev_main;
-  fallback->flags = 0;
-  wl_array_init(&fallback->formats);
-
-  struct vt_dmabuf_drm_format_t *fmt =
-      wl_array_add(&fallback->formats, sizeof(*fmt));
-  if (!fmt)
-    goto fail;
-  memset(fmt, 0, sizeof(*fmt));
-  fmt->format = DRM_FORMAT_XRGB8888;
-  fmt->len = 2;
-  fmt->mods = calloc(fmt->len, sizeof(*fmt->mods));
-  if (!fmt->mods)
-    goto fail;
-  fmt->mods[0].mod = DRM_FORMAT_MOD_LINEAR;
-  fmt->mods[0]._egl_ext_only = false;
-  fmt->mods[1].mod = DRM_FORMAT_MOD_INVALID;
-  fmt->mods[1]._egl_ext_only = false;
-
-  drmFreeDevice(&dev_main_drm);
-  for (uint32_t i = 0; i < n_devs; i++) {
-    drmFreeDevice(&devs[i]);
-  }
-  free(devs);
-
-  shm_formats[n_shm_formats++] = fmt->format;
-
-  if (!vt_proto_wl_shm_init(master->comp, shm_formats, n_shm_formats)) {
-    VT_ERROR(master->comp->log, "Failed to initialize WL SHM protcol.\n");
-    return false;
-  }
-
-  VT_TRACE(master->comp->log,
-           "Added default fallback tranche (LINEAR DRM_FORMAT_ARGB8888).\n");
-
-  return true;
-
-fail:
-  drmFreeDevice(&dev_main_drm);
-  for (uint32_t i = 0; i < n_devs; i++)
-    drmFreeDevice(&devs[i]);
-  free(devs);
-  return false;
-}
 
 static bool _drm_suspend(struct drm_backend_state_t *backend) {
   if (!backend || !backend->comp || backend->drm_fd < 0)
@@ -743,14 +577,39 @@ static bool _drm_init_for_device(struct vt_compositor_t     *comp,
   return true;
 }
 
-static bool _drm_plane_init(struct vt_compositor_t *comp,
+static bool
+_drm_plane_init_cursor_sizes(struct drm_plane_t               *plane,
+                             const struct drm_plane_size_hint *hints,
+                             size_t                            hints_len) {
+  assert(plane && hints && hints_len > 0);
+
+  plane->cursor_sizes = calloc(hints_len, sizeof(plane->cursor_sizes[0]));
+  if (plane->cursor_sizes == NULL) {
+    return false;
+  }
+  plane->n_cursor_sizes = hints_len;
+
+  for (size_t i = 0; i < hints_len; i++) {
+    const struct drm_plane_size_hint hint = hints[i];
+    plane->cursor_sizes[i] = (struct vt_output_cursor_size_t){
+        .width = hint.width,
+        .height = hint.height,
+    };
+  }
+
+  return true;
+}
+
+static bool _drm_plane_init(struct drm_backend_state_t *drm,
                             struct drm_plane_t *plane, drmModePlane *drm_plane,
-                            struct wl_array *crtcs, uint32_t plane_id,
-                            int drm_fd) {
-  assert(comp && drm_fd >= 0);
+                            struct wl_array *crtcs, uint32_t plane_id) {
+  assert(drm && drm->comp && drm->drm_fd >= 0);
 
   if (!plane || !drm_plane)
     return false;
+
+  int drm_fd = drm->drm_fd;
+  struct vt_compositor_t* comp = drm->comp;
 
   uint32_t plane_props[VT_DRM_PLANE__COUNT];
   if (!drm_kms_props_get_plane(drm_fd, plane_id, plane_props)) {
@@ -772,16 +631,95 @@ static bool _drm_plane_init(struct vt_compositor_t *comp,
   plane->id_crtc_init = drm_plane->crtc_id;
   plane->type = plane_type;
 
-  bool mods_supported = plane_props[VT_DRM_PLANE_IN_FORMATS];
+  bool in_formats_supported = plane_props[VT_DRM_PLANE_IN_FORMATS] != 0 &&
+                              drm->caps[VT_DRM_CAP_ADDFB2_MODIFIERS];
+
+  bool size_hints_support = plane_props[VT_DRM_PLANE_SIZE_HINTS] != 0; 
 
   for (size_t i = 0; i < drm_plane->count_formats; ++i) {
-    if(!mods_supported)
-      wl_array_add(&plane->formats, drm_plane->formats[i], DRM_FORMAT_MOD_LINEAR);
-                if (plane_type != DRM_PLANE_TYPE_CURSOR) {
-			wlr_drm_format_set_add(&p->formats, drm_plane->formats[i],
-				DRM_FORMAT_MOD_INVALID);
-		}
-	}
+    if (!in_formats_supported) {
+      vt_drm_format_array_push_pair(&plane->formats, drm_plane->formats[i],
+                                    DRM_FORMAT_MOD_LINEAR);
+    }
+    if (plane_type != DRM_PLANE_TYPE_CURSOR) {
+      vt_drm_format_array_push_pair(&plane->formats, drm_plane->formats[i],
+                                    DRM_FORMAT_MOD_INVALID);
+    }
+  }
+
+  if(in_formats_supported) {
+    uint64_t in_formats_id;
+    if(!drm_kms_props_get_prop(drm_fd, plane->id,
+                           plane_props[VT_DRM_PLANE_IN_FORMATS],
+                           &in_formats_id) || !in_formats_id) {
+      VT_ERROR(comp->log,
+               "Failed to get 'IN_FOMRATS' property of plane with ID %" PRIu32,
+               plane_id);
+      return false;
+    }
+
+    drmModePropertyBlobRes *blob =
+        drmModeGetPropertyBlob(drm_fd, in_formats_id);
+    if(!blob) {
+      VT_ERROR(comp->log,
+               "Failed to read 'IN_FOMRATS' blob of plane with ID %" PRIu32,
+               plane_id);
+      return false;
+    }
+
+    drmModeFormatModifierIterator iter = {0};
+    while (drmModeFormatModifierBlobIterNext(blob, &iter)) {
+      if (!vt_drm_format_array_push_pair(&plane->formats, iter.fmt, iter.mod)) {
+        VT_ERROR(comp->log,
+                 "Failed to add DRM format 0x%" PRIx32
+                 " with modifier 0x%016" PRIx64 " to plane %" PRIu32
+                 " format list.",
+                 iter.fmt, iter.mod, plane_id);
+        return false;
+      }
+    }
+
+    drmModeFreePropertyBlob(blob);
+  }
+
+  if (size_hints_support) {
+    uint64_t size_hints_id;
+    if (!drm_kms_props_get_prop(drm_fd, plane->id,
+                                plane_props[VT_DRM_PLANE_SIZE_HINTS],
+                                &size_hints_id) ||
+        !size_hints_id) {
+      VT_ERROR(comp->log,
+               "Failed to get 'SIZE_HINTS' property of plane with ID %" PRIu32,
+               plane_id);
+      return false;
+    }
+
+    drmModePropertyBlobRes *blob =
+        drmModeGetPropertyBlob(drm_fd, size_hints_id);
+    if (!blob) {
+      VT_ERROR(comp->log,
+               "Failed to read 'SIZE_HINTS' blob of plane with ID "
+               "%" PRIu32,
+               plane_id);
+      return false;
+    }
+
+    const struct drm_plane_size_hint *size_hints = blob->data;
+    size_t size_hints_len = blob->length / sizeof(size_hints[0]);
+    if (!_drm_plane_init_cursor_sizes(plane, size_hints, size_hints_len)) {
+      return false;
+    }
+
+    drmModeFreePropertyBlob(blob);
+  } else {
+    const struct drm_plane_size_hint size_hint = {
+        .width = drm->cursor_w,
+        .height = drm->cursor_h,
+    };
+    if (!_drm_plane_init_cursor_sizes(plane, &size_hint, 1)) {
+      return false;
+    }
+  }
 
   /* Assign plane to crtc plane handles */
   struct drm_crtc_t *crtc;
@@ -848,7 +786,7 @@ static bool _drm_planes_init(struct drm_backend_state_t *drm) {
       goto fail_planes;
     }
 
-    if(!_drm_plane_init(drm->comp, plane, drm_plane, plane_id, drm->drm_fd)) {
+    if (!_drm_plane_init(drm, plane, drm_plane, &drm->crtcs, plane_id)) {
       goto fail_this_plane;
     }
 
@@ -888,7 +826,7 @@ static bool _drm_init_crtc(struct vt_compositor_t *comp,
 }
 
 static bool
-_drm_init_crtcs(struct drm_backend_state_t *drm) {
+_drm_init_crtcs_and_planes(struct drm_backend_state_t *drm) {
   if (!drm || !drm->comp)
     return false;
 
@@ -937,7 +875,7 @@ _drm_init_crtcs(struct drm_backend_state_t *drm) {
     }
   }
 
-  if(!_drm_planes_init()) {
+  if(!_drm_planes_init(drm)) {
     goto fail_crtc;
   }
 
@@ -1628,11 +1566,19 @@ static bool _drm_verify_caps(struct drm_backend_state_t *drm) {
     return false;
   }
 
-  if (drmSetClientCap(drm->drm_fd, DRM_CLIENT_CAP_ATOMIC, 1)) {
-    VT_ERROR(drm->comp->log,
-             "Atomic modesetting unsupported");
-    return false;
+  drm->caps[VT_DRM_CAP_ATOMIC_MODESET] =
+      !drmSetClientCap(drm->drm_fd, DRM_CLIENT_CAP_ATOMIC, 1);
+
+  if (!drm->caps[VT_DRM_CAP_ATOMIC_MODESET]) {
+    VT_WARN(drm->comp->log, "Atomic modesetting unsupported");
   }
+
+  int ret = drmGetCap(drm->drm_fd, DRM_CAP_ADDFB2_MODIFIERS, &cap);
+  drm->caps[VT_DRM_CAP_ADDFB2_MODIFIERS] = ret == 0 && cap == 1;
+
+  VT_TRACE(drm->comp->log, "ADDFB2 modifiers %s",
+           drm->caps[VT_DRM_CAP_ADDFB2_MODIFIERS] ? "supported"
+                                                  : "unsupported");
 
   return true;
 }
