@@ -1370,9 +1370,8 @@ void renderer_begin_scene_egl(struct vt_renderer_t *r,
 
 void renderer_begin_frame_egl(struct vt_renderer_t *r,
                               struct vt_output_t   *output) {
-  if (!output)
-    ;
-  if (!r || !r->impl.begin_frame || !r->user_data) {
+
+  if (!r || !r->impl.begin_frame || !r->user_data || !output) {
     VT_ERROR(r->comp->log,
              "Renderer backend not initialized before beginning frame.");
     return;
@@ -1396,8 +1395,8 @@ void renderer_begin_frame_egl(struct vt_renderer_t *r,
     last_surface = surface;
   }
 
-  rn_resize_display_ex(egl->render, output->width, output->height, output->x,
-                       output->y);
+  rn_resize_display_ex(egl->render, output->width, output->height, 0, 
+                       0);
 
   glBindFramebuffer(GL_FRAMEBUFFER, egl_output->fbo_id);
 }

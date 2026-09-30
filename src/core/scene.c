@@ -35,14 +35,20 @@
 
 static bool _box_intersect_box(float x1, float y1, float w1, float h1, float x2,
                                float y2, float w2, float h2);
+
 static void sceneprintindent(int indent);
-static struct vt_output_layer_state_t             *
+
+static struct vt_output_layer_state_t *
 _scene_push_layer(struct vt_scene_t *scene);
+
 static bool _scene_node_is_layer_candidate(struct vt_scene_node_t *node);
 static void _scene_node_accumulate_layers(struct vt_scene_t      *scene,
+                                          struct vt_output_t     *output,
                                           struct vt_scene_node_t *node,
                                           int32_t parent_x, int32_t parent_y);
-static void _scene_accumulate_layers(struct vt_scene_t *scene);
+
+static void _scene_accumulate_layers(struct vt_scene_t  *scene,
+                                     struct vt_output_t *output);
 static void _scene_render_layers(struct vt_scene_t  *scene,
                                  struct vt_output_t *output);
 static void _composite_pass(struct vt_scene_t  *scene,
@@ -101,7 +107,72 @@ static bool _scene_node_is_layer_candidate(struct vt_scene_node_t *node) {
   return true;
 }
 
+static bool _scene_node_on_output(struct vt_scene_node_t *node,
+                                  struct vt_output_t     *output) {
+  assert(node && output);
+
+  struct vt_box_t *box = vt_scene_node_get_global_bounds(node);
+  if (!box) {
+    VT_TRACE(output->backend->comp->log,
+             "SCENE: node_on_output: node=%p has no global bounds",
+             node);
+    return false;
+  }
+
+  int32_t node_right = box->x + box->width;
+  int32_t node_bottom = box->y + box->height;
+
+  int32_t output_right = output->x + output->width;
+  int32_t output_bottom = output->y + output->height;
+
+  VT_TRACE(output->backend->comp->log,
+           "SCENE: node_on_output: node=%p output=%p "
+           "node=[x=%d y=%d w=%u h=%u right=%d bottom=%d] "
+           "output=[x=%d y=%d w=%u h=%u right=%d bottom=%d]",
+           node, output, box->x, box->y, box->width, box->height, node_right,
+           node_bottom, output->x, output->y, output->width, output->height,
+           output_right, output_bottom);
+
+  if (node_right <= output->x) {
+    VT_TRACE(output->backend->comp->log,
+             "SCENE: node=%p outside output=%p: right=%d <= output_x=%d",
+             node, output, node_right, output->x);
+    return false;
+  }
+
+  if (box->x >= output_right) {
+    VT_TRACE(output->backend->comp->log,
+             "SCENE: node=%p outside output=%p: x=%d >= output_right=%d",
+             node, output, box->x, output_right);
+    return false;
+  }
+
+  if (node_bottom <= output->y) {
+    VT_TRACE(output->backend->comp->log,
+             "SCENE: node=%p outside output=%p: bottom=%d <= output_y=%d",
+             node, output, node_bottom, output->y);
+    return false;
+  }
+
+  if (box->y >= output_bottom) {
+    VT_TRACE(output->backend->comp->log,
+             "SCENE: node=%p outside output=%p: y=%d >= output_bottom=%d",
+             node, output, box->y, output_bottom);
+    return false;
+  }
+
+  VT_TRACE(output->backend->comp->log,
+           "SCENE: node=%p intersects output=%p "
+           "node=[%d,%d %ux%u] output=[%d,%d %ux%u]",
+           node, output,
+           box->x, box->y, box->width, box->height,
+           output->x, output->y, output->width, output->height);
+
+  return true;
+}
+
 static void _scene_node_accumulate_layers(struct vt_scene_t      *scene,
+                                          struct vt_output_t     *output,
                                           struct vt_scene_node_t *node,
                                           int32_t parent_x, int32_t parent_y) {
   if (!scene || !node)
@@ -111,6 +182,8 @@ static void _scene_node_accumulate_layers(struct vt_scene_t      *scene,
   int32_t y = parent_y + node->y;
 
   if (_scene_node_is_layer_candidate(node)) {
+    if (!_scene_node_on_output(node, output))
+      goto children;
     struct vt_output_layer_state_t *layer = _scene_push_layer(scene);
     if (!layer)
       return;
@@ -127,24 +200,26 @@ static void _scene_node_accumulate_layers(struct vt_scene_t      *scene,
     };
 
     layer->dst = (struct vt_box_t){
-        .x = x,
-        .y = y,
+        .x = x - output->x,
+        .y = y - output->y,
         .width = rect->width,
         .height = rect->height,
     };
   }
 
+children:
   for (uint32_t i = 0; i < node->child_count; i++) {
-    _scene_node_accumulate_layers(scene, node->childs[i], x, y);
+    _scene_node_accumulate_layers(scene, output, node->childs[i], x, y);
   }
 }
 
-static void _scene_accumulate_layers(struct vt_scene_t *scene) {
+static void _scene_accumulate_layers(struct vt_scene_t  *scene,
+                                     struct vt_output_t *output) {
   assert(scene && scene->root);
 
   scene->n_layers = 0;
 
-  _scene_node_accumulate_layers(scene, scene->root, 0, 0);
+  _scene_node_accumulate_layers(scene, output, scene->root, 0, 0);
 }
 
 static void _scene_render_layers(struct vt_scene_t  *scene,
@@ -398,11 +473,11 @@ void vt_scene_render(struct vt_scene_t *scene, struct vt_output_t *output) {
   assert(scene && scene->renderer && output);
   scene->n_layers = 0;
 
-  _scene_accumulate_layers(scene);
+  _scene_accumulate_layers(scene, output);
 
-  if (output->backend->impl.test_output_layers)
+  /*if (output->backend->impl.test_output_layers)
     output->backend->impl.test_output_layers(output->backend, output,
-                                             scene->layers, scene->n_layers);
+                                             scene->layers, scene->n_layers);*/
 
   struct vt_renderer_t *r = scene->renderer;
 

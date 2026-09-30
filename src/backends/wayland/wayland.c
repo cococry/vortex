@@ -485,8 +485,10 @@ static void _wl_parent_output_geometry(
     const char *make, const char *model, int32_t transform) {
   parent_physical_output_t *output = data;
 
+  static int32_t x_ptr = 0;
   output->x = x;
   output->y = y;
+
   output->physical.width = physical_width;
   output->physical.height = physical_height;
   output->physical.subpixel = subpixel;
@@ -593,17 +595,26 @@ bool _wl_backend_create_output(struct vt_backend_t *backend,
   sprintf(name, "Vortex Nested (%i)", wl_list_length(&backend->comp->outputs));
   xdg_toplevel_set_title(wl_output->parent_xdg_toplevel, name);
 
-  VT_TRACE(backend->comp->log, "Created virtual nested output %s.", name);
-
   output->native_window = wl_output->parent_surface;
 
   output->id = wl_list_length(&backend->comp->outputs);
   output->refresh_rate = 60;
-  output->x = 0;
+
+  /* TODO: Output position system */
+  static int32_t x_ptr = 0;
+
+  output->x = x_ptr;
   output->y = 0;
+
   output->width = _WL_DEFAULT_OUTPUT_WIDTH;
   output->height = _WL_DEFAULT_OUTPUT_HEIGHT;
   output->resize_pending = true;
+
+  x_ptr += output->width;
+
+  VT_TRACE(backend->comp->log,
+           "Created virtual nested output %s. [x: %d, y: %d, w: %u, h: %u]",
+           name, output->x, output->y, output->width, output->height);
 
   output->physical.make = strdup("Vortex");
   output->physical.model = strdup("Vortex Nested Output");
