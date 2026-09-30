@@ -119,7 +119,7 @@ static bool _egl_pick_config(struct vt_compositor_t     *comp,
                              struct vt_backend_t        *backend);
 static bool _egl_record_surface_release_fences(struct vt_renderer_t *renderer,
                                                struct vt_output_t   *output);
-static bool _egl_gl_create_output_fbo(struct vt_output_t *output);
+static bool _egl_gl_create_output_fbo(struct vt_output_t *output, uint32_t width, uint32_t height);
 
 static bool _egl_create_renderer(struct vt_renderer_t      *renderer,
                                  enum vt_backend_platform_t platform,
@@ -586,7 +586,8 @@ bool _egl_record_surface_release_fences(struct vt_renderer_t *renderer,
   return true;
 }
 
-bool _egl_gl_create_output_fbo(struct vt_output_t *output) {
+bool _egl_gl_create_output_fbo(struct vt_output_t *output, uint32_t w,
+                               uint32_t h) {
   if (!output || !output->user_data_render)
     return false;
 
@@ -605,8 +606,8 @@ bool _egl_gl_create_output_fbo(struct vt_output_t *output) {
 
   glGenTextures(1, &egl_output->fbo_tex_id);
   glBindTexture(GL_TEXTURE_2D, egl_output->fbo_tex_id);
-  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, output->width, output->height, 0,
-               GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+  glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE,
+               NULL);
 
   // For crisp image during resize
   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -619,15 +620,13 @@ bool _egl_gl_create_output_fbo(struct vt_output_t *output) {
 
   glGenRenderbuffers(1, &egl_output->rbo_tex_depth);
   glBindRenderbuffer(GL_RENDERBUFFER, egl_output->rbo_tex_depth);
-  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, output->width,
-                        output->height);
+  glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH24_STENCIL8, w, h);
   glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT,
                             GL_RENDERBUFFER, egl_output->rbo_tex_depth);
 
   if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
     VT_ERROR(output->backend->comp->log,
-             "FBO creation for output %p (%u%u) failed.\n", output,
-             output->width, output->height);
+             "FBO creation for output %p (%u%u) failed.\n", output, w, h);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     return false;
   }
@@ -1081,7 +1080,8 @@ bool renderer_setup_renderable_output_egl(struct vt_renderer_t *r,
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
 
   output->user_data_render =
-      VT_ALLOC(r->comp, sizeof(*output->user_data_render));
+      VT_ALLOC(r->comp, sizeof(struct egl_output_state_t));
+
   struct egl_output_state_t *egl_output =
       (struct egl_output_state_t *)output->user_data_render;
 
@@ -1136,7 +1136,7 @@ bool renderer_setup_renderable_output_egl(struct vt_renderer_t *r,
                              output->width, output->height);
 
   // Create EGL FBOs for output
-  if (!_egl_gl_create_output_fbo(output))
+  if (!_egl_gl_create_output_fbo(output, output->width, output->height))
     return false;
 
   vt_comp_schedule_repaint(r->comp, output);
@@ -1149,19 +1149,21 @@ bool renderer_setup_renderable_output_egl(struct vt_renderer_t *r,
 bool renderer_resize_renderable_output_egl(struct vt_renderer_t *r,
                                            struct vt_output_t   *output,
                                            int32_t w, int32_t h) {
-  if (r->backend->platform != VT_BACKEND_WAYLAND)
-    return true;
   if (!r || !output || !output->native_window || w == 0 || h == 0)
     return false;
+  
+  if (r->backend->platform != VT_BACKEND_WAYLAND)
+    return true;
 
   struct wl_egl_window *egl_win = (struct wl_egl_window *)output->native_window;
   if (!egl_win)
     return false;
+  
+  wl_egl_window_resize(egl_win, w, h, 0, 0);
 
-  if (!_egl_gl_create_output_fbo(output))
+  if (!_egl_gl_create_output_fbo(output, w, h))
     return false;
 
-  wl_egl_window_resize(egl_win, w, h, 0, 0);
 
   pixman_region32_union_rect(&output->damage, &output->damage, 0, 0, w, h);
 
