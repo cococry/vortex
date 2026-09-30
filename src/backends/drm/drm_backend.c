@@ -800,6 +800,19 @@ _drm_plane_init_cursor_sizes(struct drm_plane_t               *plane,
   return true;
 }
 
+static const char *_drm_plane_type_name(uint64_t type) {
+  switch (type) {
+  case DRM_PLANE_TYPE_PRIMARY:
+    return "primary";
+  case DRM_PLANE_TYPE_CURSOR:
+    return "cursor";
+  case DRM_PLANE_TYPE_OVERLAY:
+    return "overlay";
+  default:
+    return "unknown";
+  }
+}
+
 static bool _drm_plane_init(struct drm_backend_state_t *drm,
                             struct drm_plane_t *plane, drmModePlane *drm_plane,
                             struct wl_array *crtcs, uint32_t plane_id) {
@@ -812,8 +825,6 @@ static bool _drm_plane_init(struct drm_backend_state_t *drm,
   int                     drm_fd = drm->drm_fd;
   struct vt_compositor_t *comp = drm->comp;
 
-  wl_array_init(&plane->formats);
-
   if (!drm_kms_props_get_plane(drm_fd, plane_id, plane->props)) {
     VT_ERROR(comp->log, "Failed to get properties of plane with ID %" PRIu32,
              plane_id);
@@ -821,8 +832,8 @@ static bool _drm_plane_init(struct drm_backend_state_t *drm,
   }
 
   uint64_t plane_type;
-  if (!drm_kms_props_get_prop(drm_fd, plane_id,
-                              plane->props[VT_DRM_PLANE_TYPE], &plane_type)) {
+  if (!drm_kms_props_get_prop(drm_fd, plane_id, plane->props[VT_DRM_PLANE_TYPE],
+                              &plane_type)) {
     VT_ERROR(comp->log,
              "Failed to get 'type' property of plane with ID %" PRIu32,
              plane_id);
@@ -837,22 +848,44 @@ static bool _drm_plane_init(struct drm_backend_state_t *drm,
   bool in_formats_supported = plane->props[VT_DRM_PLANE_IN_FORMATS] != 0 &&
                               drm->caps[VT_DRM_CAP_ADDFB2_MODIFIERS];
 
+  VT_TRACE(comp->log,
+           "DRM: discovering plane %" PRIu32 ": type=%s crtc=%" PRIu32
+           " possible_crtcs=0x%" PRIx32 " legacy_formats=%u in_formats=%s.",
+           plane_id, _drm_plane_type_name(plane_type), drm_plane->crtc_id,
+           drm_plane->possible_crtcs, drm_plane->count_formats,
+           in_formats_supported ? "yes" : "no");
+
   for (size_t i = 0; i < drm_plane->count_formats; ++i) {
-    if (!in_formats_supported && plane_type == DRM_PLANE_TYPE_CURSOR &&
-        !vt_drm_format_array_push_pair(&plane->formats, drm_plane->formats[i],
-                                       DRM_FORMAT_MOD_LINEAR)) {
-      return false;
+    uint32_t format = drm_plane->formats[i];
+
+    if (!in_formats_supported && plane_type == DRM_PLANE_TYPE_CURSOR) {
+      VT_TRACE(comp->log,
+               "DRM: plane %" PRIu32 " supports legacy format=0x%08" PRIx32
+               " modifier=LINEAR.",
+               plane_id, format);
+
+      if (!vt_drm_format_array_push_pair(&plane->formats, format,
+                                         DRM_FORMAT_MOD_LINEAR)) {
+        return false;
+      }
     }
 
-    if (plane_type != DRM_PLANE_TYPE_CURSOR &&
-        !vt_drm_format_array_push_pair(&plane->formats, drm_plane->formats[i],
-                                       DRM_FORMAT_MOD_INVALID)) {
-      return false;
+    if (plane_type != DRM_PLANE_TYPE_CURSOR) {
+      VT_TRACE(comp->log,
+               "DRM: plane %" PRIu32 " supports legacy format=0x%08" PRIx32
+               " modifier=INVALID.",
+               plane_id, format);
+
+      if (!vt_drm_format_array_push_pair(&plane->formats, format,
+                                         DRM_FORMAT_MOD_INVALID)) {
+        return false;
+      }
     }
   }
 
   if (in_formats_supported) {
     uint64_t in_formats_id;
+
     if (!drm_kms_props_get_prop(drm_fd, plane->id,
                                 plane->props[VT_DRM_PLANE_IN_FORMATS],
                                 &in_formats_id) ||
@@ -863,8 +896,13 @@ static bool _drm_plane_init(struct drm_backend_state_t *drm,
       return false;
     }
 
+    VT_TRACE(comp->log,
+             "DRM: plane %" PRIu32 " has IN_FORMATS blob id=%" PRIu64 ".",
+             plane_id, in_formats_id);
+
     drmModePropertyBlobRes *blob =
         drmModeGetPropertyBlob(drm_fd, in_formats_id);
+
     if (!blob) {
       VT_ERROR(comp->log,
                "Failed to read 'IN_FORMATS' blob of plane with ID %" PRIu32,
@@ -872,18 +910,33 @@ static bool _drm_plane_init(struct drm_backend_state_t *drm,
       return false;
     }
 
+    size_t modifier_count = 0;
+
     drmModeFormatModifierIterator iter = {0};
     while (drmModeFormatModifierBlobIterNext(blob, &iter)) {
+      VT_TRACE(comp->log,
+               "DRM: plane %" PRIu32 " supports format=0x%08" PRIx32
+               " modifier=0x%016" PRIx64 ".",
+               plane_id, iter.fmt, iter.mod);
+
       if (!vt_drm_format_array_push_pair(&plane->formats, iter.fmt, iter.mod)) {
         VT_ERROR(comp->log,
                  "Failed to add DRM format 0x%" PRIx32
                  " with modifier 0x%016" PRIx64 " to plane %" PRIu32
                  " format list.",
                  iter.fmt, iter.mod, plane_id);
+
         drmModeFreePropertyBlob(blob);
         return false;
       }
+
+      modifier_count++;
     }
+
+    VT_TRACE(comp->log,
+             "DRM: plane %" PRIu32
+             " IN_FORMATS parsed: %zu format/modifier pairs.",
+             plane_id, modifier_count);
 
     drmModeFreePropertyBlob(blob);
   }
@@ -2420,7 +2473,6 @@ bool backend_is_dmabuf_importable_drm(struct vt_backend_t     *backend,
   return drm_prime_test_import(master->main_drm->drm_fd, attr);
 }
 
-
 bool backend_test_output_layers_drm(
     struct vt_backend_t *backend, struct vt_output_t *output,
     struct vt_output_layer_state_t *layers, size_t layer_count) {
@@ -2440,47 +2492,162 @@ bool backend_test_output_layers_drm(
 
   _drm_scanout_layers_finish(drm_output, &drm_output->layer_plan, -1);
 
-  if (!drm->impl->atomic || drm_output->flip_inflight || layer_count != 1 ||
-      !drm_output->crtc || !drm_output->crtc->plane_primary) {
+
+  if (!drm->impl->atomic) {
+    VT_TRACE(backend->comp->log,
+             "DRM: direct scanout rejected for output %p: "
+             "atomic modesetting is unavailable.",
+             output);
+    return true;
+  }
+
+  if (drm_output->flip_inflight) {
+    VT_TRACE(backend->comp->log,
+             "DRM: direct scanout rejected for output %p: "
+             "page flip is still in flight.",
+             output);
+    return true;
+  }
+
+  if (layer_count != 1) {
+    VT_TRACE(backend->comp->log,
+             "DRM: direct scanout rejected for output %p: "
+             "expected exactly one layer, got %zu.",
+             output, layer_count);
+    return true;
+  }
+
+  if (!drm_output->crtc) {
+    VT_TRACE(backend->comp->log,
+             "DRM: direct scanout rejected for output %p: "
+             "output has no assigned CRTC.",
+             output);
+    return true;
+  }
+
+  if (!drm_output->crtc->plane_primary) {
+    VT_TRACE(backend->comp->log,
+             "DRM: direct scanout rejected for output %p: "
+             "CRTC has no primary plane.",
+             output);
     return true;
   }
 
   struct vt_output_layer_state_t *layer = &layers[0];
-  if (!layer->surface || !layer->surface->current_buf_use ||
-      !layer->surface->current_buf_use->buf) {
+
+  if (!layer->surface) {
+    VT_TRACE(backend->comp->log,
+             "DRM: direct scanout rejected for output %p: "
+             "layer has no surface.",
+             output);
+    return true;
+  }
+
+  if (!layer->surface->current_buf_use) {
+    VT_TRACE(backend->comp->log,
+             "DRM: direct scanout rejected for output %p surface %p: "
+             "surface has no current buffer use.",
+             output, layer->surface);
+    return true;
+  }
+
+  if (!layer->surface->current_buf_use->buf) {
+    VT_TRACE(backend->comp->log,
+             "DRM: direct scanout rejected for output %p surface %p: "
+             "current buffer use has no buffer.",
+             output, layer->surface);
     return true;
   }
 
   if (layer->dst.x != 0 || layer->dst.y != 0 ||
       layer->dst.width != output->width ||
-      layer->dst.height != output->height || layer->src.x < 0 ||
-      layer->src.y < 0 || layer->src.width <= 0 || layer->src.height <= 0) {
+      layer->dst.height != output->height) {
+    VT_TRACE(backend->comp->log,
+             "DRM: direct scanout rejected for output %p surface %p: "
+             "destination does not cover the full output. "
+             "dst=[x=%d y=%d w=%u h=%u], output=[w=%u h=%u].",
+             output, layer->surface,
+             layer->dst.x, layer->dst.y,
+             layer->dst.width, layer->dst.height,
+             output->width, output->height);
+    return true;
+  }
+
+  if (layer->src.x < 0 || layer->src.y < 0 ||
+      layer->src.width <= 0 || layer->src.height <= 0) {
+    VT_TRACE(backend->comp->log,
+             "DRM: direct scanout rejected for output %p surface %p: "
+             "invalid source rectangle src=[x=%d y=%d w=%u h=%u].",
+             output, layer->surface,
+             layer->src.x, layer->src.y,
+             layer->src.width, layer->src.height);
     return true;
   }
 
   struct vt_buffer_use_t *use = layer->surface->current_buf_use;
+
   struct vt_dmabuf_attr_t attr = {0};
-  if (!vt_buffer_get_dmabuf(use->buf, &attr))
+  if (!vt_buffer_get_dmabuf(use->buf, &attr)) {
+    VT_TRACE(backend->comp->log,
+             "DRM: direct scanout rejected for output %p surface %p: "
+             "buffer %p is not a DMABUF.",
+             output, layer->surface, use->buf);
     return true;
+  }
+
+  VT_TRACE(backend->comp->log,
+           "DRM: direct scanout candidate: "
+           "surface=%p buffer=%p format=0x%x modifier=0x%016" PRIx64
+           " size=%dx%d planes=%u",
+           layer->surface, use->buf, attr.format, attr.mod, attr.width,
+           attr.height, attr.num_planes);
 
   if ((uint64_t)layer->src.x + (uint64_t)layer->src.width >
           (uint64_t)attr.width ||
       (uint64_t)layer->src.y + (uint64_t)layer->src.height >
           (uint64_t)attr.height) {
+    VT_TRACE(backend->comp->log,
+             "DRM: direct scanout rejected for output %p surface %p: "
+             "source rectangle exceeds DMABUF bounds. "
+             "src=[x=%d y=%d w=%u h=%u], buffer=[w=%d h=%d].",
+             output, layer->surface,
+             layer->src.x, layer->src.y,
+             layer->src.width, layer->src.height,
+             attr.width, attr.height);
     return true;
   }
 
   struct drm_plane_t *plane = drm_output->crtc->plane_primary;
-  if (!_drm_plane_has_format(plane, attr.format, attr.mod))
+
+  if (!_drm_plane_has_format(plane, attr.format, attr.mod)) {
+    VT_TRACE(backend->comp->log,
+             "DRM: direct scanout rejected for output %p surface %p: "
+             "primary plane %u does not support format=0x%x modifier=0x%016"
+             PRIx64 ".",
+             output, layer->surface,
+             plane->id, attr.format, attr.mod);
     return true;
+  }
 
   if (use->acquire_fence_fd >= 0 &&
       plane->props[VT_DRM_PLANE_IN_FENCE_FD] == 0) {
+    VT_TRACE(backend->comp->log,
+             "DRM: direct scanout rejected for output %p surface %p: "
+             "buffer has acquire fence fd=%d but primary plane %u has no "
+             "IN_FENCE_FD property.",
+             output, layer->surface,
+             use->acquire_fence_fd, plane->id);
     return true;
   }
 
   if (use->release && vt_buffer_release_needs_fence(use->release) &&
       drm_output->crtc->props[VT_DRM_CRTC_OUT_FENCE_PTR] == 0) {
+    VT_TRACE(backend->comp->log,
+             "DRM: direct scanout rejected for output %p surface %p: "
+             "buffer release requires explicit fence but CRTC %u has no "
+             "OUT_FENCE_PTR property.",
+             output, layer->surface,
+             drm_output->crtc->id);
     return true;
   }
 
@@ -2490,8 +2657,13 @@ bool backend_test_output_layers_drm(
       .dst = layer->dst,
   };
 
-  if (!drm_fb_init_from_buffer(drm, &plan.scanout.fb, use->buf))
+  if (!drm_fb_init_from_buffer(drm, &plan.scanout.fb, use->buf)) {
+    VT_TRACE(backend->comp->log,
+             "DRM: direct scanout rejected for output %p surface %p: "
+             "failed to create DRM framebuffer from buffer %p.",
+             output, layer->surface, use->buf);
     return true;
+  }
 
   plan.scanout.use = vt_buffer_use_ref(use);
 
@@ -2515,19 +2687,50 @@ bool backend_test_output_layers_drm(
   };
 
   if (!drm->impl->commit(drm, &commit)) {
+    VT_TRACE(backend->comp->log,
+             "DRM: direct scanout rejected for output %p surface %p: "
+             "atomic TEST_ONLY commit failed. "
+             "plane=%u src=[x=%d y=%d w=%u h=%u] "
+             "dst=[x=%d y=%d w=%u h=%u].",
+             output, layer->surface,
+             plane->id,
+             layer->src.x, layer->src.y,
+             layer->src.width, layer->src.height,
+             layer->dst.x, layer->dst.y,
+             layer->dst.width, layer->dst.height);
+
     _drm_scanout_finish(drm_output, &plan.scanout, -1);
     return true;
   }
 
   struct drm_scanout_layer_t *stored =
       wl_array_add(&drm_output->layer_plan, sizeof(*stored));
+
   if (!stored) {
+    VT_TRACE(backend->comp->log,
+             "DRM: direct scanout preparation failed for output %p surface %p: "
+             "could not store validated layer plan.",
+             output, layer->surface);
+
     _drm_scanout_finish(drm_output, &plan.scanout, -1);
     return false;
   }
 
   *stored = plan;
   layer->accepted = true;
+
+  VT_TRACE(backend->comp->log,
+           "DRM: direct scanout accepted for output %p surface %p: "
+           "plane=%u buffer=%p format=0x%x modifier=0x%016" PRIx64 " "
+           "src=[x=%d y=%d w=%u h=%u] "
+           "dst=[x=%d y=%d w=%u h=%u].",
+           output, layer->surface,
+           plane->id, use->buf, attr.format, attr.mod,
+           layer->src.x, layer->src.y,
+           layer->src.width, layer->src.height,
+           layer->dst.x, layer->dst.y,
+           layer->dst.width, layer->dst.height);
+
   return true;
 }
 

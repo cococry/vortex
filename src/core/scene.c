@@ -239,6 +239,38 @@ static void _scene_render_layers(struct vt_scene_t  *scene,
   }
 }
 
+static void _scene_render_cursor(struct vt_scene_t  *scene,
+                                 struct vt_output_t *output) {
+  assert(scene && scene->renderer && output);
+
+  struct vt_renderer_t *r = scene->renderer;
+
+  struct vt_seat_t    *seat = r->comp->seat;
+  struct vt_surface_t *cursor = seat->cursor.surf;
+
+  if (cursor && cursor->mapped) {
+
+    int32_t cursor_x = seat->pointer_x - seat->cursor.hotspot_x;
+    int32_t cursor_y = seat->pointer_y - seat->cursor.hotspot_y;
+
+    int32_t cursor_right = cursor_x + cursor->applied.width;
+    int32_t cursor_bottom = cursor_y + cursor->applied.height;
+
+    int32_t output_right = output->x + output->width;
+    int32_t output_bottom = output->y + output->height;
+
+    if (cursor && cursor->mapped && cursor_right > output->x &&
+        cursor_x < output_right && cursor_bottom > output->y &&
+        cursor_y < output_bottom) {
+      r->impl.draw_surface_simple(r, output, cursor, cursor_x - output->x,
+                                  cursor_y - output->y);
+    }
+    r->impl.draw_surface_simple(r, output, cursor,
+                                seat->pointer_x - seat->cursor.hotspot_x,
+                                seat->pointer_y - seat->cursor.hotspot_y);
+  }
+}
+
 static void _composite_pass(struct vt_scene_t  *scene,
                             struct vt_output_t *output) {
   assert(scene && scene->renderer && output);
@@ -252,16 +284,9 @@ static void _composite_pass(struct vt_scene_t  *scene,
   r->impl.set_clear_color(r, output, 0x000000);
 
   _scene_render_layers(scene, output);
-
-  struct vt_seat_t    *seat = r->comp->seat;
-  struct vt_surface_t *cursor = seat->cursor.surf;
-
-  if (cursor && cursor->mapped) {
-    r->impl.draw_surface_simple(r, output, cursor,
-                                seat->pointer_x - seat->cursor.hotspot_x,
-                                seat->pointer_y - seat->cursor.hotspot_y);
-  }
-
+  
+  _scene_render_cursor(scene, output);
+ 
   r->impl.end_scene(r, output);
 }
 
@@ -469,9 +494,9 @@ void vt_scene_render(struct vt_scene_t *scene, struct vt_output_t *output) {
 
   _scene_accumulate_layers(scene, output);
 
-  /*if (output->backend->impl.test_output_layers)
+  if (output->backend->impl.test_output_layers)
     output->backend->impl.test_output_layers(output->backend, output,
-                                             scene->layers, scene->n_layers);*/
+                                             scene->layers, scene->n_layers);
 
   struct vt_renderer_t *r = scene->renderer;
 

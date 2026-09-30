@@ -1423,6 +1423,7 @@ void renderer_draw_surface_egl(struct vt_renderer_t *r,
     VT_TRACE(r->comp->log,
              "Not rendering surface %p, no active buffer use on surface.",
              surface);
+    return;
   }
 
   if (!r || !r->impl.draw_surface || !r->user_data) {
