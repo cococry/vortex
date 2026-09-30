@@ -84,12 +84,16 @@ void renderer_begin_frame_egl(struct vt_renderer_t *r,
 void renderer_begin_scene_egl(struct vt_renderer_t *r,
                               struct vt_output_t   *output);
 
-void renderer_init_surface_egl(struct vt_renderer_t *r,
-                               struct vt_surface_t  *surf);
-
 void renderer_draw_surface_egl(struct vt_renderer_t *r,
                                struct vt_output_t   *output,
-                               struct vt_surface_t *surface, float x, float y);
+                               struct vt_surface_t  *surface,
+                               struct vt_box_t      *src_box,
+                               struct vt_box_t      *dst_box);
+
+void renderer_draw_surface_simple_egl(struct vt_renderer_t *r,
+                                      struct vt_output_t   *output,
+                                      struct vt_surface_t *surface, float x,
+                                      float y);
 
 void renderer_draw_image_egl(struct vt_renderer_t *r,
                              struct vt_output_t *output, uint32_t tex_id,

@@ -441,6 +441,7 @@ typedef struct {
     uint8_t color[4];   // RGBA (normalized)
     uint8_t tex_index;  // texture slot 0–31
     uint8_t _pad[3];    // align to 4 bytes
+    vec4 uv_rect;
 } RnInstance;
 
 typedef DA_TYPE(RnSegment) RnVgSegmentList;
@@ -1076,7 +1077,7 @@ void rn_next_batch(RnState* state);
 
 RnInstance* rn_add_instance(RnState* state,
     vec2s pos, vec2s size, float rotation, RnColor color,
-    uint8_t tex_index);
+    uint8_t tex_index, vec4s uv_rect);
 
 /*
  * @brief Returns the index of 
@@ -1230,7 +1231,7 @@ void rn_rect_render_base_types(
  * @param[in] pos The position of the image (px)
  * @param[in] color The color of the image 
  * @param[in] tex The texture to render 
- * @param[in] texcoords The texture coordinates 
+ * @param[in] uv_rect The UV rectangle 
  * to use to render the image (NDC).
  * @param[in] border_color The border color 
  * of the image (ignored if border_width <= 0).
@@ -1242,10 +1243,11 @@ void rn_rect_render_base_types(
 void rn_image_render_adv(
     RnState* state, 
     vec2s pos, 
+    vec2s render_size, 
     float rotation_angle,
     RnColor color, 
     RnTexture tex,
-    vec2s* texcoords,
+    vec4s uv_rect,
     bool is_text,
     RnColor border_color,
     float border_width, 

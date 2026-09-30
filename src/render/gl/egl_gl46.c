@@ -21,6 +21,7 @@
  */
 
 #include <EGL/eglplatform.h>
+#include <cglm/types-struct.h>
 #include <stdbool.h>
 #include <unistd.h>
 #include <wayland-util.h>
@@ -1403,7 +1404,10 @@ void renderer_begin_frame_egl(struct vt_renderer_t *r,
 
 void renderer_draw_surface_egl(struct vt_renderer_t *r,
                                struct vt_output_t   *output,
-                               struct vt_surface_t *surface, float x, float y) {
+                               struct vt_surface_t  *surface,
+                               struct vt_box_t *src_box, 
+                               struct vt_box_t *dst_box
+                               ) {
   VT_TRACE(r->comp->log,
            "DRAW ENTER: surf=%p current_use=%p mapped=%d effective_mapped=%d",
            surface, surface ? surface->current_buf_use : NULL,
@@ -1448,15 +1452,25 @@ void renderer_draw_surface_egl(struct vt_renderer_t *r,
   if (!buf || egl_buf->tex.id == 0)
     return;
 
+  if (surface->applied.width <= 0 || surface->applied.height <= 0)
+    return;
+
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
 
   if (!_egl_buffer_use_is_ready(r, use))
     return;
 
-  rn_image_render(egl->render, (vec2s){x, y}, RN_WHITE,
-                  (RnTexture){.id = egl_buf->tex.id,
-                              .width = surface->applied.width,
-                              .height = surface->applied.height});
+  vec4s uv_rect = (vec4s){
+      (float)src_box->x / (float)surface->applied.width,
+      (float)src_box->y / (float)surface->applied.height,
+      (float)(src_box->x + src_box->width) / (float)surface->applied.width,
+      (float)(src_box->y + src_box->height) / (float)surface->applied.height,
+  };
+
+  rn_image_render_adv(egl->render, (vec2s){dst_box->x, dst_box->y},
+                      (vec2s){dst_box->width, dst_box->height}, 0.0f, RN_WHITE,
+                     egl_buf->tex,
+                      uv_rect, false, RN_NO_COLOR, 0.0f, 0.0f);
 
   struct vt_rendered_surface_t *entry = calloc(1, sizeof(*entry));
   if (!entry)
@@ -1469,7 +1483,29 @@ void renderer_draw_surface_egl(struct vt_renderer_t *r,
 
   surface->damaged = false;
 
-  VT_TRACE(r->comp->log, "Presented surface %p (%.2f,%.2f).", surface, x, y);
+  VT_TRACE(r->comp->log,
+           "Presented surface %p "
+           "src=[x:%d y:%d w:%u h:%u] "
+           "dst=[x:%d y:%d w:%u h:%u].",
+           surface, src_box->x, src_box->y, src_box->width, src_box->height,
+           dst_box->x, dst_box->y, dst_box->width, dst_box->height);
+}
+
+void renderer_draw_surface_simple_egl(struct vt_renderer_t *r,
+                                      struct vt_output_t   *output,
+                                      struct vt_surface_t *surface, float x,
+                                      float y) {
+  assert(r && output && surface);
+  struct vt_box_t src = (struct vt_box_t){.x = 0,
+                                          .y = 0,
+                                          .width = surface->applied.width,
+                                          .height = surface->applied.height};
+  struct vt_box_t dst = (struct vt_box_t){.x = x,
+                                          .y = y,
+                                          .width = surface->applied.width,
+                                          .height = surface->applied.height};
+
+  renderer_draw_surface_egl(r, output, surface, &src, &dst);
 }
 
 void renderer_draw_image_egl(struct vt_renderer_t *r,

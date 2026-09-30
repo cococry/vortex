@@ -125,48 +125,21 @@ static bool _scene_node_on_output(struct vt_scene_node_t *node,
   int32_t output_right = output->x + output->width;
   int32_t output_bottom = output->y + output->height;
 
-  VT_TRACE(output->backend->comp->log,
-           "SCENE: node_on_output: node=%p output=%p "
-           "node=[x=%d y=%d w=%u h=%u right=%d bottom=%d] "
-           "output=[x=%d y=%d w=%u h=%u right=%d bottom=%d]",
-           node, output, box->x, box->y, box->width, box->height, node_right,
-           node_bottom, output->x, output->y, output->width, output->height,
-           output_right, output_bottom);
-
   if (node_right <= output->x) {
-    VT_TRACE(output->backend->comp->log,
-             "SCENE: node=%p outside output=%p: right=%d <= output_x=%d",
-             node, output, node_right, output->x);
     return false;
   }
 
   if (box->x >= output_right) {
-    VT_TRACE(output->backend->comp->log,
-             "SCENE: node=%p outside output=%p: x=%d >= output_right=%d",
-             node, output, box->x, output_right);
     return false;
   }
 
   if (node_bottom <= output->y) {
-    VT_TRACE(output->backend->comp->log,
-             "SCENE: node=%p outside output=%p: bottom=%d <= output_y=%d",
-             node, output, node_bottom, output->y);
     return false;
   }
 
   if (box->y >= output_bottom) {
-    VT_TRACE(output->backend->comp->log,
-             "SCENE: node=%p outside output=%p: y=%d >= output_bottom=%d",
-             node, output, box->y, output_bottom);
     return false;
   }
-
-  VT_TRACE(output->backend->comp->log,
-           "SCENE: node=%p intersects output=%p "
-           "node=[%d,%d %ux%u] output=[%d,%d %ux%u]",
-           node, output,
-           box->x, box->y, box->width, box->height,
-           output->x, output->y, output->width, output->height);
 
   return true;
 }
@@ -175,7 +148,7 @@ static void _scene_node_accumulate_layers(struct vt_scene_t      *scene,
                                           struct vt_output_t     *output,
                                           struct vt_scene_node_t *node,
                                           int32_t parent_x, int32_t parent_y) {
-  if (!scene || !node)
+  if (!scene || !output || !node)
     return;
 
   int32_t x = parent_x + node->x;
@@ -184,26 +157,47 @@ static void _scene_node_accumulate_layers(struct vt_scene_t      *scene,
   if (_scene_node_is_layer_candidate(node)) {
     if (!_scene_node_on_output(node, output))
       goto children;
+
+    struct vt_box_t *rect = vt_scene_node_get_global_bounds(node);
+    if (!rect)
+      goto children;
+
+    int32_t left = rect->x;
+    int32_t top = rect->y;
+    int32_t right = rect->x + rect->width;
+    int32_t bottom = rect->y + rect->height;
+
+    int32_t output_left = output->x;
+    int32_t output_top = output->y;
+    int32_t output_right = output->x + output->width;
+    int32_t output_bottom = output->y + output->height;
+
+    int32_t clipped_left = VT_MAX(left, output_left);
+    int32_t clipped_top = VT_MAX(top, output_top);
+    int32_t clipped_right = VT_MIN(right, output_right);
+    int32_t clipped_bottom = VT_MIN(bottom, output_bottom);
+
+    if (clipped_right <= clipped_left || clipped_bottom <= clipped_top)
+      goto children;
+
     struct vt_output_layer_state_t *layer = _scene_push_layer(scene);
     if (!layer)
       return;
 
     layer->surface = node->surf;
 
-    struct vt_box_t *rect = vt_scene_node_get_global_bounds(node);
-
     layer->src = (struct vt_box_t){
-        .x = 0,
-        .y = 0,
-        .width = rect->width,
-        .height = rect->height,
+        .x = clipped_left - left,
+        .y = clipped_top - top,
+        .width = clipped_right - clipped_left,
+        .height = clipped_bottom - clipped_top,
     };
 
     layer->dst = (struct vt_box_t){
-        .x = x - output->x,
-        .y = y - output->y,
-        .width = rect->width,
-        .height = rect->height,
+        .x = clipped_left - output->x,
+        .y = clipped_top - output->y,
+        .width = clipped_right - clipped_left,
+        .height = clipped_bottom - clipped_top,
     };
   }
 
@@ -240,8 +234,8 @@ static void _scene_render_layers(struct vt_scene_t  *scene,
       continue;
     }
 
-    renderer->impl.draw_surface(renderer, output, layer->surface, layer->dst.x,
-                                layer->dst.y);
+    renderer->impl.draw_surface(renderer, output, layer->surface, &layer->src,
+                                &layer->dst);
   }
 }
 
@@ -263,9 +257,9 @@ static void _composite_pass(struct vt_scene_t  *scene,
   struct vt_surface_t *cursor = seat->cursor.surf;
 
   if (cursor && cursor->mapped) {
-    r->impl.draw_surface(r, output, cursor,
-                         seat->pointer_x - seat->cursor.hotspot_x,
-                         seat->pointer_y - seat->cursor.hotspot_y);
+    r->impl.draw_surface_simple(r, output, cursor,
+                                seat->pointer_x - seat->cursor.hotspot_x,
+                                seat->pointer_y - seat->cursor.hotspot_y);
   }
 
   r->impl.end_scene(r, output);
