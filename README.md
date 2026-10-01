@@ -21,7 +21,7 @@ meson ninja-build libwayland-dev libdrm-dev libgbm-dev libegl1-mesa-dev libinput
 ```
 
 Clone & build:
-```
+```bash
 git clone https://github.com/cococry/vortex.git
 cd vortex
 
@@ -31,7 +31,7 @@ sudo meson install -C build
 ```
 
 Simple test of vortex:
-```
+```bash
 ./build/vortex &
 sleep 1
 WAYLAND_DISPLAY=wayland-1 weston-simple-shm
