@@ -22,7 +22,7 @@ meson ninja-build libwayland-dev libdrm-dev libgbm-dev libegl1-mesa-dev libinput
 
 Clone & build:
 ```
-git clone --recurse-submodules https://github.com/cococry/vortex.git
+git clone https://github.com/cococry/vortex.git
 cd vortex
 
 meson setup build
@@ -92,5 +92,7 @@ Or load a custom shared object backend manually:
 ```bash
 vortex -bp /usr/lib/vortex/backends/libcustom.so
 ```
+
+[`runara`](https://github.com/cococry/runara) is currently vendored into `subprojects/` but might not be in the future.
 
 ---
