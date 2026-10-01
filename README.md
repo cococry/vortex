@@ -1,15 +1,16 @@
 # vortex
 
-**vortex** is an independent wayland compositor written in C. 
+**vortex** is an independent wayland compositor written in C.
 
 ---
 
 ## Overview
 
 vortex is currently under active development as a high-performance, modern Wayland compositor
-focused on creating a visually appealing Wayland desktop experience. 
-The project's goal is to create a self-contained, independent platform dedicated entirely to desktop compositing. 
-In other words, the compositor is responsible only for compositing and its related aspects (such as window animations and IPC), 
+focused on creating a visually appealing Wayland desktop experience.
+
+The project's goal is to create a self-contained platform dedicated entirely to desktop compositing.
+In other words, the compositor is responsible only for compositing and its related aspects (such as window animations and IPC),
 while components like the desktop shell are intentionally abstracted away from it.
 
 ## Build & Run
@@ -36,11 +37,11 @@ sleep 1
 WAYLAND_DISPLAY=wayland-1 weston-simple-shm
 ```
 
-Note: Use the wayland display that is logged by the output of **./vortex --verbose** as the WAYLAND_DISPLAY variable 
+Note: Use the wayland display that is logged by the output of **./vortex --verbose** as the WAYLAND_DISPLAY variable
 when starting clients.
 
 
-Note: The sink backend is automatically chosen at runtime, depending on context. 
+Note: The sink backend is automatically chosen at runtime, depending on context.
 
 Supported sink backends are:
 - *DRM/KMS* (hardware scanout)
@@ -76,9 +77,9 @@ The compositor supports **pluggable sink backends** that can be discovered at ru
 
 ### Valid Backends
 
-Valid options for backends are: 
+Valid options for backends are:
   - drm
-  -  wl 
+  -  wl
 
 You can specify one directly:
 
