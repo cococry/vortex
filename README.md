@@ -1,12 +1,12 @@
 # vortex
 
-**vortex** is an independent wayland compositor written in C.
+`vortex` is an independent wayland compositor written in C.
 
 ---
 
 ## Overview
 
-vortex is currently under active development as a high-performance, modern Wayland compositor
+`vortex` is currently under active development as a high-performance, modern Wayland compositor
 focused on creating a visually appealing Wayland desktop experience.
 
 The project's goal is to create a self-contained platform dedicated entirely to desktop compositing.
