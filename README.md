@@ -25,6 +25,7 @@ Clone & build:
 git clone https://github.com/cococry/vortex.git
 cd vortex
 
+# needs to be in $PATH
 meson setup build --prefix="$HOME/.local"
 meson compile -C build
 meson install -C build
