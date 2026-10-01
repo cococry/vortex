@@ -26,7 +26,6 @@
 #include <cglm/types-struct.h>
 #include <ctype.h>
 #include <float.h>
-#include <fontconfig/fontconfig.h>
 #include <string.h>
 
 #include "vendor/glad/include/glad/glad.h"

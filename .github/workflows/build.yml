@@ -19,7 +19,7 @@ jobs:
             base-devel meson ninja \
             wayland wayland-protocols libxkbcommon pixman \
             mesa libglvnd libdrm libinput systemd-libs seatd \
-            glfw freetype2 harfbuzz fontconfig
+            glfw freetype2 harfbuzz
 
       - uses: actions/checkout@v4
 

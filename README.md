@@ -17,7 +17,7 @@ while components like the desktop shell are intentionally abstracted away from i
 
 Make sure you have the required dependencies installed (debian packages shown):
 ```
-meson ninja-build libwayland-dev libdrm-dev libgbm-dev libegl1-mesa-dev libinput-dev libudev-dev libxkbcommon-dev libglfw3-dev libcglm-dev libfreetype-dev libharfbuzz-dev libfontconfig-dev
+meson ninja-build libwayland-dev libdrm-dev libgbm-dev libegl1-mesa-dev libinput-dev libudev-dev libxkbcommon-dev libglfw3-dev libcglm-dev libfreetype-dev libharfbuzz-dev
 ```
 
 Clone & build:
