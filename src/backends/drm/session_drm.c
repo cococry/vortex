@@ -307,7 +307,6 @@ bool vt_session_init_drm(struct vt_session_t *session) {
   libseat_set_log_handler(_vt_session_seat_log_func);
 
   setenv("XDG_SESSION_TYPE", "wayland", 1);
-  setenv("LIBSEAT_BACKEND", "seatd", 1);
 
   wl_list_init(&session_drm->devices);
   wl_signal_init(&session_drm->ev_drm_add_card);

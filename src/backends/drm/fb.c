@@ -41,7 +41,10 @@ static bool _drm_fb_add(struct drm_backend_state_t *drm,
 
   if (drm->caps[VT_DRM_CAP_ADDFB2_MODIFIERS] &&
       modifier != DRM_FORMAT_MOD_INVALID) {
-    uint64_t modifiers[4] = {modifier, modifier, modifier, modifier};
+    // kernel rejects a non-zero modifier on unused planes with -EINVAL
+    uint64_t modifiers[4] = {0};
+    for (int i = 0; i < 4; i++)
+      modifiers[i] = handles[i] ? modifier : 0;
     ret = drmModeAddFB2WithModifiers(drm->drm_fd, width, height, format,
                                      handles, strides, offsets, modifiers,
                                      &fb->id, DRM_MODE_FB_MODIFIERS);

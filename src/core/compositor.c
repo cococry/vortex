@@ -184,7 +184,8 @@ bool _vt_comp_render_output(struct vt_compositor_t *c,
   if (!c || !c->backend || !c->backend->impl.handle_frame || !output)
     return false;
 
-  vt_comp_repaint_scene(c, output);
+  // backends repaint inside handle_frame: DRM must gate on pending flips
+  // before swapping, or unlocked GBM buffers deadlock eglSwapBuffers
   c->backend->impl.handle_frame(c->backend, output);
   output->repaint_pending = false;
 
@@ -811,8 +812,10 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
 
   // Initialize session
   if (c->backend->platform == VT_BACKEND_DRM_GBM) {
-    if (c->session->impl.init)
-      c->session->impl.init(c->session);
+    if (c->session->impl.init && !c->session->impl.init(c->session)) {
+      VT_ERROR(c->log, "Failed to initialize session.");
+      return false;
+    }
   }
 
   // Initialize backend
