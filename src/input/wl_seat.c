@@ -184,8 +184,11 @@ void _wl_handle_keybind_exit(struct vt_compositor_t *comp, void *user_data) {
   vt_comp_terminate(comp);
 }
 void _wl_handle_keybind_term(struct vt_compositor_t *comp, void *user_data) {
-  char buf[64];
-  snprintf(buf, sizeof(buf), "weston-terminal &");
+  char buf[128];
+  // env scoped to the child: our own WAYLAND_DISPLAY may point at a parent
+  snprintf(buf, sizeof(buf),
+           "WAYLAND_DISPLAY=%s ${TERMINAL:-weston-terminal} &",
+           comp->wl.socket_name);
   VT_TRACE(comp->log, "Doing: '%s'", buf);
   system(buf);
 }

@@ -56,6 +56,7 @@ struct wl_state_t {
   struct wl_display    *dsp;
   struct wl_event_loop *evloop;
   struct wl_compositor *compositor;
+  const char           *socket_name; // owned by dsp
 };
 
 enum vt_backend_platform_t {

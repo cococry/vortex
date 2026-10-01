@@ -676,6 +676,7 @@ bool _vt_comp_wl_init(struct vt_compositor_t *c) {
   }
 
   const char *socket_name = wl_display_add_socket_auto(c->wl.dsp);
+  c->wl.socket_name = socket_name;
   if (!socket_name) {
     VT_ERROR(
         c->log,
