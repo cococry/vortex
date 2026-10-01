@@ -448,7 +448,7 @@ void renderer_init(RnState *state) {
       "    vec4 col = v_color;\n"
       "\n"
       "    if (v_tex_index != 0u) {\n"
-      "        col *= sample_texture(int(clamp(v_tex_index, 1, 15u)), v_uv);\n"
+      "        col *= sample_texture(int(clamp(v_tex_index, 1u, 15u)), v_uv);\n"
       "    }\n"
       "\n"
       "    o_color = col;\n"
