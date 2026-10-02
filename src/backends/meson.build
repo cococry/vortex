@@ -18,6 +18,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+# headers only: symbols resolve from the vortex executable (-Wl,-E)
+dep_runara_headers = runara_dep.partial_dependency(
+  compile_args: true, includes: true)
+
 if get_option('vt_backend_drm')
   subdir('drm')
 endif

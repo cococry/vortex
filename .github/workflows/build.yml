@@ -1,0 +1,30 @@
+name: build
+
+on:
+  push:
+    paths-ignore:
+      - '**.md'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+
+jobs:
+  arch:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm --needed \
+            base-devel meson ninja \
+            wayland wayland-protocols libxkbcommon pixman \
+            mesa libglvnd libdrm libinput systemd-libs seatd \
+            glfw freetype2 harfbuzz
+
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: meson setup build
+
+      - name: Compile
+        run: meson compile -C build

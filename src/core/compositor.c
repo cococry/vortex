@@ -675,6 +675,7 @@ bool _vt_comp_wl_init(struct vt_compositor_t *c) {
   }
 
   const char *socket_name = wl_display_add_socket_auto(c->wl.dsp);
+  c->wl.socket_name = socket_name;
   if (!socket_name) {
     VT_ERROR(
         c->log,
@@ -809,8 +810,10 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
 
   // Initialize session
   if (c->backend->platform == VT_BACKEND_DRM_GBM) {
-    if (c->session->impl.init)
-      c->session->impl.init(c->session);
+    if (c->session->impl.init && !c->session->impl.init(c->session)) {
+      VT_ERROR(c->log, "Failed to initialize session.");
+      return false;
+    }
   }
 
   // Initialize backend

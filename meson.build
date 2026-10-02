@@ -14,6 +14,10 @@ project(
 
 add_project_arguments('-Ddefault_library=static', language: 'c')
 
+# backends include core headers that pull in runara.h, so resolve it first
+runara_sp  = subproject('runara')
+runara_dep = runara_sp.get_variable('runara_dep')
+
 subdir('src')
 
 cc = meson.get_compiler('c')
@@ -83,10 +87,6 @@ explitic_sync_code = custom_target(
   command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'],
   install: false
 )
-
-runara_sp  = subproject('runara')
-runara_dep = runara_sp.get_variable('runara_dep')
-
 
 vortex_src = files('src/vortex.c', 
 'src/vortex.c', 
