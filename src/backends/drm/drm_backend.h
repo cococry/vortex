@@ -23,6 +23,7 @@
 #pragma once
 
 #include "core/core_types.h"
+#include "render/dmabuf.h"
 
 bool backend_init_drm(struct vt_backend_t *backend);
 
@@ -43,3 +44,8 @@ bool backend_prepare_output_frame_drm(struct vt_backend_t *backend,
 bool backend_test_output_layers_drm(
     struct vt_backend_t *backend, struct vt_output_t *output,
     struct vt_output_layer_state_t *layers, size_t layer_count);
+
+bool backend_build_surface_feedback(struct vt_backend_t         *backend,
+                                    struct vt_surface_t         *surface,
+                                    struct vt_output_t          *output,
+                                    struct vt_dmabuf_feedback_t *feedback);

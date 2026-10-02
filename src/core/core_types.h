@@ -26,7 +26,9 @@ struct vt_renderer_t;
 struct vt_surface_t;
 struct vt_backend_t;
 struct vt_output_t;
+struct vt_output_layer_state_t;
 struct vt_scene_t;
+struct vt_dmabuf_feedback_t; 
 
 #include <stdbool.h>
 
@@ -39,10 +41,8 @@ struct vt_scene_t;
 
 #include "session.h"
 #include "util.h"
-#include "output_layer.h"
 
 #define BACKEND_DATA(b, type) ((type *)((b)->user_data))
-#define VT_MAX_DAMAGE_RECTS   64
 
 #define VT_ALLOC(c, size)       vt_util_alloc(&(c)->arena, (size))
 #define VT_ALLOC_FRAME(c, size) vt_util_alloc(&(c)->frame_arena, (size))
@@ -83,6 +83,12 @@ struct vt_backend_interface_t {
                              struct vt_output_t             *output,
                              struct vt_output_layer_state_t *layers,
                              size_t                          layer_count);
+
+  bool (*build_surface_feedback)(struct vt_backend_t         *backend,
+                                 struct vt_surface_t         *surface,
+                                 struct vt_output_t          *output,
+                                 struct vt_dmabuf_feedback_t *feedback);
+
   bool (*terminate)(struct vt_backend_t *backend);
 };
 
@@ -115,67 +121,13 @@ struct vt_output_mode_t {
   struct wl_list                     link;
 };
 
-struct vt_rendered_surface_t {
+struct vt_presented_surface_t {
   struct wl_list link;
   struct vt_surface_t *surf;
-
-  struct vt_buffer_use_t *buffer_use;
 };
 
 struct vt_output_cursor_size_t {
   uint16_t width, height;
-};
-
-struct vt_output_t {
-  struct wl_list       rendered_surfaces;
-  struct wl_list       link_local, link_global;
-  struct vt_backend_t *backend;
-  void                *native_window;
-  void                *render_surface;
-
-  uint32_t width, height;
-  int32_t  x, y;
-  float    refresh_rate;
-  uint32_t format, id;
-
-  bool needs_repaint, repaint_pending, resize_pending;
-
-  void *user_data, *user_data_render;
-
-  struct wl_event_source *repaint_source;
-
-  pixman_region32_t damage;
-
-  pixman_box32_t cached_damage[VT_MAX_DAMAGE_RECTS];
-  int32_t        n_damage_boxes;
-  bool           needs_damage_rebuild;
-
-  struct {
-    struct wl_global *global;
-    struct wl_list    resources;
-  } proto;
-
-  uint32_t transform;
-  int32_t  native_scale;
-  int32_t  current_scale;
-  int32_t  original_scale;
-
-  struct {
-    int32_t mm_width;
-    int32_t mm_height;
-
-    // WL_OUTPUT_TRANSFORM
-    uint32_t transform;
-
-    char *make;
-    char *model;
-    char *name;
-
-    char    *serial_number;
-    uint32_t subpixel;
-
-    struct wl_list modes;
-  } physical;
 };
 
 struct vt_compositor_t {

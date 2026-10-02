@@ -56,6 +56,7 @@ struct drm_scanout_buffer_t {
 };
 
 struct drm_scanout_layer_t {
+  struct vt_surface_t        *surface;
   struct drm_plane_t *plane;
   struct drm_scanout_buffer_t scanout;
 
@@ -159,6 +160,8 @@ struct drm_backend_state_t {
   struct wl_array planes;
 
   bool caps[VT_DRM_CAP__COUNT];
+
+  struct wl_array sampling_formats;
 
   drmModeRes *res;
 };

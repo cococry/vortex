@@ -566,7 +566,7 @@ bool _wl_backend_create_output(struct vt_backend_t *backend,
   pixman_region32_init(&output->damage);
   output->backend = backend;
   wl_list_init(&output->physical.modes);
-  wl_list_init(&output->rendered_surfaces);
+  wl_list_init(&output->presented_surfaces);
   wl_list_init(&output->proto.resources);
 
   _wl_set_fake_output_mode(output, _WL_DEFAULT_OUTPUT_WIDTH,
@@ -697,9 +697,6 @@ bool _wl_backend_destroy_output(struct vt_backend_t *backend,
 
 bool _wl_init_fake_dmabuf_feedback(struct vt_compositor_t      *comp,
                                    struct vt_dmabuf_feedback_t *fb) {
-  wl_array_init(&fb->tranches);
-
-  fb->comp = comp;
   fb->dev_main = calloc(1, sizeof(*fb->dev_main));
   dev_t       main_dev;
   struct stat st;
@@ -720,9 +717,12 @@ bool _wl_init_fake_dmabuf_feedback(struct vt_compositor_t      *comp,
 
   // single empty tranche (no formats)
   struct vt_dmabuf_tranche_t *tranche =
-      wl_array_add(&fb->tranches, sizeof(*tranche));
-  if (!tranche)
+      vt_dmabuf_feedback_add_tranche(fb, fb->dev_main, 0);
+  if (!tranche) {
+    VT_ERROR(comp->log, "Failed to create fake tranche");
+
     return false;
+  }
 
   wl_array_init(&tranche->formats);
 
@@ -827,8 +827,12 @@ bool backend_init_wl(struct vt_backend_t *backend) {
   if (backend->comp->have_proto_dmabuf) {
     // initialize the dmabuf protocol with default feedback
     struct vt_dmabuf_feedback_t *default_feedback =
-        calloc(1, sizeof(*default_feedback));
-    default_feedback->comp = backend->comp;
+        vt_dmabuf_feedback_create(backend->comp, NULL);
+
+    if (!default_feedback) {
+      VT_ERROR(backend->comp->log, "Failed to create default DMABUF feedback.");
+      return false;
+    }
 
     if (!(_wl_init_fake_dmabuf_feedback(backend->comp, default_feedback))) {
       VT_ERROR(backend->comp->log, "Failed to build default DMABUF feedback.");
@@ -847,13 +851,7 @@ bool backend_init_wl(struct vt_backend_t *backend) {
     }
 
     // cleanup the feedback
-    struct vt_dmabuf_tranche_t *tranche;
-    wl_array_for_each(tranche, &default_feedback->tranches) {
-      vt_drm_format_array_free(&tranche->formats);
-    }
-    wl_array_release(&default_feedback->tranches);
-
-    free(default_feedback);
+    vt_dmabuf_feedback_fini(default_feedback);
   }
 
   // init explicit sync
@@ -907,6 +905,7 @@ bool backend_implement_wl(struct vt_compositor_t *comp) {
       .handle_frame = backend_handle_frame_wl,
       .terminate = backend_terminate_wl,
       .prepare_output_frame = backend_prepare_output_frame_wl,
+      .build_surface_feedback = NULL
   };
 
   // No session in Wayland nested

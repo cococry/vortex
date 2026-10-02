@@ -154,9 +154,9 @@ void vt_comp_frame_done(struct vt_compositor_t *c, struct vt_output_t *output,
   if (!c || !output)
     return;
 
-  struct vt_rendered_surface_t *entry, *tmp;
+  struct vt_presented_surface_t *entry, *tmp;
 
-  wl_list_for_each_safe(entry, tmp, &output->rendered_surfaces, link) {
+  wl_list_for_each_safe(entry, tmp, &output->presented_surfaces, link) {
     if (entry->surf)
       vt_surface_frame_done(entry->surf, t);
 
@@ -164,7 +164,6 @@ void vt_comp_frame_done(struct vt_compositor_t *c, struct vt_output_t *output,
     free(entry);
   }
 
-  wl_list_init(&output->rendered_surfaces);
   VT_TRACE(c->log, "Sent frame callbacks for output %p.", output);
 }
 

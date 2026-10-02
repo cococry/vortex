@@ -97,29 +97,35 @@ size_t vt_drm_format_array_count(const struct wl_array *formats) {
   return formats->size / sizeof(struct vt_drm_format_t);
 }
 
-struct vt_drm_format_t *vt_drm_format_array_push(struct wl_array *formats,
-                                                 struct vt_drm_format_t *fmt) {
+struct vt_drm_format_t *
+vt_drm_format_array_push(struct wl_array              *formats,
+                         const struct vt_drm_format_t *fmt) {
   assert(formats && fmt);
 
   struct vt_drm_format_t *present =
       vt_drm_format_array_get_format(formats, fmt);
-  if (present)
-    return present;
 
-  struct vt_drm_format_t *add = wl_array_add(formats, sizeof(*add));
-  if (!add)
+  if (present) {
+    if (!vt_drm_format_add_mods(present, &fmt->mods))
+      return NULL;
+
+    return present;
+  }
+
+  struct vt_drm_format_t *candidate = wl_array_add(formats, sizeof(*candidate));
+  if (!candidate)
     return NULL;
 
-  vt_drm_format_init(add, fmt->format);
+  vt_drm_format_init(candidate, fmt->format);
 
   /* deep copy */
-  if (!vt_drm_format_add_mods(add, &fmt->mods)) {
-    wl_array_release(&add->mods);
-    formats->size -= sizeof(*add);
+  if (!vt_drm_format_add_mods(candidate, &fmt->mods)) {
+    wl_array_release(&candidate->mods);
+    formats->size -= sizeof(*candidate);
     return NULL;
   }
 
-  return add;
+  return candidate;
 }
 struct vt_drm_format_t *vt_drm_format_array_push_pair(struct wl_array *formats,
                                                       uint32_t         format,
@@ -129,7 +135,7 @@ struct vt_drm_format_t *vt_drm_format_array_push_pair(struct wl_array *formats,
   struct vt_drm_format_t fmt = {0};
   vt_drm_format_init(&fmt, format);
 
-  if(!vt_drm_format_add_mod(&fmt, mod)) {
+  if (!vt_drm_format_add_mod(&fmt, mod)) {
     vt_drm_format_fini(&fmt);
     return NULL;
   }
@@ -138,7 +144,7 @@ struct vt_drm_format_t *vt_drm_format_array_push_pair(struct wl_array *formats,
 
   vt_drm_format_fini(&fmt);
 
-  return pushed; 
+  return pushed;
 }
 
 struct vt_drm_format_t *
@@ -150,25 +156,12 @@ vt_drm_format_array_get_format(struct wl_array              *formats,
   if (!find)
     return false;
 
-  const size_t n_mods_find = vt_drm_format_mod_count(find);
-
   struct vt_drm_format_t *fmt;
   wl_array_for_each(fmt, formats) {
-    if (fmt->format != find->format ||
-        vt_drm_format_mod_count(fmt) != n_mods_find)
+    if (fmt->format != find->format)
       continue;
 
-    bool                             match = true;
-    struct vt_drm_format_modifier_t *it;
-    wl_array_for_each(it, &find->mods) {
-      if (!vt_drm_format_get_mod(fmt, it->mod)) {
-        match = false;
-        break;
-      }
-    }
-    if (match) {
-      return fmt;
-    }
+    return fmt;
   }
   return NULL;
 }
@@ -184,4 +177,97 @@ void vt_drm_format_array_free(struct wl_array *formats) {
 
   /* 3. Release the formats array */
   wl_array_release(formats);
+}
+
+bool vt_drm_format_array_intersect(struct wl_array       *dst,
+                                   const struct wl_array *a,
+                                   const struct wl_array *b) {
+  struct wl_array out;
+  wl_array_init(&out);
+
+  const struct vt_drm_format_t *afmt;
+  wl_array_for_each(afmt, a) {
+    const struct vt_drm_format_t *bfmt = NULL;
+
+    wl_array_for_each(bfmt, b) {
+      if (afmt->format == bfmt->format) {
+        break;
+      }
+    }
+
+    if (bfmt == NULL || afmt->format != bfmt->format) {
+      continue;
+    }
+
+    struct vt_drm_format_t *ofmt = wl_array_add(&out, sizeof(*ofmt));
+    if (ofmt == NULL) {
+      vt_drm_format_array_free(&out);
+      return false;
+    }
+
+    vt_drm_format_init(ofmt, afmt->format);
+
+    const struct vt_drm_format_modifier_t *amod;
+    wl_array_for_each(amod, &afmt->mods) {
+      const struct vt_drm_format_modifier_t *bmod = NULL;
+
+      wl_array_for_each(bmod, &bfmt->mods) {
+        if (amod->mod == bmod->mod) {
+          break;
+        }
+      }
+
+      if (bmod == NULL || amod->mod != bmod->mod) {
+        continue;
+      }
+
+      struct vt_drm_format_modifier_t *omod =
+          vt_drm_format_add_mod(ofmt, amod->mod);
+      if (omod == NULL) {
+        vt_drm_format_array_free(&out);
+        return false;
+      }
+
+      /* The modifier is EGL-extension-only if it is marked
+       * that way by either input format */
+      omod->_egl_ext_only = amod->_egl_ext_only || bmod->_egl_ext_only;
+    }
+
+    /* Formats with no common modifiers do not belong in the
+     * resulting intersection */
+    if (vt_drm_format_mod_count(ofmt) == 0) {
+      vt_drm_format_fini(ofmt);
+      out.size -= sizeof(*ofmt);
+    }
+  }
+
+  if (vt_drm_format_array_count(&out) == 0) {
+    vt_drm_format_array_free(&out);
+    return false;
+  }
+
+  vt_drm_format_array_free(dst);
+  *dst = out;
+  return true;
+}
+
+bool vt_drm_format_array_copy(struct wl_array       *dst,
+                              const struct wl_array *src) {
+  assert(dst && src);
+
+  struct wl_array out;
+  wl_array_init(&out);
+
+  const struct vt_drm_format_t *fmt;
+  wl_array_for_each(fmt, src) {
+    if (!vt_drm_format_array_push(&out, fmt)) {
+      vt_drm_format_array_free(&out);
+      return false;
+    }
+  }
+
+  vt_drm_format_array_free(dst);
+  *dst = out;
+
+  return true;
 }

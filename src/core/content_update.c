@@ -82,9 +82,14 @@ static bool _content_update_prepare_buffer(struct vt_content_update_t *cu) {
 
   assert(cu->buffer_use->buf);
 
-  if (r->impl.import_buffer &&
+  /* TODO: For correctness, we should make sure that that this buffer is
+   * importable. If the renderer import fails after DAG applying, the atomic 
+   * apply path would fail, which should not happen. */
+  /*
+   * if (r->impl.import_buffer &&
       !r->impl.import_buffer(r, cu->buffer_use->buf, &cu->state.damage_surface))
     return false;
+    */
 
   return true;
 }

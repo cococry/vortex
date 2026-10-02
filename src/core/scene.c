@@ -494,18 +494,32 @@ void vt_scene_render(struct vt_scene_t *scene, struct vt_output_t *output) {
 
   _scene_accumulate_layers(scene, output);
 
-  if (output->backend->impl.test_output_layers)
-    output->backend->impl.test_output_layers(output->backend, output,
-                                             scene->layers, scene->n_layers);
+  if (scene->n_layers > 0) {
+    if (output->backend->impl.test_output_layers)
+      output->backend->impl.test_output_layers(output->backend, output,
+                                               scene->layers, scene->n_layers);
+  }
 
   struct vt_renderer_t *r = scene->renderer;
 
-  r->impl.begin_frame(r, output);
+  bool need_compositing = false; 
+  for(size_t i = 0; i < scene->n_layers; i++) {
+    if(!scene->layers[i].accepted) {
+      need_compositing = true;
+      break;
+    }
+  }
+  if (!need_compositing && scene->n_layers == 0)
+    need_compositing = true;
 
-  // TODO: Damage pass
-  _composite_pass(scene, output);
+  if (need_compositing) {
+    r->impl.begin_frame(r, output);
 
-  r->impl.end_frame(r, output, output->cached_damage, output->n_damage_boxes);
+    // TODO: Damage pass
+    _composite_pass(scene, output);
+
+    r->impl.end_frame(r, output, output->cached_damage, output->n_damage_boxes);
+  }
 
   pixman_region32_clear(&output->damage);
   output->needs_repaint = false;
