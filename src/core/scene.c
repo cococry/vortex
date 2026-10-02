@@ -284,9 +284,9 @@ static void _composite_pass(struct vt_scene_t  *scene,
   r->impl.set_clear_color(r, output, 0x000000);
 
   _scene_render_layers(scene, output);
-  
+
   _scene_render_cursor(scene, output);
- 
+
   r->impl.end_scene(r, output);
 }
 
@@ -502,7 +502,7 @@ void vt_scene_render(struct vt_scene_t *scene, struct vt_output_t *output) {
 
   struct vt_renderer_t *r = scene->renderer;
 
-  bool need_compositing = false; 
+  bool need_compositing = false;
   for(size_t i = 0; i < scene->n_layers; i++) {
     if(!scene->layers[i].accepted) {
       need_compositing = true;

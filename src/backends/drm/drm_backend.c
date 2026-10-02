@@ -1119,7 +1119,7 @@ _drm_init_crtcs_and_planes(struct drm_backend_state_t *drm) {
   }
 
 	if (res->count_crtcs == 0) {
-    VT_WARN(comp->log, "No CRTCs are available"); 
+    VT_WARN(comp->log, "No CRTCs are available");
 		drmModeFreeResources(res);
 		return true;
 	}
@@ -2553,7 +2553,7 @@ bool backend_test_output_layers_drm(
              output, layer_count);
     return false;
   }
-  
+
   struct vt_output_layer_state_t *layer = &layers[0];
 
   if (!drm->impl->atomic) {
@@ -2572,7 +2572,7 @@ bool backend_test_output_layers_drm(
     goto reject;
   }
 
-  
+
 
   if (!drm_output->crtc) {
     VT_TRACE(backend->comp->log,

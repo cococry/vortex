@@ -36,13 +36,13 @@ struct vt_drm_format_t {
   struct wl_array mods; /* struct vt_drm_format_modifier_t */
 };
 
-void vt_drm_format_init(struct vt_drm_format_t* fmt, uint32_t format); 
+void vt_drm_format_init(struct vt_drm_format_t* fmt, uint32_t format);
 
 struct vt_drm_format_modifier_t* vt_drm_format_get_mod(struct vt_drm_format_t *fmt, uint64_t mod);
 
 struct vt_drm_format_modifier_t* vt_drm_format_add_mod(struct vt_drm_format_t *fmt, uint64_t mod);
 
-void vt_drm_format_fini(struct vt_drm_format_t *fmt); 
+void vt_drm_format_fini(struct vt_drm_format_t *fmt);
 
 bool vt_drm_format_add_mods(struct vt_drm_format_t *fmt, struct wl_array *mods);
 

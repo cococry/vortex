@@ -43,6 +43,6 @@ shared_module(
   ],
   dependencies: [dep_wayland_client, dep_runara_headers],
   install: true,
-  include_directories: vortex_inc, 
+  include_directories: vortex_inc,
   install_dir: join_paths(get_option('libdir'), 'vortex/backends'),
 )

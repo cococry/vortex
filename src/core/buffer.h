@@ -105,9 +105,9 @@ bool vt_buffer_get_dmabuf(struct vt_buffer_t *buf, struct vt_dmabuf_attr_t * o_a
 
 bool vt_buffer_get_shm(struct vt_buffer_t *buf, struct vt_shm_attr_t* o_attr);
 
-void vt_buffer_begin_use(struct vt_buffer_t *buf); 
+void vt_buffer_begin_use(struct vt_buffer_t *buf);
 
-void vt_buffer_end_use(struct vt_buffer_t *buf); 
+void vt_buffer_end_use(struct vt_buffer_t *buf);
 
 struct vt_buffer_attachment_t *
 vt_buffer_add_attachment(struct vt_buffer_t *buf, const void *owner, void *data,

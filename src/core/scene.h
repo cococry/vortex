@@ -106,9 +106,9 @@ void vt_scene_render(struct vt_scene_t *scene, struct vt_output_t *output);
 void vt_scene_node_set_position(struct vt_scene_node_t *node, int32_t x,
                                 int32_t y);
 
-void vt_scene_node_mark_geometry_dirty(struct vt_scene_node_t *node); 
+void vt_scene_node_mark_geometry_dirty(struct vt_scene_node_t *node);
 
-void vt_scene_node_update_global_bounds(struct vt_scene_node_t *node); 
+void vt_scene_node_update_global_bounds(struct vt_scene_node_t *node);
 
 struct vt_box_t* vt_scene_node_get_global_bounds(struct vt_scene_node_t *node);
 
