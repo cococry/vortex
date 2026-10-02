@@ -347,12 +347,23 @@ static const char *_fourcc_to_str(uint32_t fmt) {
 static const char *_modifier_to_str(uint64_t mod, char *buf, size_t len) {
   if (!buf || len == 0)
     return NULL;
-  if (mod == DRM_FORMAT_MOD_INVALID)
-    snprintf(buf, len, "INVALID");
-  else if (mod == DRM_FORMAT_MOD_LINEAR)
-    snprintf(buf, len, "LINEAR");
-  else
-    snprintf(buf, len, "0x%016" PRIx64, mod);
+
+  char *vendor = drmGetFormatModifierVendor(mod);
+  char *name = drmGetFormatModifierName(mod);
+
+  if (vendor && name) {
+    snprintf(buf, len, "%s:%s (0x%016" PRIx64 ")", vendor, name, mod);
+  } else if (name) {
+    snprintf(buf, len, "%s (0x%016" PRIx64 ")", name, mod);
+  } else if (vendor) {
+    snprintf(buf, len, "%s:UNKNOWN (0x%016" PRIx64 ")", vendor, mod);
+  } else {
+    snprintf(buf, len, "UNKNOWN (0x%016" PRIx64 ")", mod);
+  }
+
+  free(vendor);
+  free(name);
+
   return buf;
 }
 
@@ -374,8 +385,11 @@ static void _log_dmabuf_tranche(struct vt_compositor_t           *comp,
            minor(tranche->target_device->dev),
            (unsigned long)tranche->target_device->dev);
 
-  VT_TRACE(comp->log, "      flags: 0x%x%s", tranche->flags,
-           tranche->flags ? " (preferred/scanout)" : "");
+  VT_TRACE(
+      comp->log, "      flags: 0x%x%s%s", tranche->flags,
+      tranche->flags & VT_DMABUF_TRANCHE_FLAG_DIRECT_SCANOUT ? " DIRECT_SCANOUT"
+                                                             : "",
+      tranche->flags & VT_DMABUF_TRANCHE_FLAG_COMPOSITE ? " COMPOSITE" : "");
 
   size_t n_formats = vt_drm_format_array_count(&tranche->formats);
   VT_TRACE(comp->log, "      formats: %zu total", n_formats);
@@ -391,7 +405,7 @@ static void _log_dmabuf_tranche(struct vt_compositor_t           *comp,
 
     struct vt_drm_format_modifier_t *mod;
     wl_array_for_each(mod, &fmt->mods) {
-      char mod_str[32];
+      char mod_str[256];
       _modifier_to_str(mod->mod, mod_str, sizeof(mod_str));
 
       VT_TRACE(comp->log, "            - %s%s", mod_str,
@@ -403,6 +417,31 @@ static void _log_dmabuf_tranche(struct vt_compositor_t           *comp,
            "=========================================================== ");
 }
 
+static void _log_drm_format_array(struct vt_compositor_t *comp,
+                                  const char *name,
+                                  const struct wl_array *formats) {
+  VT_TRACE(comp->log, "========== %s ==========", name);
+
+  const struct vt_drm_format_t *fmt;
+  wl_array_for_each(fmt, formats) {
+    if (fmt->format != DRM_FORMAT_ARGB8888)
+      continue;
+
+    VT_TRACE(comp->log, "AR24: %zu modifiers",
+             vt_drm_format_mod_count(fmt));
+
+    const struct vt_drm_format_modifier_t *mod;
+    wl_array_for_each(mod, &fmt->mods) {
+      char mod_str[256];
+      _modifier_to_str(mod->mod, mod_str, sizeof(mod_str));
+
+      VT_TRACE(comp->log, "  - %s%s",
+               mod_str,
+               mod->_egl_ext_only ? " (EXT_ONLY)" : "");
+    }
+  }
+}
+
 static bool
 _drm_build_dmabuf_feedback(struct drm_backend_master_state_t *master,
                            struct vt_dmabuf_feedback_t       *feedback) {
@@ -412,11 +451,12 @@ _drm_build_dmabuf_feedback(struct drm_backend_master_state_t *master,
 
   drmDevicePtr dev_main_drm = NULL;
   if (drmGetDevice(master->main_drm->dev->fd, &dev_main_drm) != 0 ||
-      !dev_main_drm)
+      !dev_main_drm) {
+    VT_ERROR(master->comp->log,
+             "Cannot get DRM device pointer of device with fd=%i",
+             master->main_drm->dev->fd);
     return false;
-
-  feedback->dev_main = master->main_drm->dev;
-  wl_array_init(&feedback->tranches);
+  }
 
   VT_TRACE(master->comp->log, "Building default DMABUF feedback...");
 
@@ -473,25 +513,17 @@ _drm_build_dmabuf_feedback(struct drm_backend_master_state_t *master,
       continue;
     }
 
-    struct vt_dmabuf_tranche_t *tranche =
-        wl_array_add(&feedback->tranches, sizeof(*tranche));
-    if (!tranche)
-      goto fail;
-
-    memset(tranche, 0, sizeof(*tranche));
-
-    tranche->target_device = dev;
-    tranche->flags = _drm_devices_equal(dev_main_drm, dev_drm)
-                         ? VT_DMABUF_TRANCHE_FLAG_DIRECT_SCANOUT
-                         : 0;
-
-    wl_array_init(&tranche->formats);
+    struct vt_dmabuf_tranche_t *main_tranche = vt_dmabuf_feedback_add_tranche(
+        feedback, dev,
+        _drm_devices_equal(dev_main_drm, dev_drm)
+            ? VT_DMABUF_TRANCHE_FLAG_DIRECT_SCANOUT
+            : VT_DMABUF_TRANCHE_FLAG_COMPOSITE);
 
     struct vt_renderer_t *r = master->comp->renderer;
     if (dev == master->main_drm->dev) {
       if (r->impl.query_dmabuf_formats_with_renderer) {
         if (!r->impl.query_dmabuf_formats_with_renderer(
-                r, &tranche->formats)) {
+                r, &drm->sampling_formats)) {
           VT_WARN(master->comp->log,
                   "Cannot query DMABUF formats for main device '%s' from EGL.",
                   dev->path);
@@ -501,7 +533,7 @@ _drm_build_dmabuf_feedback(struct drm_backend_master_state_t *master,
     } else {
       if (r->impl.query_dmabuf_formats) {
         if (!r->impl.query_dmabuf_formats(
-                master->comp, drm->gbm_dev, &tranche->formats)) {
+                master->comp, drm->gbm_dev, &drm->sampling_formats)) {
           VT_WARN(
               master->comp->log,
               "Cannot query DMABUF formats for tranche device '%s' from EGL.",
@@ -511,8 +543,15 @@ _drm_build_dmabuf_feedback(struct drm_backend_master_state_t *master,
       }
     }
 
+    if (!vt_drm_format_array_copy(&main_tranche->formats,
+                                  &drm->sampling_formats)) {
+      VT_ERROR(master->comp->log,
+               "Failed to copy renderer formats into fallback tranche");
+      return false;
+    }
+
     struct vt_drm_format_t *fmt;
-    wl_array_for_each(fmt, &tranche->formats) {
+    wl_array_for_each(fmt, &main_tranche->formats) {
       if (!(n_shm_formats < max_shm_formats - 1)) {
         VT_WARN(master->comp->log,
                 "Maximum number of SHM formats reached, not adding format %i.",
@@ -523,19 +562,11 @@ _drm_build_dmabuf_feedback(struct drm_backend_master_state_t *master,
       shm_formats[n_shm_formats++] = fmt->format;
     }
 
-    _log_dmabuf_tranche(master->comp, tranche, dev->path);
+    _log_dmabuf_tranche(master->comp, main_tranche, dev->path);
   }
 
-  struct vt_dmabuf_tranche_t *fallback =
-      wl_array_add(&feedback->tranches, sizeof(*fallback));
-  if (!fallback)
-    goto fail;
-
-  memset(fallback, 0, sizeof(*fallback));
-
-  fallback->target_device = feedback->dev_main;
-  fallback->flags = 0;
-  wl_array_init(&fallback->formats);
+  struct vt_dmabuf_tranche_t* fallback_tranche = vt_dmabuf_feedback_add_tranche(feedback, feedback->dev_main, 0);
+  wl_array_init(&fallback_tranche->formats);
 
   struct vt_drm_format_t fallback_fmt = {0};
   vt_drm_format_init(&fallback_fmt, DRM_FORMAT_XRGB8888);
@@ -546,7 +577,7 @@ _drm_build_dmabuf_feedback(struct drm_backend_master_state_t *master,
     goto fail;
   }
 
-  if (!vt_drm_format_array_push(&fallback->formats, &fallback_fmt)) {
+  if (!vt_drm_format_array_push(&fallback_tranche->formats, &fallback_fmt)) {
     vt_drm_format_fini(&fallback_fmt);
     goto fail;
   }
@@ -707,6 +738,7 @@ static bool _drm_init_for_device(struct vt_compositor_t     *comp,
 
   wl_list_init(&drm->outputs);
   wl_array_init(&drm->crtcs);
+  wl_array_init(&drm->sampling_formats);
   wl_array_init(&drm->planes);
 
   drm->drm_fd = dev->fd;
@@ -858,11 +890,13 @@ static bool _drm_plane_init(struct drm_backend_state_t *drm,
   for (size_t i = 0; i < drm_plane->count_formats; ++i) {
     uint32_t format = drm_plane->formats[i];
 
+    const char *format_name = drmGetFormatName(format);
     if (!in_formats_supported && plane_type == DRM_PLANE_TYPE_CURSOR) {
+
       VT_TRACE(comp->log,
-               "DRM: plane %" PRIu32 " supports legacy format=0x%08" PRIx32
+               "DRM: plane %" PRIu32 " supports legacy format=%s" PRIx32
                " modifier=LINEAR.",
-               plane_id, format);
+               plane_id, format_name);
 
       if (!vt_drm_format_array_push_pair(&plane->formats, format,
                                          DRM_FORMAT_MOD_LINEAR)) {
@@ -872,9 +906,9 @@ static bool _drm_plane_init(struct drm_backend_state_t *drm,
 
     if (plane_type != DRM_PLANE_TYPE_CURSOR) {
       VT_TRACE(comp->log,
-               "DRM: plane %" PRIu32 " supports legacy format=0x%08" PRIx32
+               "DRM: plane %" PRIu32 " supports legacy format=%s" PRIx32
                " modifier=INVALID.",
-               plane_id, format);
+               plane_id, format_name);
 
       if (!vt_drm_format_array_push_pair(&plane->formats, format,
                                          DRM_FORMAT_MOD_INVALID)) {
@@ -914,17 +948,20 @@ static bool _drm_plane_init(struct drm_backend_state_t *drm,
 
     drmModeFormatModifierIterator iter = {0};
     while (drmModeFormatModifierBlobIterNext(blob, &iter)) {
+      const char *format_name = drmGetFormatName(iter.fmt);
+      char        mod_str[256];
+      _modifier_to_str(iter.mod, mod_str, sizeof(mod_str));
       VT_TRACE(comp->log,
-               "DRM: plane %" PRIu32 " supports format=0x%08" PRIx32
-               " modifier=0x%016" PRIx64 ".",
-               plane_id, iter.fmt, iter.mod);
+               "DRM: plane %" PRIu32 " supports format=%s" PRIx32
+               " modifier=%s.",
+               plane_id, format_name, mod_str);
 
       if (!vt_drm_format_array_push_pair(&plane->formats, iter.fmt, iter.mod)) {
         VT_ERROR(comp->log,
-                 "Failed to add DRM format 0x%" PRIx32
+                 "Failed to add DRM format %s"
                  " with modifier 0x%016" PRIx64 " to plane %" PRIu32
                  " format list.",
-                 iter.fmt, iter.mod, plane_id);
+                 format_name, iter.mod, plane_id);
 
         drmModeFreePropertyBlob(blob);
         return false;
@@ -1388,7 +1425,7 @@ static bool _drm_create_output_for_device(struct drm_backend_state_t *drm,
 
   wl_list_init(&output->physical.modes);
   wl_list_init(&output->proto.resources);
-  wl_list_init(&output->rendered_surfaces);
+  wl_list_init(&output->presented_surfaces);
 
   struct vt_output_mode_t *fallback = NULL;
   struct vt_output_mode_t *selected = NULL;
@@ -2010,7 +2047,6 @@ static bool _drm_handle_frame_for_device(struct drm_backend_state_t *drm,
   }
 
   VT_TRACE(comp->log, "Handling frame...");
-  vt_comp_repaint_scene(comp, output);
 
   drm_output->pending_layers = drm_output->layer_plan;
   wl_array_init(&drm_output->layer_plan);
@@ -2125,6 +2161,28 @@ static bool _drm_handle_frame_for_device(struct drm_backend_state_t *drm,
   }
   free(plane_states);
 
+  struct drm_scanout_layer_t *layer;
+
+  wl_array_for_each(layer, &drm_output->pending_layers) {
+    if (!layer->surface || !layer->scanout.use)
+      continue;
+
+    if (!vt_output_track_presented_surface(output, layer->surface)) {
+      VT_ERROR(comp->log, "Failed to track directly scanned-out surface %p.",
+               layer->surface);
+      continue;
+    }
+
+    VT_TRACE(comp->log, "OUTPUT: tracking presented surface=%p output=%p",
+             layer->surface, output);
+  }
+
+  VT_TRACE(comp->log,
+           "DRM: real commit succeeded output=%p event_pending=%d layers=%zu",
+           output, commit.event_pending,
+           drm_output->pending_layers.size /
+               sizeof(struct drm_scanout_layer_t));
+
   drm_output->pending_valid = true;
   drm_output->needs_modeset = false;
   drm_output->pending_out_fence_fd = commit.out_fence_fd;
@@ -2231,6 +2289,9 @@ bool backend_init_drm(struct vt_backend_t *backend) {
 
   struct drm_backend_master_state_t *drm_master =
       BACKEND_DATA(backend, struct drm_backend_master_state_t);
+
+  assert(drm_master);
+
   drm_master->comp = backend->comp;
 
   wl_list_init(&drm_master->backends);
@@ -2320,12 +2381,13 @@ bool backend_init_drm(struct vt_backend_t *backend) {
 
   if (backend->comp->have_proto_dmabuf) {
     struct vt_dmabuf_feedback_t *default_feedback =
-        calloc(1, sizeof(*default_feedback));
+        vt_dmabuf_feedback_create(drm_master->comp, drm_master->main_drm->dev);
+
     if (!default_feedback) {
-      VT_ERROR(backend->comp->log,
-               "Failed to allocate default DMABUF feedback.");
+      VT_ERROR(backend->comp->log, "Failed to create default DMABUF feedback.");
       goto fail;
     }
+
     default_feedback->comp = drm_master->comp;
 
     if (!_drm_build_dmabuf_feedback(drm_master, default_feedback)) {
@@ -2344,15 +2406,7 @@ bool backend_init_drm(struct vt_backend_t *backend) {
       }
     }
 
-    if (default_feedback->tranches.size > 0) {
-      struct vt_dmabuf_tranche_t *tranche;
-      wl_array_for_each(tranche, &default_feedback->tranches) {
-        vt_drm_format_array_free(&tranche->formats);
-      }
-    }
-    wl_array_release(&default_feedback->tranches);
-
-    free(default_feedback);
+    vt_dmabuf_feedback_fini(default_feedback);
   }
 
   if (backend->comp->have_proto_dmabuf_explicit_sync) {
@@ -2492,13 +2546,22 @@ bool backend_test_output_layers_drm(
 
   _drm_scanout_layers_finish(drm_output, &drm_output->layer_plan, -1);
 
+  if (layer_count != 1) {
+    VT_TRACE(backend->comp->log,
+             "DRM: direct scanout rejected for output %p: "
+             "expected exactly one layer, got %zu.",
+             output, layer_count);
+    return false;
+  }
+  
+  struct vt_output_layer_state_t *layer = &layers[0];
 
   if (!drm->impl->atomic) {
     VT_TRACE(backend->comp->log,
              "DRM: direct scanout rejected for output %p: "
              "atomic modesetting is unavailable.",
              output);
-    return true;
+    goto reject;
   }
 
   if (drm_output->flip_inflight) {
@@ -2506,23 +2569,17 @@ bool backend_test_output_layers_drm(
              "DRM: direct scanout rejected for output %p: "
              "page flip is still in flight.",
              output);
-    return true;
+    goto reject;
   }
 
-  if (layer_count != 1) {
-    VT_TRACE(backend->comp->log,
-             "DRM: direct scanout rejected for output %p: "
-             "expected exactly one layer, got %zu.",
-             output, layer_count);
-    return true;
-  }
+  
 
   if (!drm_output->crtc) {
     VT_TRACE(backend->comp->log,
              "DRM: direct scanout rejected for output %p: "
              "output has no assigned CRTC.",
              output);
-    return true;
+    goto reject;
   }
 
   if (!drm_output->crtc->plane_primary) {
@@ -2530,17 +2587,16 @@ bool backend_test_output_layers_drm(
              "DRM: direct scanout rejected for output %p: "
              "CRTC has no primary plane.",
              output);
-    return true;
+    goto reject;
   }
 
-  struct vt_output_layer_state_t *layer = &layers[0];
 
   if (!layer->surface) {
     VT_TRACE(backend->comp->log,
              "DRM: direct scanout rejected for output %p: "
              "layer has no surface.",
              output);
-    return true;
+    goto reject;
   }
 
   if (!layer->surface->current_buf_use) {
@@ -2548,7 +2604,7 @@ bool backend_test_output_layers_drm(
              "DRM: direct scanout rejected for output %p surface %p: "
              "surface has no current buffer use.",
              output, layer->surface);
-    return true;
+    goto reject;
   }
 
   if (!layer->surface->current_buf_use->buf) {
@@ -2556,7 +2612,7 @@ bool backend_test_output_layers_drm(
              "DRM: direct scanout rejected for output %p surface %p: "
              "current buffer use has no buffer.",
              output, layer->surface);
-    return true;
+    goto reject;
   }
 
   if (layer->dst.x != 0 || layer->dst.y != 0 ||
@@ -2570,7 +2626,7 @@ bool backend_test_output_layers_drm(
              layer->dst.x, layer->dst.y,
              layer->dst.width, layer->dst.height,
              output->width, output->height);
-    return true;
+    goto reject;
   }
 
   if (layer->src.x < 0 || layer->src.y < 0 ||
@@ -2581,7 +2637,7 @@ bool backend_test_output_layers_drm(
              output, layer->surface,
              layer->src.x, layer->src.y,
              layer->src.width, layer->src.height);
-    return true;
+    goto reject;
   }
 
   struct vt_buffer_use_t *use = layer->surface->current_buf_use;
@@ -2592,14 +2648,16 @@ bool backend_test_output_layers_drm(
              "DRM: direct scanout rejected for output %p surface %p: "
              "buffer %p is not a DMABUF.",
              output, layer->surface, use->buf);
-    return true;
+    goto reject;
   }
+
+    const char *format_name = drmGetFormatName(attr.format);
 
   VT_TRACE(backend->comp->log,
            "DRM: direct scanout candidate: "
-           "surface=%p buffer=%p format=0x%x modifier=0x%016" PRIx64
+           "surface=%p buffer=%p format=%s modifier=0x%016" PRIx64
            " size=%dx%d planes=%u",
-           layer->surface, use->buf, attr.format, attr.mod, attr.width,
+           layer->surface, use->buf, format_name, attr.mod, attr.width,
            attr.height, attr.num_planes);
 
   if ((uint64_t)layer->src.x + (uint64_t)layer->src.width >
@@ -2614,19 +2672,21 @@ bool backend_test_output_layers_drm(
              layer->src.x, layer->src.y,
              layer->src.width, layer->src.height,
              attr.width, attr.height);
-    return true;
+    goto reject;
   }
 
   struct drm_plane_t *plane = drm_output->crtc->plane_primary;
 
   if (!_drm_plane_has_format(plane, attr.format, attr.mod)) {
-    VT_TRACE(backend->comp->log,
-             "DRM: direct scanout rejected for output %p surface %p: "
-             "primary plane %u does not support format=0x%x modifier=0x%016"
-             PRIx64 ".",
-             output, layer->surface,
-             plane->id, attr.format, attr.mod);
-    return true;
+
+    VT_TRACE(
+        backend->comp->log,
+        "DRM: direct scanout rejected for output %p surface %p: "
+        "primary plane %u does not support format=%s modifier=0x%016" PRIx64
+        ".",
+        output, layer->surface, plane->id,
+        format_name ? format_name : "UNKNOWN", attr.mod);
+    goto reject;
   }
 
   if (use->acquire_fence_fd >= 0 &&
@@ -2637,7 +2697,7 @@ bool backend_test_output_layers_drm(
              "IN_FENCE_FD property.",
              output, layer->surface,
              use->acquire_fence_fd, plane->id);
-    return true;
+    goto reject;
   }
 
   if (use->release && vt_buffer_release_needs_fence(use->release) &&
@@ -2646,12 +2706,12 @@ bool backend_test_output_layers_drm(
              "DRM: direct scanout rejected for output %p surface %p: "
              "buffer release requires explicit fence but CRTC %u has no "
              "OUT_FENCE_PTR property.",
-             output, layer->surface,
-             drm_output->crtc->id);
-    return true;
+             output, layer->surface, drm_output->crtc->id);
+    goto reject;
   }
 
   struct drm_scanout_layer_t plan = {
+      .surface = layer->surface,
       .plane = plane,
       .src = layer->src,
       .dst = layer->dst,
@@ -2662,7 +2722,7 @@ bool backend_test_output_layers_drm(
              "DRM: direct scanout rejected for output %p surface %p: "
              "failed to create DRM framebuffer from buffer %p.",
              output, layer->surface, use->buf);
-    return true;
+    goto reject;
   }
 
   plan.scanout.use = vt_buffer_use_ref(use);
@@ -2692,15 +2752,12 @@ bool backend_test_output_layers_drm(
              "atomic TEST_ONLY commit failed. "
              "plane=%u src=[x=%d y=%d w=%u h=%u] "
              "dst=[x=%d y=%d w=%u h=%u].",
-             output, layer->surface,
-             plane->id,
-             layer->src.x, layer->src.y,
-             layer->src.width, layer->src.height,
-             layer->dst.x, layer->dst.y,
+             output, layer->surface, plane->id, layer->src.x, layer->src.y,
+             layer->src.width, layer->src.height, layer->dst.x, layer->dst.y,
              layer->dst.width, layer->dst.height);
 
     _drm_scanout_finish(drm_output, &plan.scanout, -1);
-    return true;
+    goto reject;
   }
 
   struct drm_scanout_layer_t *stored =
@@ -2713,7 +2770,7 @@ bool backend_test_output_layers_drm(
              output, layer->surface);
 
     _drm_scanout_finish(drm_output, &plan.scanout, -1);
-    return false;
+    goto reject;
   }
 
   *stored = plan;
@@ -2721,15 +2778,99 @@ bool backend_test_output_layers_drm(
 
   VT_TRACE(backend->comp->log,
            "DRM: direct scanout accepted for output %p surface %p: "
-           "plane=%u buffer=%p format=0x%x modifier=0x%016" PRIx64 " "
+           "plane=%u buffer=%p format=%s modifier=0x%016" PRIx64 " "
            "src=[x=%d y=%d w=%u h=%u] "
            "dst=[x=%d y=%d w=%u h=%u].",
-           output, layer->surface,
-           plane->id, use->buf, attr.format, attr.mod,
-           layer->src.x, layer->src.y,
-           layer->src.width, layer->src.height,
-           layer->dst.x, layer->dst.y,
-           layer->dst.width, layer->dst.height);
+           output, layer->surface, plane->id, use->buf, format_name, attr.mod,
+           layer->src.x, layer->src.y, layer->src.width, layer->src.height,
+           layer->dst.x, layer->dst.y, layer->dst.width, layer->dst.height);
+
+  return true;
+
+reject:
+  vt_proto_linux_dmabuf_v1_set_surface_feedback(layer->surface);
+  return true;
+}
+
+bool backend_build_surface_feedback(struct vt_backend_t         *backend,
+                                    struct vt_surface_t         *surface,
+                                    struct vt_output_t          *output,
+                                    struct vt_dmabuf_feedback_t *feedback) {
+
+  assert(backend && surface && output && feedback);
+
+  struct drm_backend_master_state_t *drm_master =
+      BACKEND_DATA(backend, struct drm_backend_master_state_t);
+
+  struct drm_output_state_t *drm_output =
+      BACKEND_DATA(output, struct drm_output_state_t);
+
+  assert(drm_master && drm_output && drm_master->main_drm &&
+         drm_master->main_drm->dev);
+
+  if (!drm_output->crtc || !drm_output->crtc->plane_primary) {
+    VT_ERROR(drm_master->comp->log,
+             "Cannot build surface feedback for surface %p, output %p; CRTC or"
+             "primary plane is not available",
+             surface, output);
+    return false;
+  }
+
+  feedback->dev_main = drm_master->main_drm->dev;
+
+  struct vt_dmabuf_tranche_t *scanout_tranche =
+      vt_dmabuf_feedback_add_tranche(feedback, drm_master->main_drm->dev,
+                                     VT_DMABUF_TRANCHE_FLAG_DIRECT_SCANOUT);
+
+  if (!scanout_tranche) {
+    VT_ERROR(drm_master->comp->log,
+             "Failed to create direct-scanout tranche for surface feedback of "
+             "surface %p, output %p",
+             surface, output);
+    return false;
+  }
+
+  _log_drm_format_array(drm_master->comp, "Renderer sampling formats",
+                        &drm_master->main_drm->sampling_formats);
+
+  _log_drm_format_array(drm_master->comp, "Primary plane formats",
+                        &drm_output->crtc->plane_primary->formats);
+
+  vt_drm_format_array_intersect(&scanout_tranche->formats,
+                                &drm_master->main_drm->sampling_formats,
+                                &drm_output->crtc->plane_primary->formats);
+
+  VT_TRACE(drm_master->comp->log,
+           "Surface feedback for surface=%p output=%p: direct scanout tranche",
+           surface, output);
+
+  _log_dmabuf_tranche(drm_master->comp, scanout_tranche,
+                      drm_master->main_drm->dev->path);
+
+  struct vt_dmabuf_tranche_t *fallback_tranche = vt_dmabuf_feedback_add_tranche(
+      feedback, drm_master->main_drm->dev, VT_DMABUF_TRANCHE_FLAG_COMPOSITE);
+
+  if (!fallback_tranche) {
+    VT_ERROR(drm_master->comp->log,
+             "Failed to create fallback tranche for surface feedback of "
+             "surface %p, output %p",
+             surface, output);
+    return false;
+  }
+
+  if (!vt_drm_format_array_copy(&fallback_tranche->formats,
+                                &drm_master->main_drm->sampling_formats)) {
+    VT_ERROR(drm_master->comp->log,
+             "Failed to copy renderer formats into fallback tranche");
+    return false;
+  }
+
+  VT_TRACE(drm_master->comp->log,
+           "Surface feedback for surface=%p output=%p: composite tranche",
+           surface, output);
+
+  _log_dmabuf_tranche(drm_master->comp, fallback_tranche,
+                      drm_master->main_drm->dev->path);
 
   return true;
 }
@@ -2768,6 +2909,7 @@ bool backend_implement_drm(struct vt_compositor_t *comp) {
       .terminate = backend_terminate_drm,
       .prepare_output_frame = backend_prepare_output_frame_drm,
       .test_output_layers = backend_test_output_layers_drm,
+      .build_surface_feedback = backend_build_surface_feedback,
   };
 
   comp->session->impl = (struct vt_session_interface_t){

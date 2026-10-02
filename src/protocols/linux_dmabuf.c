@@ -37,6 +37,7 @@
 #include <wayland-server-core.h>
 #include <wayland-util.h>
 #include "src/core/buffer.h"
+#include "src/core/scene.h"
 
 #include "../core/util.h"
 
@@ -1491,18 +1492,62 @@ vt_proto_linux_dmabuf_v1_from_buffer_res(struct wl_resource *res) {
 }
 
 bool vt_proto_linux_dmabuf_v1_set_surface_feedback(struct vt_surface_t *surf) {
+  assert(surf && surf->comp);
+
   struct vt_linux_dmabuf_v1_surface_state_t *dmabuf_surf =
       _linux_dmabuf_surface_from_surf(surf);
   if (dmabuf_surf == NULL) {
     return false;
   }
+
+  if (!surf->comp->backend->impl.build_surface_feedback)
+    return false;
+
+  struct vt_linux_dmabuf_v1_packed_feedback_t *packed_feedback =
+      _proto->default_feedback;
+  bool packed = false;
+
+  struct vt_output_t *primary_output = NULL;
+  if (surf->scene_node) {
+    primary_output = vt_scene_node_primary_output(surf->comp, surf->scene_node);
+  }
+
+  if (!primary_output) {
+    VT_WARN(surf->comp->log, "Cannot get primary output of surface %p; Will "
+                             "send default fallback feedback for surface.");
+  } else {
+    struct vt_dmabuf_feedback_t *feedback =
+        vt_dmabuf_feedback_create(surf->comp, NULL);
+    if (!feedback) {
+      VT_ERROR(surf->comp->log, "Failed to create surface DMABUF feedback");
+      return false;
+    }
+    if (!surf->comp->backend->impl.build_surface_feedback(
+            surf->comp->backend, surf, primary_output, feedback)) {
+      VT_ERROR(surf->comp->log, "Failed to build surface DMABUF feedback");
+      vt_dmabuf_feedback_fini(feedback);
+      return false;
+    }
+
+    if (!_linux_dmabuf_pack_feedback(feedback, &packed_feedback)) {
+      VT_ERROR(surf->comp->log, "Failed to pack surface DMABUF feedback");
+      vt_dmabuf_feedback_fini(feedback);
+      return false;
+    }
+
+    vt_dmabuf_feedback_fini(feedback);
+
+    packed = true;
+  }
+
   if (dmabuf_surf->feedback)
     _linux_dmabuf_free_feedback(dmabuf_surf->feedback);
-  dmabuf_surf->feedback = NULL;
+
+  dmabuf_surf->feedback = packed ? packed_feedback : NULL;
 
   struct wl_resource *resource;
   wl_resource_for_each(resource, &dmabuf_surf->res_feedback) {
-    _linux_dmabuf_send_feedback(resource, _proto->default_feedback);
+    _linux_dmabuf_send_feedback(resource, packed_feedback);
   }
 
   return true;

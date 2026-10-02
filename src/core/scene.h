@@ -24,7 +24,7 @@
 
 #include "core_types.h"
 #include "util.h"
-#include "output_layer.h"
+#include "output.h"
 
 struct vt_renderer_t;
 struct vt_output_t;

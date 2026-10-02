@@ -54,6 +54,11 @@
 
 #define _SUBSYS_NAME "EGL"
 
+struct egl_rendered_buffer_use_t {
+  struct wl_list          link;
+  struct vt_buffer_use_t *use;
+};
+
 // Minimal GBM interop
 #define __vt_gbm_fourcc_code(a, b, c, d)                                       \
   ((uint32_t)(a) | ((uint32_t)(b) << 8) | ((uint32_t)(c) << 16) |              \
@@ -102,6 +107,8 @@ struct egl_backend_state_t {
 
 struct egl_output_state_t {
   GLint fbo_id, fbo_tex_id, rbo_tex_depth;
+
+  struct wl_list rendered_buffer_uses;
 };
 
 static const char *_egl_err_str(EGLint error);
@@ -127,6 +134,9 @@ static bool _egl_create_renderer(struct vt_renderer_t      *renderer,
 
 static void _egl_buffer_attachment_destroy(struct vt_buffer_t *buf, void *owner,
                                            void *data);
+
+
+static bool _egl_track_rendered_buffer_use(struct vt_output_t* output, struct vt_buffer_use_t *use);
 
 struct vt_buffer_attachment_implementation_t egl_buffer_attachment_impl = {
     .destroy = _egl_buffer_attachment_destroy};
@@ -504,11 +514,13 @@ bool _egl_buffer_use_is_ready(struct vt_renderer_t   *renderer,
   return ret == EGL_TRUE;
 }
 
-static bool _output_needs_release_fence(struct vt_output_t *output) {
-  struct vt_rendered_surface_t *entry;
+static bool _output_needs_release_fence(struct egl_output_state_t *egl_output) {
+  assert(egl_output);
 
-  wl_list_for_each(entry, &output->rendered_surfaces, link) {
-    struct vt_buffer_use_t *use = entry->buffer_use;
+  struct egl_rendered_buffer_use_t *entry;
+
+  wl_list_for_each(entry, &egl_output->rendered_buffer_uses, link) {
+    struct vt_buffer_use_t *use = entry->use;
 
     if (!use)
       continue;
@@ -534,7 +546,7 @@ bool _egl_record_surface_release_fences(struct vt_renderer_t *renderer,
   struct egl_output_state_t *egl_output =
       (struct egl_output_state_t *)output->user_data_render;
 
-  bool need_fence = explicit_sync && _output_needs_release_fence(output);
+  bool need_fence = explicit_sync && _output_needs_release_fence(egl_output);
 
   int fence_fd = -1;
   if (need_fence) {
@@ -562,10 +574,10 @@ bool _egl_record_surface_release_fences(struct vt_renderer_t *renderer,
     }
   }
 
-  struct vt_rendered_surface_t *entry;
+  struct egl_rendered_buffer_use_t *entry;
 
-  wl_list_for_each(entry, &output->rendered_surfaces, link) {
-    struct vt_buffer_use_t *use = entry->buffer_use;
+  wl_list_for_each(entry, &egl_output->rendered_buffer_uses, link) {
+    struct vt_buffer_use_t *use = entry->use;
 
     if (!use)
       continue;
@@ -576,8 +588,7 @@ bool _egl_record_surface_release_fences(struct vt_renderer_t *renderer,
         // TODO: handle dup failure
       }
     }
-
-    vt_buffer_use_unref(&entry->buffer_use);
+    vt_buffer_use_unref(&entry->use);
   }
 
   if (fence_fd >= 0)
@@ -743,6 +754,25 @@ static void _egl_buffer_attachment_destroy(struct vt_buffer_t *buf, void *owner,
   egl_buf->tex.height = 0;
 
   VT_TRACE(r->comp->log, "Destroyed EGL Image handle for buffer %p", buf);
+}
+
+static bool _egl_track_rendered_buffer_use(struct vt_output_t* output, struct vt_buffer_use_t *use) {
+  assert(output && use && use->buf);
+
+  struct egl_output_state_t *egl_output =
+      (struct egl_output_state_t *)output->user_data_render;
+
+  assert(egl_output);
+
+  struct egl_rendered_buffer_use_t *egl_use = calloc(1, sizeof(*egl_use));
+  if (!egl_use)
+    return false;
+
+  egl_use->use = vt_buffer_use_ref(use);
+
+  wl_list_insert(egl_output->rendered_buffer_uses.prev, &egl_use->link);
+
+  return true;
 }
 
 // ===================================================
@@ -1084,6 +1114,8 @@ bool renderer_setup_renderable_output_egl(struct vt_renderer_t *r,
 
   struct egl_output_state_t *egl_output =
       (struct egl_output_state_t *)output->user_data_render;
+
+  wl_list_init(&egl_output->rendered_buffer_uses);
 
   // If we're running the wayland sink backend, we create the egl_window
   // handle and use it as the native window handle to create the EGL
@@ -1433,11 +1465,16 @@ void renderer_draw_surface_egl(struct vt_renderer_t *r,
   }
 
   struct vt_buffer_use_t *use = surface->current_buf_use;
-
-  struct vt_buffer_t *buf = use->buf;
+  struct vt_buffer_t     *buf = use->buf;
 
   if (!buf) {
     VT_WARN(r->comp->log, "Trying to render surface with NULL buffer");
+    return;
+  }
+
+  if (!renderer_import_buffer_egl(r, use->buf, &surface->applied.damage)) {
+    VT_ERROR(r->comp->log, "Failed to import buffer %p for surface %p.",
+             use->buf, surface);
     return;
   }
 
@@ -1452,7 +1489,7 @@ void renderer_draw_surface_egl(struct vt_renderer_t *r,
 
   struct vt_egl_buffer_t *egl_buf = attachment->data;
 
-  if (!buf || egl_buf->tex.id == 0)
+  if (egl_buf->tex.id == 0)
     return;
 
   if (surface->applied.width <= 0 || surface->applied.height <= 0)
@@ -1472,17 +1509,17 @@ void renderer_draw_surface_egl(struct vt_renderer_t *r,
 
   rn_image_render_adv(egl->render, (vec2s){dst_box->x, dst_box->y},
                       (vec2s){dst_box->width, dst_box->height}, 0.0f, RN_WHITE,
-                     egl_buf->tex,
-                      uv_rect, false, RN_NO_COLOR, 0.0f, 0.0f);
+                      egl_buf->tex, uv_rect, false, RN_NO_COLOR, 0.0f, 0.0f);
 
-  struct vt_rendered_surface_t *entry = calloc(1, sizeof(*entry));
-  if (!entry)
-    return;
+  if (!vt_output_track_presented_surface(output, surface)) {
+    VT_ERROR(r->comp->log, "Failed to track presented surface %p on output %p.",
+             surface, output);
+  }
 
-  entry->surf = surface;
-  entry->buffer_use = vt_buffer_use_ref(use);
-
-  wl_list_insert(output->rendered_surfaces.prev, &entry->link);
+  if (!_egl_track_rendered_buffer_use(output, use)) {
+    VT_ERROR(r->comp->log, "Failed to track EGL buffer use %p (buffer: %p).",
+             use, buf);
+  }
 
   surface->damaged = false;
 

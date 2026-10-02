@@ -21,8 +21,6 @@
  */
 
 #include "fb.h"
-
-#include "core/compositor.h"
 #include "prime.h"
 #include <drm/drm_fourcc.h>
 #include <errno.h>
@@ -33,34 +31,43 @@
 #define _SUBSYS_NAME "DRM"
 
 static bool _drm_fb_add(struct drm_backend_state_t *drm,
-                        struct drm_framebuffer_t   *fb,
-                        uint32_t width, uint32_t height, uint32_t format,
-                        uint32_t handles[4], uint32_t strides[4],
-                        uint32_t offsets[4], uint64_t modifier) {
+                        struct drm_framebuffer_t *fb, uint32_t width,
+                        uint32_t height, uint32_t format, uint32_t handles[4],
+                        uint32_t strides[4], uint32_t offsets[4],
+                        uint64_t modifier, uint32_t num_planes) {
+  assert(drm && fb);
+  assert(num_planes > 0 && num_planes <= 4);
+
   int ret = -1;
 
   if (drm->caps[VT_DRM_CAP_ADDFB2_MODIFIERS] &&
       modifier != DRM_FORMAT_MOD_INVALID) {
-    // kernel rejects a non-zero modifier on unused planes with -EINVAL
     uint64_t modifiers[4] = {0};
-    for (int i = 0; i < 4; i++)
-      modifiers[i] = handles[i] ? modifier : 0;
+
+    for (uint32_t i = 0; i < num_planes; i++)
+      modifiers[i] = modifier;
+
     ret = drmModeAddFB2WithModifiers(drm->drm_fd, width, height, format,
                                      handles, strides, offsets, modifiers,
                                      &fb->id, DRM_MODE_FB_MODIFIERS);
   }
 
-  if (ret != 0 &&
-      (modifier == DRM_FORMAT_MOD_INVALID || modifier == DRM_FORMAT_MOD_LINEAR)) {
+  if (ret != 0 && (modifier == DRM_FORMAT_MOD_INVALID ||
+                   modifier == DRM_FORMAT_MOD_LINEAR)) {
     ret = drmModeAddFB2(drm->drm_fd, width, height, format, handles, strides,
                         offsets, &fb->id, 0);
   }
 
   if (ret != 0) {
     VT_ERROR(drm->comp->log,
-             "Failed to create DRM framebuffer (%ux%u, format=0x%08x, "
-             "modifier=0x%016" PRIx64 "): %s",
-             width, height, format, modifier, strerror(errno));
+             "Failed to create DRM framebuffer "
+             "(%ux%u, format=0x%08x, modifier=0x%016" PRIx64 ", planes=%u): %s",
+             width, height, format, modifier, num_planes, strerror(errno));
+
+    for (uint32_t i = 0; i < num_planes; i++) {
+      VT_ERROR(drm->comp->log, "  plane %u: handle=%u stride=%u offset=%u", i,
+               handles[i], strides[i], offsets[i]);
+    }
     return false;
   }
 
@@ -69,7 +76,7 @@ static bool _drm_fb_add(struct drm_backend_state_t *drm,
 
 bool drm_fb_init_from_buffer(struct drm_backend_state_t *drm,
                              struct drm_framebuffer_t   *fb,
-                             struct vt_buffer_t          *buf) {
+                             struct vt_buffer_t         *buf) {
   if (!drm || !fb || !buf)
     return false;
 
@@ -94,7 +101,7 @@ bool drm_fb_init_from_buffer(struct drm_backend_state_t *drm,
   }
 
   if (!_drm_fb_add(drm, fb, attr.width, attr.height, attr.format, handles,
-                   strides, offsets, attr.mod)) {
+                   strides, offsets, attr.mod, attr.num_planes)) {
     drm_prime_close_handles(drm->drm_fd, handles);
     return false;
   }
@@ -107,8 +114,7 @@ bool drm_fb_init_from_buffer(struct drm_backend_state_t *drm,
 }
 
 bool drm_fb_init_from_gbm(struct drm_backend_state_t *drm,
-                          struct drm_framebuffer_t   *fb,
-                          struct gbm_bo              *bo) {
+                          struct drm_framebuffer_t *fb, struct gbm_bo *bo) {
   if (!drm || !fb || !bo)
     return false;
 
@@ -146,7 +152,7 @@ bool drm_fb_init_from_gbm(struct drm_backend_state_t *drm,
   }
 
   if (!_drm_fb_add(drm, fb, width, height, format, handles, strides, offsets,
-                   modifier)) {
+                   modifier, plane_count)) {
     if (import)
       drm_prime_close_handles(drm->drm_fd, handles);
     return false;

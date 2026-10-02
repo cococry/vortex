@@ -51,7 +51,7 @@ size_t vt_drm_format_mod_count(const struct vt_drm_format_t *fmt);
 size_t vt_drm_format_array_count(const struct wl_array *formats);
 
 struct vt_drm_format_t *vt_drm_format_array_push(struct wl_array *formats,
-                                                 struct vt_drm_format_t* fmt);
+                                                 const struct vt_drm_format_t* fmt);
 
 struct vt_drm_format_t *vt_drm_format_array_push_pair(struct wl_array *formats,
                                                       uint32_t         format,
@@ -62,3 +62,10 @@ vt_drm_format_array_get_format(struct wl_array              *formats,
                                const struct vt_drm_format_t *find);
 
 void vt_drm_format_array_free(struct wl_array *formats);
+
+bool vt_drm_format_array_intersect(struct wl_array       *dst,
+                                   const struct wl_array *a,
+                                   const struct wl_array *b);
+
+bool vt_drm_format_array_copy(struct wl_array       *dst,
+                              const struct wl_array *src);

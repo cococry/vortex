@@ -8,7 +8,7 @@ project(
     'optimization=3',
     'default_library=static',
     'werror=false',
-    'c_args=-w -Ofast -ffast-math -funroll-loops -march=native'
+    'c_args=-w -g -O1 -fno-omit-frame-pointer'
   ]
 )
 
@@ -92,6 +92,8 @@ vortex_src = files('src/vortex.c',
 'src/vortex.c', 
 'src/render/renderer.c', 
 'src/render/renderer.h', 
+'src/render/dmabuf.h', 
+'src/render/dmabuf.c', 
 'src/render/drm_format.c', 
 'src/render/drm_format.h', 
 'src/render/gl/egl_gl46.c', 
@@ -128,6 +130,8 @@ vortex_src = files('src/vortex.c',
 'src/core/surface.h',
 'src/core/surface_addon.c', 
 'src/core/surface_addon.h', 
+'src/core/output.c',
+'src/core/output.h',
 'src/core/focus_policy.c', 
 'src/core/focus_policy.h', 
 'src/core/buffer.c',
