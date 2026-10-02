@@ -54,7 +54,7 @@ xdg_server_code = custom_target(
   'xdg-shell-server-code',
   input: xdg_shell_xml,
   output: 'xdg-shell-protocol.c',
-  command: [wayland_scanner, 'code', '@INPUT@', '@OUTPUT@'],
+  command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'],
   install: false
 )
 dma_buf_header = custom_target(
