@@ -183,8 +183,7 @@ bool _vt_comp_render_output(struct vt_compositor_t *c,
   if (!c || !c->backend || !c->backend->impl.handle_frame || !output)
     return false;
 
-  // backends repaint inside handle_frame: DRM must gate on pending flips
-  // before swapping, or unlocked GBM buffers deadlock eglSwapBuffers
+  vt_comp_repaint_scene(c, output);
   c->backend->impl.handle_frame(c->backend, output);
   output->repaint_pending = false;
 

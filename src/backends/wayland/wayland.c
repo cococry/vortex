@@ -922,8 +922,6 @@ bool backend_handle_frame_wl(struct vt_backend_t *backend,
   wayland_output_state_t *wl_output =
       BACKEND_DATA(output, wayland_output_state_t);
 
-  vt_comp_repaint_scene(backend->comp, output);
-
   if (!_wl_parent_flush(wl))
     return false;
 
