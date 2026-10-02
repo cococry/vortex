@@ -1183,14 +1183,14 @@ bool renderer_resize_renderable_output_egl(struct vt_renderer_t *r,
                                            int32_t w, int32_t h) {
   if (!r || !output || !output->native_window || w == 0 || h == 0)
     return false;
-  
+
   if (r->backend->platform != VT_BACKEND_WAYLAND)
     return true;
 
   struct wl_egl_window *egl_win = (struct wl_egl_window *)output->native_window;
   if (!egl_win)
     return false;
-  
+
   wl_egl_window_resize(egl_win, w, h, 0, 0);
 
   if (!_egl_gl_create_output_fbo(output, w, h))
@@ -1430,7 +1430,7 @@ void renderer_begin_frame_egl(struct vt_renderer_t *r,
     last_surface = surface;
   }
 
-  rn_resize_display_ex(egl->render, output->width, output->height, 0, 
+  rn_resize_display_ex(egl->render, output->width, output->height, 0,
                        0);
 
   glBindFramebuffer(GL_FRAMEBUFFER, egl_output->fbo_id);
@@ -1439,7 +1439,7 @@ void renderer_begin_frame_egl(struct vt_renderer_t *r,
 void renderer_draw_surface_egl(struct vt_renderer_t *r,
                                struct vt_output_t   *output,
                                struct vt_surface_t  *surface,
-                               struct vt_box_t *src_box, 
+                               struct vt_box_t *src_box,
                                struct vt_box_t *dst_box
                                ) {
   VT_TRACE(r->comp->log,

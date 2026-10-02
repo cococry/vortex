@@ -28,7 +28,7 @@ struct vt_backend_t;
 struct vt_output_t;
 struct vt_output_layer_state_t;
 struct vt_scene_t;
-struct vt_dmabuf_feedback_t; 
+struct vt_dmabuf_feedback_t;
 
 #include <stdbool.h>
 

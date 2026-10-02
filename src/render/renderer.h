@@ -60,8 +60,8 @@ struct vt_renderer_interface_t {
   void (*begin_scene)(struct vt_renderer_t *r, struct vt_output_t *output);
   void (*begin_frame)(struct vt_renderer_t *r, struct vt_output_t *output);
   void (*draw_surface)(struct vt_renderer_t *r, struct vt_output_t *output,
-                       struct vt_surface_t *surface, 
-                       struct vt_box_t *src_box, 
+                       struct vt_surface_t *surface,
+                       struct vt_box_t *src_box,
                        struct vt_box_t *dst_box
                        );
   void (*draw_surface_simple)(struct vt_renderer_t *r,

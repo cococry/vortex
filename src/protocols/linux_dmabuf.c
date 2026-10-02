@@ -247,7 +247,7 @@ static const struct vt_surface_addon_impl_t dmabuf_surface_addon_impl = {
 };
 
 struct vt_buffer_implementation_t dmabuf_buffer_impl = {
-  .get_dmabuf = _dmabuf_buffer_get_dmabuf 
+  .get_dmabuf = _dmabuf_buffer_get_dmabuf
 };
 
 struct vt_buffer_attachment_implementation_t dmabuf_buffer_attachment_impl = {
@@ -1401,7 +1401,7 @@ static bool _dmabuf_buffer_get_dmabuf(struct vt_buffer_t      *buf,
 
   *o_attr = dmabuf->attr;
 
-  return true; 
+  return true;
 }
 
 static void _dmabuf_buffer_attachment_destroy(struct vt_buffer_t *buf,

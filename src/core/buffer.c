@@ -164,7 +164,7 @@ void vt_buffer_begin_use(struct vt_buffer_t *buf) {
 }
 
 void vt_buffer_end_use(struct vt_buffer_t *buf) {
-  if (!buf || !buf->comp) { 
+  if (!buf || !buf->comp) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return;
   }
@@ -181,7 +181,7 @@ void vt_buffer_end_use(struct vt_buffer_t *buf) {
     if (attachment->impl && attachment->impl->end_use)
       attachment->impl->end_use(buf, attachment->owner, attachment->data);
   }
-} 
+}
 
 struct vt_buffer_attachment_t *
 vt_buffer_add_attachment(struct vt_buffer_t *buf, const void *owner, void *data,
@@ -346,14 +346,14 @@ static void _buffer_use_destroy(struct vt_buffer_use_t *use) {
     close(use->acquire_fence_fd);
     use->acquire_fence_fd = -1;
   }
- 
+
   vt_buffer_end_use(use->buf);
 
   if (use->release)
     vt_buffer_release_unref(&use->release);
 
   vt_buffer_unref(&use->buf);
-  
+
   free(use);
 }
 

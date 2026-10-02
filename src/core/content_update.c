@@ -83,7 +83,7 @@ static bool _content_update_prepare_buffer(struct vt_content_update_t *cu) {
   assert(cu->buffer_use->buf);
 
   /* TODO: For correctness, we should make sure that that this buffer is
-   * importable. If the renderer import fails after DAG applying, the atomic 
+   * importable. If the renderer import fails after DAG applying, the atomic
    * apply path would fail, which should not happen. */
   /*
    * if (r->impl.import_buffer &&
@@ -162,7 +162,7 @@ _content_update_prepare_dag_recursive(struct vt_content_update_t *cu) {
   return true;
 }
 
-static bool 
+static bool
 _content_update_apply_surface_state(struct vt_content_update_t *cu) {
   /* Content update application must assert a valid prepared content update. All
    * failures here must not be permitted. */
@@ -247,7 +247,7 @@ static bool _content_update_apply_one(struct vt_content_update_t *cu) {
   return true;
 }
 
-static bool 
+static bool
 _content_update_apply_dag_recursive(struct vt_content_update_t *cu) {
   bool valid_params = cu != NULL;
   assert(valid_params);
@@ -271,7 +271,7 @@ _content_update_apply_dag_recursive(struct vt_content_update_t *cu) {
     return false;
 
   cu->applied = true;
-  
+
   return true;
 }
 
@@ -420,7 +420,7 @@ bool vt_content_update_apply_dag(struct vt_content_update_t *root) {
   if (!root || !root->surf || !root->surf->comp)
     return false;
 
-  struct vt_compositor_t* comp = root->surf->comp; 
+  struct vt_compositor_t* comp = root->surf->comp;
 
   VT_TRACE(comp->log, "Content update apply DAG: root=%p type=%d",
            root, root->type);

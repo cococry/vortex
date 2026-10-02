@@ -285,7 +285,7 @@ static void _wl_seat_pointer_set_cursor(struct wl_client   *client,
       return;
     }
   }
-  
+
   seat->cursor.surf = surf;
   seat->cursor.owner = ptr;
   seat->cursor.hotspot_x = hotspot_x;
