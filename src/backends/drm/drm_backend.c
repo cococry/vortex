@@ -36,6 +36,7 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <stdlib.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
@@ -759,9 +760,10 @@ static bool _drm_init_for_device(struct vt_compositor_t     *comp,
     return false;
   }
 
-  drm->impl = drm->caps[VT_DRM_CAP_ATOMIC_MODESET]
-                  ? &drm_kms_atomic_impl
-                  : &drm_kms_legacy_impl;
+  bool use_atomic =
+      getenv("VT_DRM_NO_ATOMIC") ? false : drm->caps[VT_DRM_CAP_ATOMIC_MODESET];
+  drm->impl = use_atomic ? &drm_kms_atomic_impl : &drm_kms_legacy_impl;
+
   _drm_update_tearing_cap(drm);
 
   /* Renderer is only initialized on the main DRM device */
