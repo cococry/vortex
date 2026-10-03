@@ -94,6 +94,13 @@ Or load a custom shared object backend manually:
 vortex -bp /usr/lib/vortex/backends/libcustom.so
 ```
 
+### Environment Variables
+Vortex handles the following environment variables:
+
+| Env | Description | 
+|--------|--------------|
+| `VT_DRM_NO_ATOMIC` | Force legacy DRM/KMS implementation |
+
 ## Notes
 - [`runara`](https://github.com/cococry/runara) is currently vendored into `subprojects/` but might not be in the future.
 
