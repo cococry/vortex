@@ -24,9 +24,9 @@
 
 #include <wayland-server-core.h>
 
-#include "core_types.h"
 #include "../render/dmabuf_attr.h"
 #include "../render/shm_attr.h"
+#include "core_types.h"
 
 struct vt_buffer_t;
 
@@ -59,7 +59,7 @@ struct vt_buffer_attachment_t {
 };
 
 struct vt_buffer_t {
-  struct vt_compositor_t* comp;
+  struct vt_compositor_t *comp;
 
   uint32_t refcount, uses;
 
@@ -74,9 +74,9 @@ struct vt_buffer_release_t {
   struct vt_compositor_t *comp;
 
   uint32_t refcount;
-  bool finished;
+  bool     finished;
 
-  const struct vt_buffer_release_implementation_t* impl;
+  const struct vt_buffer_release_implementation_t *impl;
 };
 
 struct vt_buffer_use_t {
@@ -93,29 +93,30 @@ struct vt_buffer_use_t {
   int release_fence_fd;
 };
 
-struct vt_buffer_t *vt_buffer_create(struct vt_compositor_t *comp,
-                                     uint32_t width, uint32_t height,
-                                     const struct vt_buffer_implementation_t *impl);
+struct vt_buffer_t *
+vt_buffer_create(struct vt_compositor_t *comp, uint32_t width, uint32_t height,
+                 const struct vt_buffer_implementation_t *impl);
 
 struct vt_buffer_t *vt_buffer_ref(struct vt_buffer_t *buf);
 
 void vt_buffer_unref(struct vt_buffer_t **buf);
 
-bool vt_buffer_get_dmabuf(struct vt_buffer_t *buf, struct vt_dmabuf_attr_t * o_attr);
+bool vt_buffer_get_dmabuf(struct vt_buffer_t      *buf,
+                          struct vt_dmabuf_attr_t *o_attr);
 
-bool vt_buffer_get_shm(struct vt_buffer_t *buf, struct vt_shm_attr_t* o_attr);
+bool vt_buffer_get_shm(struct vt_buffer_t *buf, struct vt_shm_attr_t *o_attr);
 
 void vt_buffer_begin_use(struct vt_buffer_t *buf);
 
 void vt_buffer_end_use(struct vt_buffer_t *buf);
 
-struct vt_buffer_attachment_t *
-vt_buffer_add_attachment(struct vt_buffer_t *buf, const void *owner, void *data,
-                         const struct vt_buffer_attachment_implementation_t *impl);
+struct vt_buffer_attachment_t *vt_buffer_add_attachment(
+    struct vt_buffer_t *buf, const void *owner, void *data,
+    const struct vt_buffer_attachment_implementation_t *impl);
 
-struct vt_buffer_attachment_t *
-vt_buffer_find_attachment(struct vt_buffer_t *buf, const void *owner,
-                          const struct vt_buffer_attachment_implementation_t *impl);
+struct vt_buffer_attachment_t *vt_buffer_find_attachment(
+    struct vt_buffer_t *buf, const void *owner,
+    const struct vt_buffer_attachment_implementation_t *impl);
 
 void vt_buffer_release_init_and_ref(
     struct vt_buffer_release_t *release, struct vt_compositor_t *comp,
@@ -136,9 +137,8 @@ struct vt_buffer_use_t *vt_buffer_use_ref(struct vt_buffer_use_t *use);
 void vt_buffer_use_unref(struct vt_buffer_use_t **use);
 
 struct vt_buffer_use_t *vt_buffer_use_create_take(
-    struct vt_compositor_t *comp, const void* owner, struct vt_buffer_t **buf,
+    struct vt_compositor_t *comp, const void *owner, struct vt_buffer_t **buf,
     struct vt_buffer_release_t **release, int *acquire_fence_fd);
 
 bool vt_buffer_use_set_release_fence_fd(struct vt_buffer_use_t *use,
                                         int                     release_fd);
-

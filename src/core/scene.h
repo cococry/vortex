@@ -23,8 +23,8 @@
 #pragma once
 
 #include "core_types.h"
-#include "util.h"
 #include "output.h"
+#include "util.h"
 
 struct vt_renderer_t;
 struct vt_output_t;
@@ -46,7 +46,7 @@ struct vt_scene_node_t {
   uint32_t color;
 
   /* position relative to parent */
-  int32_t x, y;
+  int32_t  x, y;
   uint32_t rect_w, rect_h;
 
   /* resolved global bounds */
@@ -110,6 +110,7 @@ void vt_scene_node_mark_geometry_dirty(struct vt_scene_node_t *node);
 
 void vt_scene_node_update_global_bounds(struct vt_scene_node_t *node);
 
-struct vt_box_t* vt_scene_node_get_global_bounds(struct vt_scene_node_t *node);
+struct vt_box_t *vt_scene_node_get_global_bounds(struct vt_scene_node_t *node);
 
-struct vt_output_t * vt_scene_node_primary_output(struct vt_compositor_t* comp, struct vt_scene_node_t *node);
+struct vt_output_t *vt_scene_node_primary_output(struct vt_compositor_t *comp,
+                                                 struct vt_scene_node_t *node);

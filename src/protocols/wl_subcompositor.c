@@ -98,7 +98,7 @@ static void _subcompositor_destroy(struct wl_client   *client,
 static bool _surface_has_ancestor(struct vt_surface_t *surf,
                                   struct vt_surface_t *ancestor) {
   while (surf && vt_surface_has_role(surf, VT_SURFACE_ROLE_SUBSURFACE)) {
-    struct vt_subsurface_t* sub = surf->role.data;
+    struct vt_subsurface_t *sub = surf->role.data;
     surf = sub->parent;
 
     if (surf == ancestor) {

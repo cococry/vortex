@@ -39,13 +39,12 @@ static bool _legacy_commit(struct drm_backend_state_t *drm,
     return false;
 
   struct drm_output_state_t *output = commit->output;
-  uint32_t fb_id = commit->planes[0].fb->id;
+  uint32_t                   fb_id = commit->planes[0].fb->id;
 
   if (commit->modeset) {
     if (drmModeSetCrtc(drm->drm_fd, output->crtc->id, fb_id, 0, 0,
                        &output->conn_id, 1, &output->mode) != 0) {
-      VT_ERROR(drm->comp->log, "drmModeSetCrtc() failed: %s",
-               strerror(errno));
+      VT_ERROR(drm->comp->log, "drmModeSetCrtc() failed: %s", strerror(errno));
       return false;
     }
 
@@ -63,8 +62,7 @@ static bool _legacy_commit(struct drm_backend_state_t *drm,
     if (!commit->async ||
         drmModePageFlip(drm->drm_fd, output->crtc->id, fb_id,
                         DRM_MODE_PAGE_FLIP_EVENT, output->base) != 0) {
-      VT_ERROR(drm->comp->log, "drmModePageFlip() failed: %s",
-               strerror(errno));
+      VT_ERROR(drm->comp->log, "drmModePageFlip() failed: %s", strerror(errno));
       return false;
     }
   }
@@ -79,10 +77,10 @@ static bool _legacy_disable(struct drm_backend_state_t *drm,
   if (!drm || !output || !output->crtc)
     return false;
 
-  if (drmModeSetCrtc(drm->drm_fd, output->crtc->id, 0, 0, 0, NULL, 0,
-                     NULL) != 0) {
-    VT_WARN(drm->comp->log, "Failed to disable CRTC %u: %s",
-            output->crtc->id, strerror(errno));
+  if (drmModeSetCrtc(drm->drm_fd, output->crtc->id, 0, 0, 0, NULL, 0, NULL) !=
+      0) {
+    VT_WARN(drm->comp->log, "Failed to disable CRTC %u: %s", output->crtc->id,
+            strerror(errno));
     return false;
   }
 

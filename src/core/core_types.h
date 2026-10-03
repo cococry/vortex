@@ -123,7 +123,7 @@ struct vt_output_mode_t {
 };
 
 struct vt_presented_surface_t {
-  struct wl_list link;
+  struct wl_list       link;
   struct vt_surface_t *surf;
 };
 

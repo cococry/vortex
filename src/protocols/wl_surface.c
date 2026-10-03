@@ -83,15 +83,16 @@ static void _wl_surface_destroy(struct wl_client   *client,
 
 static void _wl_surface_handle_resource_destroy(struct wl_resource *resource);
 
-static struct vt_buffer_attachment_t *_wayland_buffer_attachment_get_or_create(
-    struct vt_buffer_t *buf, struct wl_resource *res);
+static struct vt_buffer_attachment_t *
+_wayland_buffer_attachment_get_or_create(struct vt_buffer_t *buf,
+                                         struct wl_resource *res);
 
 static void _wayland_buffer_attachment_destroy(struct vt_buffer_t *buf,
                                                void *owner, void *data);
 static void _wayland_buffer_attachment_end_use(struct vt_buffer_t *buf,
                                                void *owner, void *data);
-static void
-_wayland_buffer_handle_res_destroy(struct wl_listener *listener, void *data);
+static void _wayland_buffer_handle_res_destroy(struct wl_listener *listener,
+                                               void               *data);
 
 static const struct wl_surface_interface surface_impl = {
     .attach = _wl_surface_attach,
@@ -160,7 +161,7 @@ void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
     VT_TRACE(surf->comp->log, "attach: buffer_res=%p id=%u wrapper=%p refs=%u",
              buffer, wl_resource_get_id(buffer), new_buf, new_buf->refcount);
 
-    if(!_wayland_buffer_attachment_get_or_create(new_buf, buffer)) {
+    if (!_wayland_buffer_attachment_get_or_create(new_buf, buffer)) {
       VT_WL_OUT_OF_MEMORY(surf->comp, client);
       vt_buffer_unref(&new_buf);
       return;
@@ -528,7 +529,8 @@ _wayland_buffer_attachment_get_or_create(struct vt_buffer_t *buf,
     wl_attachment = vt_buffer_add_attachment(buf, NULL, wl_data,
                                              &wayland_buffer_attachment_impl);
 
-    wl_data->resource_destroy_listener.notify = _wayland_buffer_handle_res_destroy;
+    wl_data->resource_destroy_listener.notify =
+        _wayland_buffer_handle_res_destroy;
 
     wl_resource_add_destroy_listener(wl_data->resource,
                                      &wl_data->resource_destroy_listener);
@@ -568,7 +570,7 @@ static void _wayland_buffer_attachment_end_use(struct vt_buffer_t *buf,
 }
 
 static void _wayland_buffer_handle_res_destroy(struct wl_listener *listener,
-                                             void               *data) {
+                                               void               *data) {
   (void)data;
 
   struct vt_wayland_buffer_attachment_t *wl_buf =

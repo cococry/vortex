@@ -44,4 +44,4 @@ struct vt_surface_addon_t {
   struct vt_surface_addon_impl_t impl;
 };
 
-void vt_surface_addon_destroy(struct vt_surface_addon_t* addon);
+void vt_surface_addon_destroy(struct vt_surface_addon_t *addon);

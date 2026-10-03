@@ -117,7 +117,8 @@ void vt_seat_set_pointer_focus(struct vt_seat_t    *seat,
 
 void vt_seat_bind_global_keybinds(struct vt_seat_t *seat);
 
-void vt_seat_handle_surface_unmapped(struct vt_seat_t* seat, struct vt_surface_t* surf);
+void vt_seat_handle_surface_unmapped(struct vt_seat_t    *seat,
+                                     struct vt_surface_t *surf);
 
 void vt_seat_repick_pointer_focus(struct vt_seat_t *seat);
 

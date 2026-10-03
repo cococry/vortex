@@ -84,5 +84,3 @@ uint32_t vt_session_enumerate_cards_drm(struct vt_session_t *session,
                                         const uint32_t       max_devs);
 
 bool vt_session_switch_vt_drm(struct vt_session_t *session, uint32_t vt);
-
-

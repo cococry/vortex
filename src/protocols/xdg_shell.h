@@ -50,7 +50,7 @@ struct vt_xdg_toplevel_t {
   bool maximized;
   bool resizing;
 
-  struct vt_output_t* fullscreen_output;
+  struct vt_output_t *fullscreen_output;
 
   struct vt_xdg_surface_t *xdg_surf;
 };

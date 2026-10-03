@@ -1223,7 +1223,6 @@ static void _xdg_toplevel_set_fullscreen(struct wl_client   *client,
   vt_scene_node_set_position(surf->scene_node, output->x, output->y);
 
   _xdg_toplevel_configure(top, output->width, output->height);
-
 }
 
 void _xdg_toplevel_unset_fullscreen(struct wl_client   *client,

@@ -36,11 +36,13 @@ struct vt_drm_format_t {
   struct wl_array mods; /* struct vt_drm_format_modifier_t */
 };
 
-void vt_drm_format_init(struct vt_drm_format_t* fmt, uint32_t format);
+void vt_drm_format_init(struct vt_drm_format_t *fmt, uint32_t format);
 
-struct vt_drm_format_modifier_t* vt_drm_format_get_mod(struct vt_drm_format_t *fmt, uint64_t mod);
+struct vt_drm_format_modifier_t *
+vt_drm_format_get_mod(struct vt_drm_format_t *fmt, uint64_t mod);
 
-struct vt_drm_format_modifier_t* vt_drm_format_add_mod(struct vt_drm_format_t *fmt, uint64_t mod);
+struct vt_drm_format_modifier_t *
+vt_drm_format_add_mod(struct vt_drm_format_t *fmt, uint64_t mod);
 
 void vt_drm_format_fini(struct vt_drm_format_t *fmt);
 
@@ -50,8 +52,9 @@ size_t vt_drm_format_mod_count(const struct vt_drm_format_t *fmt);
 
 size_t vt_drm_format_array_count(const struct wl_array *formats);
 
-struct vt_drm_format_t *vt_drm_format_array_push(struct wl_array *formats,
-                                                 const struct vt_drm_format_t* fmt);
+struct vt_drm_format_t *
+vt_drm_format_array_push(struct wl_array              *formats,
+                         const struct vt_drm_format_t *fmt);
 
 struct vt_drm_format_t *vt_drm_format_array_push_pair(struct wl_array *formats,
                                                       uint32_t         format,
@@ -67,8 +70,7 @@ bool vt_drm_format_array_intersect(struct wl_array       *dst,
                                    const struct wl_array *a,
                                    const struct wl_array *b);
 
-bool vt_drm_format_array_copy(struct wl_array       *dst,
-                              const struct wl_array *src);
+bool vt_drm_format_array_copy(struct wl_array *dst, const struct wl_array *src);
 
 bool vt_drm_format_array_union(struct wl_array *dst, const struct wl_array *a,
                                const struct wl_array *b);

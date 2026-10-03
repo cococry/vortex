@@ -35,4 +35,3 @@ bool vt_proto_wl_shm_init(struct vt_compositor_t *comp,
                           const uint32_t *drm_formats, uint32_t n_formats);
 
 struct vt_buffer_t *vt_proto_wl_shm_get_buffer(struct wl_resource *res);
-

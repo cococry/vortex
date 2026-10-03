@@ -21,10 +21,9 @@
  */
 
 #include "props.h"
-#include <xf86drmMode.h>
-#include <string.h>
 #include <stdlib.h>
-
+#include <string.h>
+#include <xf86drmMode.h>
 
 /* Needs to be sorted alphabetically for bsearch() */
 static const char *connector_infos[VT_DRM_CONNECTOR__COUNT] = {
@@ -116,7 +115,6 @@ bool drm_kms_props_get_crtc(int drm_fd, uint32_t id, uint32_t *o_props) {
 bool drm_kms_props_get_plane(int drm_fd, uint32_t id, uint32_t *o_props) {
   return _drm_get_props(drm_fd, id, DRM_MODE_OBJECT_PLANE, plane_infos,
                         VT_DRM_PLANE__COUNT, o_props);
-
 }
 
 bool drm_kms_props_get_prop(int drm_fd, uint32_t id, uint32_t prop,
@@ -143,5 +141,3 @@ bool drm_kms_props_get_prop(int drm_fd, uint32_t id, uint32_t prop,
   drmModeFreeObjectProperties(props);
   return false;
 }
-
-

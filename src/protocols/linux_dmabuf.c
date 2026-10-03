@@ -26,6 +26,8 @@
 #include "../render/dmabuf_attr.h"
 #include "src/render/drm_format.h"
 
+#include "src/core/buffer.h"
+#include "src/core/scene.h"
 #include <errno.h>
 #include <fcntl.h>
 #include <linux-dmabuf-v1-server-protocol.h>
@@ -36,8 +38,6 @@
 #include <unistd.h>
 #include <wayland-server-core.h>
 #include <wayland-util.h>
-#include "src/core/buffer.h"
-#include "src/core/scene.h"
 
 #include "../core/util.h"
 
@@ -102,7 +102,6 @@ struct vt_linux_dmabuf_v1_params_t {
   struct vt_dmabuf_attr_t attr;
   bool                    has_mod;
 };
-
 
 static void
 _linux_dmabuf_surface_destroy_addon(struct vt_surface_addon_t *addon);
@@ -179,7 +178,8 @@ static void _linux_dmabuf_free_feedback(
     struct vt_linux_dmabuf_v1_packed_feedback_t *packed);
 
 static struct vt_linux_dmabuf_v1_output_feedback_t *
-_linux_dmabuf_output_feedback_get_or_create(struct vt_output_t *output, bool create);
+_linux_dmabuf_output_feedback_get_or_create(struct vt_output_t *output,
+                                            bool                create);
 
 static void _linux_dmabuf_output_feedback_destroy(
     struct vt_linux_dmabuf_v1_output_feedback_t *cache);
@@ -235,9 +235,8 @@ static const struct wl_buffer_interface _dmabuf_wl_buffer_impl = {
     .destroy = _linux_dmabuf_v1_buffer_destroy,
 };
 
-  static void
-_linux_dmabuf_surface_destroy_addon(struct vt_surface_addon_t *addon)
-{
+static void
+_linux_dmabuf_surface_destroy_addon(struct vt_surface_addon_t *addon) {
   struct vt_linux_dmabuf_v1_surface_state_t *state =
       wl_container_of(addon, state, addon);
 
@@ -267,8 +266,7 @@ static const struct vt_surface_addon_impl_t dmabuf_surface_addon_impl = {
 };
 
 struct vt_buffer_implementation_t dmabuf_buffer_impl = {
-  .get_dmabuf = _dmabuf_buffer_get_dmabuf
-};
+    .get_dmabuf = _dmabuf_buffer_get_dmabuf};
 
 struct vt_buffer_attachment_implementation_t dmabuf_buffer_attachment_impl = {
     .destroy = _dmabuf_buffer_attachment_destroy};
@@ -306,10 +304,10 @@ void _proto_linux_dmabuf_v1_bind(struct wl_client *client, void *data,
   /* 4. For legacy clients (version < v4), send legacy formats */
   if (version < ZWP_LINUX_DMABUF_V1_GET_DEFAULT_FEEDBACK_SINCE_VERSION) {
     _linux_dmabuf_legacy_send_default_formats(res);
-    VT_TRACE(
-        _proto->comp->log,
-        "linux_dmabuf.bind: sending legacy formats for client %p (%zu formats).",
-        client, vt_drm_format_array_count(&_proto->default_formats));
+    VT_TRACE(_proto->comp->log,
+             "linux_dmabuf.bind: sending legacy formats for client %p (%zu "
+             "formats).",
+             client, vt_drm_format_array_count(&_proto->default_formats));
   }
 }
 
@@ -630,7 +628,7 @@ void _linux_dmabuf_params_create(struct wl_resource *resource, uint32_t buf_id,
                            ZWP_LINUX_BUFFER_PARAMS_V1_ERROR_INCOMPLETE,
                            "gap in dmabuf planes");
     _linux_dmabuf_close_params(params);
-        free(params);
+    free(params);
     return;
   }
 
@@ -732,7 +730,7 @@ void _linux_dmabuf_params_create(struct wl_resource *resource, uint32_t buf_id,
                              "importing the supplied dmabufs failed");
     }
     _linux_dmabuf_close_params(params);
-        free(params);
+    free(params);
     return;
   }
 
@@ -1057,7 +1055,7 @@ bool _linux_dmabuf_pack_feedback(
 
   VT_TRACE(feedback->comp->log, "Accumulated all formats of all tranches.");
 
-  size_t n_entries = 0;
+  size_t                  n_entries = 0;
   struct vt_drm_format_t *fmt;
   wl_array_for_each(fmt, &all_formats) {
     n_entries += vt_drm_format_mod_count(fmt);
@@ -1188,8 +1186,8 @@ bool _linux_dmabuf_pack_feedback(
     }
 
     n = 0;
-    uint16_t                      *indices = tranche_packed->indices.data;
-    struct vt_drm_format_t        *fmt = NULL;
+    uint16_t               *indices = tranche_packed->indices.data;
+    struct vt_drm_format_t *fmt = NULL;
     wl_array_for_each(fmt, &tranche->formats) {
       struct vt_drm_format_modifier_t *mod;
       wl_array_for_each(mod, &fmt->mods) {
@@ -1251,10 +1249,10 @@ void _linux_dmabuf_free_feedback(
 }
 
 static struct vt_linux_dmabuf_v1_output_feedback_t *
-_linux_dmabuf_output_feedback_get_or_create(struct vt_output_t *output, bool create) {
+_linux_dmabuf_output_feedback_get_or_create(struct vt_output_t *output,
+                                            bool                create) {
   if (!_proto || !output)
     return NULL;
-
 
   struct vt_linux_dmabuf_v1_output_feedback_t *cache;
   wl_list_for_each(cache, &_proto->output_feedbacks, link) {
@@ -1342,7 +1340,8 @@ _linux_dmabuf_surface_packed_feedback(
     return _proto->default_feedback;
 
   struct vt_linux_dmabuf_v1_output_feedback_t *cache =
-      _linux_dmabuf_output_feedback_get_or_create(state->feedback_output, false);
+      _linux_dmabuf_output_feedback_get_or_create(state->feedback_output,
+                                                  false);
 
   if (!cache || cache->generation != state->feedback_generation ||
       !cache->feedback) {
@@ -1471,7 +1470,7 @@ void _linux_dmabuf_send_feedback(
 #define _VT_DRM_FORMAT_MOD_INVALID 0x00FFFFFFFFFFFFFF
 #define _VT_DRM_FORMAT_MOD_LINEAR  0x0000000000000000
 
-static void _send_mods(struct wl_resource            *resource,
+static void _send_mods(struct wl_resource     *resource,
                        struct vt_drm_format_t *fmt) {
   if (wl_resource_get_version(resource) <
       ZWP_LINUX_DMABUF_V1_MODIFIER_SINCE_VERSION) {
@@ -1548,7 +1547,7 @@ static void _dmabuf_buffer_attachment_destroy(struct vt_buffer_t *buf,
                                               void *owner, void *data) {
   (void)buf;
   (void)owner;
-  if(!data) {
+  if (!data) {
     VT_PARAM_CHECK_FAIL(_proto->comp);
     return;
   }
@@ -1632,7 +1631,8 @@ vt_proto_linux_dmabuf_v1_from_buffer_res(struct wl_resource *res) {
   return buf;
 }
 
-bool vt_proto_linux_dmabuf_v1_update_surface_feedback(struct vt_surface_t *surf) {
+bool vt_proto_linux_dmabuf_v1_update_surface_feedback(
+    struct vt_surface_t *surf) {
   assert(surf && surf->comp);
 
   if (!_proto)
@@ -1669,8 +1669,7 @@ bool vt_proto_linux_dmabuf_v1_update_surface_feedback(struct vt_surface_t *surf)
       primary_output = NULL;
       success = false;
     } else {
-      if (!cache->built &&
-          !_linux_dmabuf_output_feedback_build(cache, surf)) {
+      if (!cache->built && !_linux_dmabuf_output_feedback_build(cache, surf)) {
         VT_WARN(surf->comp->log,
                 "Failed to build cached DMABUF feedback for output %p; using "
                 "default feedback.",
@@ -1768,4 +1767,3 @@ vt_proto_linux_dmabuf_v1_get_buffer(struct wl_resource *res) {
 
   return dmabuf->buf;
 }
-

@@ -671,5 +671,3 @@ bool vt_session_switch_vt_drm(struct vt_session_t *session, uint32_t vt) {
 
   return true;
 }
-
-

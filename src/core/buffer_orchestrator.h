@@ -20,7 +20,6 @@
  * SOFTWARE.
  */
 
-
 #include "src/core/buffer.h"
 #include <wayland-server.h>
 

@@ -30,9 +30,9 @@
 #include <EGL/eglext.h>
 
 struct vt_egl_buffer_t {
-  RnTexture   tex;
-  EGLImageKHR egl_img;
-  struct vt_renderer_t* renderer;
+  RnTexture             tex;
+  EGLImageKHR           egl_img;
+  struct vt_renderer_t *renderer;
 };
 
 bool renderer_init_egl(struct vt_backend_t *backend, struct vt_renderer_t *r,

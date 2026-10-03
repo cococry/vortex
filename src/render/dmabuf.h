@@ -49,12 +49,13 @@ struct vt_dmabuf_tranche_t {
   struct wl_array                formats; // array of vt_drm_format
 };
 
-struct vt_dmabuf_feedback_t      *
+struct vt_dmabuf_feedback_t *
 vt_dmabuf_feedback_create(struct vt_compositor_t *comp,
-                               struct vt_device_t     *dev);
+                          struct vt_device_t     *dev);
 
 void vt_dmabuf_feedback_fini(struct vt_dmabuf_feedback_t *feedback);
 
-struct vt_dmabuf_tranche_t *vt_dmabuf_feedback_add_tranche(
-    struct vt_dmabuf_feedback_t *feedback,
-    struct vt_device_t *target_device, enum vt_dmabuf_tranche_flags_t flags);
+struct vt_dmabuf_tranche_t *
+vt_dmabuf_feedback_add_tranche(struct vt_dmabuf_feedback_t   *feedback,
+                               struct vt_device_t            *target_device,
+                               enum vt_dmabuf_tranche_flags_t flags);

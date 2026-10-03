@@ -20,7 +20,9 @@
  * SOFTWARE.
  */
 
+#include "fb.h"
 #include "kms.h"
+#include "libliftoff.h"
 
 #include <errno.h>
 #include <inttypes.h>
@@ -29,11 +31,13 @@
 #include <unistd.h>
 #include <xf86drmMode.h>
 
+#include "atomic.h"
+
 #define _SUBSYS_NAME "DRM"
 
 static bool _atomic_add_prop(struct drm_backend_state_t *drm,
-                             drmModeAtomicReq *req, uint32_t obj,
-                             uint32_t prop, uint64_t value) {
+                             drmModeAtomicReq *req, uint32_t obj, uint32_t prop,
+                             uint64_t value) {
   if (prop == 0 || drmModeAtomicAddProperty(req, obj, prop, value) < 0) {
     VT_ERROR(drm->comp->log,
              "Failed to add atomic property %" PRIu32 " on object %" PRIu32,
@@ -45,7 +49,7 @@ static bool _atomic_add_prop(struct drm_backend_state_t *drm,
 }
 
 static bool _atomic_plane_in_commit(struct drm_kms_commit_t *commit,
-                                    uint32_t plane_id) {
+                                    uint32_t                 plane_id) {
   for (size_t i = 0; i < commit->plane_count; i++) {
     if (commit->planes[i].plane && commit->planes[i].plane->id == plane_id)
       return true;
@@ -54,42 +58,36 @@ static bool _atomic_plane_in_commit(struct drm_kms_commit_t *commit,
   return false;
 }
 
-static bool _atomic_add_plane(struct drm_backend_state_t *drm,
-                              drmModeAtomicReq *req,
-                              struct drm_output_state_t *output,
+static bool _atomic_add_plane(struct drm_backend_state_t   *drm,
+                              drmModeAtomicReq             *req,
+                              struct drm_output_state_t    *output,
                               struct drm_kms_plane_state_t *state) {
-  if (!state || !state->plane || !state->fb || state->fb->id == 0 ||
-      !output || !output->crtc)
+  if (!state || !state->plane || !state->fb || state->fb->id == 0 || !output ||
+      !output->crtc)
     return false;
 
   struct drm_plane_t *plane = state->plane;
   struct drm_crtc_t  *crtc = output->crtc;
 
-  if (!_atomic_add_prop(drm, req, plane->id,
-                        plane->props[VT_DRM_PLANE_FB_ID], state->fb->id) ||
-      !_atomic_add_prop(drm, req, plane->id,
-                        plane->props[VT_DRM_PLANE_CRTC_ID], crtc->id) ||
-      !_atomic_add_prop(drm, req, plane->id,
-                        plane->props[VT_DRM_PLANE_CRTC_X],
+  if (!_atomic_add_prop(drm, req, plane->id, plane->props[VT_DRM_PLANE_FB_ID],
+                        state->fb->id) ||
+      !_atomic_add_prop(drm, req, plane->id, plane->props[VT_DRM_PLANE_CRTC_ID],
+                        crtc->id) ||
+      !_atomic_add_prop(drm, req, plane->id, plane->props[VT_DRM_PLANE_CRTC_X],
                         (uint64_t)(int64_t)state->dst.x) ||
-      !_atomic_add_prop(drm, req, plane->id,
-                        plane->props[VT_DRM_PLANE_CRTC_Y],
+      !_atomic_add_prop(drm, req, plane->id, plane->props[VT_DRM_PLANE_CRTC_Y],
                         (uint64_t)(int64_t)state->dst.y) ||
-      !_atomic_add_prop(drm, req, plane->id,
-                        plane->props[VT_DRM_PLANE_CRTC_W], state->dst.width) ||
-      !_atomic_add_prop(drm, req, plane->id,
-                        plane->props[VT_DRM_PLANE_CRTC_H], state->dst.height) ||
-      !_atomic_add_prop(drm, req, plane->id,
-                        plane->props[VT_DRM_PLANE_SRC_X],
+      !_atomic_add_prop(drm, req, plane->id, plane->props[VT_DRM_PLANE_CRTC_W],
+                        state->dst.width) ||
+      !_atomic_add_prop(drm, req, plane->id, plane->props[VT_DRM_PLANE_CRTC_H],
+                        state->dst.height) ||
+      !_atomic_add_prop(drm, req, plane->id, plane->props[VT_DRM_PLANE_SRC_X],
                         (uint64_t)state->src.x << 16) ||
-      !_atomic_add_prop(drm, req, plane->id,
-                        plane->props[VT_DRM_PLANE_SRC_Y],
+      !_atomic_add_prop(drm, req, plane->id, plane->props[VT_DRM_PLANE_SRC_Y],
                         (uint64_t)state->src.y << 16) ||
-      !_atomic_add_prop(drm, req, plane->id,
-                        plane->props[VT_DRM_PLANE_SRC_W],
+      !_atomic_add_prop(drm, req, plane->id, plane->props[VT_DRM_PLANE_SRC_W],
                         (uint64_t)state->src.width << 16) ||
-      !_atomic_add_prop(drm, req, plane->id,
-                        plane->props[VT_DRM_PLANE_SRC_H],
+      !_atomic_add_prop(drm, req, plane->id, plane->props[VT_DRM_PLANE_SRC_H],
                         (uint64_t)state->src.height << 16)) {
     return false;
   }
@@ -105,13 +103,38 @@ static bool _atomic_add_plane(struct drm_backend_state_t *drm,
   return true;
 }
 
+/*
+
+static bool _atomic_add_plane(struct drm_backend_state_t   *drm,
+                            drmModeAtomicReq             *req,
+                            struct drm_kms_plane_state_t *state,
+                            struct drm_output_state_t    *output) {
+if (!state || !state->plane || !state->fb || state->fb->id == 0)
+  return false;
+
+struct drm_plane_t *plane = state->plane;
+struct drm_crtc_t  *crtc = output->crtc;
+
+if (!plane->liftoff_plane || plane->id_crtc_init != output->crtc) {
+  plane->liftoff_plane = liftoff_plane_create(drm->liftoff_dev, plane->id);
+  if (!plane->liftoff_plane) {
+    VT_ERROR(drm->comp->log,
+             "Failed to create liftoff plane for plane %p (plane ID: %d)",
+             plane, plane->id);
+    return false;
+  }
+}
+
+return true;
+}*/
+
 static bool _atomic_disable_old_planes(struct drm_backend_state_t *drm,
-                                       drmModeAtomicReq *req,
-                                       struct drm_kms_commit_t *commit) {
+                                       drmModeAtomicReq           *req,
+                                       struct drm_kms_commit_t    *commit) {
   if (!commit->output || !commit->output->crtc)
     return true;
 
-  struct drm_crtc_t *crtc = commit->output->crtc;
+  struct drm_crtc_t  *crtc = commit->output->crtc;
   struct drm_plane_t *plane;
   wl_array_for_each(plane, &drm->planes) {
     if (_atomic_plane_in_commit(commit, plane->id))
@@ -127,8 +150,8 @@ static bool _atomic_disable_old_planes(struct drm_backend_state_t *drm,
     if (!attached)
       continue;
 
-    if (!_atomic_add_prop(drm, req, plane->id,
-                          plane->props[VT_DRM_PLANE_FB_ID], 0) ||
+    if (!_atomic_add_prop(drm, req, plane->id, plane->props[VT_DRM_PLANE_FB_ID],
+                          0) ||
         !_atomic_add_prop(drm, req, plane->id,
                           plane->props[VT_DRM_PLANE_CRTC_ID], 0)) {
       return false;
@@ -166,10 +189,10 @@ static bool _atomic_commit(struct drm_backend_state_t *drm,
     if (!_atomic_add_prop(drm, req, output->conn_id,
                           output->conn_props[VT_DRM_CONNECTOR_CRTC_ID],
                           crtc->id) ||
-        !_atomic_add_prop(drm, req, crtc->id,
-                          crtc->props[VT_DRM_CRTC_MODE_ID], mode_blob) ||
-        !_atomic_add_prop(drm, req, crtc->id,
-                          crtc->props[VT_DRM_CRTC_ACTIVE], 1)) {
+        !_atomic_add_prop(drm, req, crtc->id, crtc->props[VT_DRM_CRTC_MODE_ID],
+                          mode_blob) ||
+        !_atomic_add_prop(drm, req, crtc->id, crtc->props[VT_DRM_CRTC_ACTIVE],
+                          1)) {
       goto done;
     }
   }
@@ -213,8 +236,7 @@ static bool _atomic_commit(struct drm_backend_state_t *drm,
     }
 
     if (!ok) {
-      VT_ERROR(drm->comp->log, "Atomic DRM commit failed: %s",
-               strerror(errno));
+      VT_ERROR(drm->comp->log, "Atomic DRM commit failed: %s", strerror(errno));
       goto done;
     }
   } else {
@@ -244,7 +266,7 @@ static bool _atomic_disable(struct drm_backend_state_t *drm,
     return false;
 
   struct drm_crtc_t *crtc = output->crtc;
-  bool ok = true;
+  bool               ok = true;
 
   struct drm_plane_t *plane;
   wl_array_for_each(plane, &drm->planes) {
@@ -257,8 +279,8 @@ static bool _atomic_disable(struct drm_backend_state_t *drm,
     if (!attached)
       continue;
 
-    if (!_atomic_add_prop(drm, req, plane->id,
-                          plane->props[VT_DRM_PLANE_FB_ID], 0) ||
+    if (!_atomic_add_prop(drm, req, plane->id, plane->props[VT_DRM_PLANE_FB_ID],
+                          0) ||
         !_atomic_add_prop(drm, req, plane->id,
                           plane->props[VT_DRM_PLANE_CRTC_ID], 0)) {
       ok = false;
@@ -269,14 +291,14 @@ static bool _atomic_disable(struct drm_backend_state_t *drm,
   if (ok) {
     ok = _atomic_add_prop(drm, req, output->conn_id,
                           output->conn_props[VT_DRM_CONNECTOR_CRTC_ID], 0) &&
-         _atomic_add_prop(drm, req, crtc->id,
-                          crtc->props[VT_DRM_CRTC_ACTIVE], 0) &&
-         _atomic_add_prop(drm, req, crtc->id,
-                          crtc->props[VT_DRM_CRTC_MODE_ID], 0);
+         _atomic_add_prop(drm, req, crtc->id, crtc->props[VT_DRM_CRTC_ACTIVE],
+                          0) &&
+         _atomic_add_prop(drm, req, crtc->id, crtc->props[VT_DRM_CRTC_MODE_ID],
+                          0);
   }
 
-  if (ok && drmModeAtomicCommit(drm->drm_fd, req,
-                                DRM_MODE_ATOMIC_ALLOW_MODESET, NULL) != 0) {
+  if (ok && drmModeAtomicCommit(drm->drm_fd, req, DRM_MODE_ATOMIC_ALLOW_MODESET,
+                                NULL) != 0) {
     VT_WARN(drm->comp->log, "Failed to disable atomic DRM output: %s",
             strerror(errno));
     ok = false;
@@ -292,3 +314,119 @@ const struct drm_kms_impl_t drm_kms_atomic_impl = {
     .commit = _atomic_commit,
     .disable = _atomic_disable,
 };
+
+drmModeAtomicReq *drm_atomic_create_test_req(struct drm_backend_state_t *drm,
+                                             struct drm_output_state_t  *output,
+                                             uint32_t *mode_blob,
+                                             uint32_t *flags) {
+  assert(drm && output && output->crtc);
+  assert(mode_blob && flags);
+
+  struct drm_crtc_t *crtc = output->crtc;
+
+  *mode_blob = 0;
+  *flags = DRM_MODE_ATOMIC_TEST_ONLY;
+
+  drmModeAtomicReq *req = drmModeAtomicAlloc();
+  if (!req) {
+    VT_ERROR(drm->comp->log, "Failed to allocate atomic DRM test request.");
+    return NULL;
+  }
+
+  if (output->needs_modeset) {
+    if (drmModeCreatePropertyBlob(drm->drm_fd, &output->mode,
+                                  sizeof(output->mode), mode_blob) != 0) {
+      VT_ERROR(drm->comp->log,
+               "Failed to create DRM mode property blob for test: %s",
+               strerror(errno));
+      goto fail;
+    }
+
+    if (!_atomic_add_prop(drm, req, output->conn_id,
+                          output->conn_props[VT_DRM_CONNECTOR_CRTC_ID],
+                          crtc->id) ||
+        !_atomic_add_prop(drm, req, crtc->id, crtc->props[VT_DRM_CRTC_MODE_ID],
+                          *mode_blob) ||
+        !_atomic_add_prop(drm, req, crtc->id, crtc->props[VT_DRM_CRTC_ACTIVE],
+                          1)) {
+      goto fail;
+    }
+
+    *flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
+  }
+
+  return req;
+
+fail:
+  if (*mode_blob != 0) {
+    drmModeDestroyPropertyBlob(drm->drm_fd, *mode_blob);
+    *mode_blob = 0;
+  }
+
+  drmModeAtomicFree(req);
+  return NULL;
+}
+
+bool drm_liftoff_testing_set_layer(struct liftoff_layer *liftoff_layer,
+                                   const struct vt_output_layer_state_t *layer,
+                                   uint32_t fb_id, int in_fence_fd,
+                                   uint64_t zpos) {
+  assert(liftoff_layer && layer);
+
+  if (fb_id == 0)
+    return false;
+
+  if (layer->src.x < 0 || layer->src.y < 0 || layer->src.width == 0 ||
+      layer->src.height == 0 || layer->dst.width == 0 ||
+      layer->dst.height == 0) {
+    return false;
+  }
+
+  if (liftoff_layer_set_property(liftoff_layer, "FB_ID", fb_id) < 0 ||
+      liftoff_layer_set_property(liftoff_layer, "SRC_X",
+                                 (uint64_t)(uint32_t)layer->src.x << 16) < 0 ||
+      liftoff_layer_set_property(liftoff_layer, "SRC_Y",
+                                 (uint64_t)(uint32_t)layer->src.y << 16) < 0 ||
+      liftoff_layer_set_property(liftoff_layer, "SRC_W",
+                                 (uint64_t)layer->src.width << 16) < 0 ||
+      liftoff_layer_set_property(liftoff_layer, "SRC_H",
+                                 (uint64_t)layer->src.height << 16) < 0 ||
+      liftoff_layer_set_property(liftoff_layer, "CRTC_X",
+                                 (uint64_t)(int64_t)layer->dst.x) < 0 ||
+      liftoff_layer_set_property(liftoff_layer, "CRTC_Y",
+                                 (uint64_t)(int64_t)layer->dst.y) < 0 ||
+      liftoff_layer_set_property(liftoff_layer, "CRTC_W", layer->dst.width) <
+          0 ||
+      liftoff_layer_set_property(liftoff_layer, "CRTC_H", layer->dst.height) <
+          0 ||
+      liftoff_layer_set_property(liftoff_layer, "zpos", zpos) < 0 ||
+      liftoff_layer_set_property(liftoff_layer, "IN_FENCE_FD",
+                                 (uint64_t)(int64_t)in_fence_fd) < 0) {
+    return false;
+  }
+
+  return true;
+}
+
+void drm_liftoff_testing_finish(struct drm_backend_state_t      *drm,
+                                struct drm_liftoff_test_layer_t *test_layers,
+                                size_t                           layer_count) {
+  if (!drm || !test_layers)
+    return;
+
+  for (size_t i = 0; i < layer_count; i++) {
+    struct drm_liftoff_test_layer_t *test = &test_layers[i];
+
+    if (test->liftoff_layer) {
+      liftoff_layer_destroy(test->liftoff_layer);
+      test->liftoff_layer = NULL;
+    }
+
+    drm_fb_finish(drm, &test->fb);
+
+    if (test->use)
+      vt_buffer_use_unref(&test->use);
+  }
+
+  /*free(test_layers); (arena allocated)*/
+}

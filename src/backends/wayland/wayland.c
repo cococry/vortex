@@ -905,8 +905,7 @@ bool backend_implement_wl(struct vt_compositor_t *comp) {
       .handle_frame = backend_handle_frame_wl,
       .terminate = backend_terminate_wl,
       .prepare_output_frame = backend_prepare_output_frame_wl,
-      .build_surface_feedback = NULL
-  };
+      .build_surface_feedback = NULL};
 
   // No session in Wayland nested
   memset(&comp->session->impl, 0, sizeof(comp->session->impl));

@@ -93,5 +93,5 @@ struct vt_output_layer_state_t {
   bool accepted;
 };
 
-bool vt_output_track_presented_surface(struct vt_output_t     *output,
-                                       struct vt_surface_t    *surface);
+bool vt_output_track_presented_surface(struct vt_output_t  *output,
+                                       struct vt_surface_t *surface);

@@ -27,7 +27,7 @@
 
 struct vt_wayland_buffer_attachment_t {
   struct wl_resource *resource;
-  struct wl_listener resource_destroy_listener;
+  struct wl_listener  resource_destroy_listener;
 };
 
 bool vt_proto_wl_surface_init(struct vt_surface_t *surf,

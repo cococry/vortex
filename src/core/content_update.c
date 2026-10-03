@@ -27,8 +27,8 @@
 #include "src/render/renderer.h"
 #include <wayland-util.h>
 
-#include <stdlib.h>
 #include <assert.h>
+#include <stdlib.h>
 #include <unistd.h>
 
 #define _SUBSYS_NAME "CONTENT-UPDATE"
@@ -194,7 +194,7 @@ _content_update_apply_surface_state(struct vt_content_update_t *cu) {
       &surf->applied.width, &surf->applied.height);
 
   assert(compute_success);
-  if(!compute_success) {
+  if (!compute_success) {
     return false;
   }
 
@@ -270,7 +270,7 @@ _content_update_apply_dag_recursive(struct vt_content_update_t *cu) {
   bool applied = _content_update_apply_one(cu);
   assert(applied);
 
-  if(!applied)
+  if (!applied)
     return false;
 
   cu->applied = true;
@@ -423,45 +423,43 @@ bool vt_content_update_apply_dag(struct vt_content_update_t *root) {
   if (!root || !root->surf || !root->surf->comp)
     return false;
 
-  struct vt_compositor_t* comp = root->surf->comp;
+  struct vt_compositor_t *comp = root->surf->comp;
 
-  VT_TRACE(comp->log, "Content update apply DAG: root=%p type=%d",
-           root, root->type);
+  VT_TRACE(comp->log, "Content update apply DAG: root=%p type=%d", root,
+           root->type);
 
   if (!_content_update_is_candidate(root)) {
-    VT_TRACE(comp->log,
-             "Content update apply DAG: root=%p NOT CANDIDATE", root);
+    VT_TRACE(comp->log, "Content update apply DAG: root=%p NOT CANDIDATE",
+             root);
     return false;
   }
 
-  VT_TRACE(comp->log,
-           "Content update apply DAG: root=%p is candidate", root);
+  VT_TRACE(comp->log, "Content update apply DAG: root=%p is candidate", root);
 
   if (!_content_update_is_ready(root)) {
-    VT_TRACE(comp->log,
-             "Content update apply DAG: root=%p not ready", root);
+    VT_TRACE(comp->log, "Content update apply DAG: root=%p not ready", root);
     return false;
   }
 
   VT_TRACE(comp->log, "Content update DAG root=%p is ready", root);
 
   if (!_content_update_prepare_dag_recursive(root)) {
-    VT_WARN(comp->log,
-            "Content update apply DAG: root=%p prepare failed", root);
+    VT_WARN(comp->log, "Content update apply DAG: root=%p prepare failed",
+            root);
     return false;
   }
 
   VT_TRACE(comp->log, "Content update DAG: root=%p prepared", root);
 
-  if(!_content_update_apply_dag_recursive(root)) {
+  if (!_content_update_apply_dag_recursive(root)) {
     log_fatal(comp->log,
               "Content update DAG: root=%p apply failed with valid prepare",
               root);
     return false;
   }
 
-  VT_TRACE(comp->log,
-           "Content update apply DAG: root=%p applied, retiring", root);
+  VT_TRACE(comp->log, "Content update apply DAG: root=%p applied, retiring",
+           root);
 
   _content_update_retire_applied_dag(root);
 

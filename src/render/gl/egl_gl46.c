@@ -126,7 +126,8 @@ static bool _egl_pick_config(struct vt_compositor_t     *comp,
                              struct vt_backend_t        *backend);
 static bool _egl_record_surface_release_fences(struct vt_renderer_t *renderer,
                                                struct vt_output_t   *output);
-static bool _egl_gl_create_output_fbo(struct vt_output_t *output, uint32_t width, uint32_t height);
+static bool _egl_gl_create_output_fbo(struct vt_output_t *output,
+                                      uint32_t width, uint32_t height);
 
 static bool _egl_create_renderer(struct vt_renderer_t      *renderer,
                                  enum vt_backend_platform_t platform,
@@ -135,8 +136,8 @@ static bool _egl_create_renderer(struct vt_renderer_t      *renderer,
 static void _egl_buffer_attachment_destroy(struct vt_buffer_t *buf, void *owner,
                                            void *data);
 
-
-static bool _egl_track_rendered_buffer_use(struct vt_output_t* output, struct vt_buffer_use_t *use);
+static bool _egl_track_rendered_buffer_use(struct vt_output_t     *output,
+                                           struct vt_buffer_use_t *use);
 
 struct vt_buffer_attachment_implementation_t egl_buffer_attachment_impl = {
     .destroy = _egl_buffer_attachment_destroy};
@@ -756,7 +757,8 @@ static void _egl_buffer_attachment_destroy(struct vt_buffer_t *buf, void *owner,
   VT_TRACE(r->comp->log, "Destroyed EGL Image handle for buffer %p", buf);
 }
 
-static bool _egl_track_rendered_buffer_use(struct vt_output_t* output, struct vt_buffer_use_t *use) {
+static bool _egl_track_rendered_buffer_use(struct vt_output_t     *output,
+                                           struct vt_buffer_use_t *use) {
   assert(output && use && use->buf);
 
   struct egl_output_state_t *egl_output =
@@ -1196,7 +1198,6 @@ bool renderer_resize_renderable_output_egl(struct vt_renderer_t *r,
   if (!_egl_gl_create_output_fbo(output, w, h))
     return false;
 
-
   pixman_region32_union_rect(&output->damage, &output->damage, 0, 0, w, h);
 
   output->needs_damage_rebuild = true;
@@ -1430,8 +1431,7 @@ void renderer_begin_frame_egl(struct vt_renderer_t *r,
     last_surface = surface;
   }
 
-  rn_resize_display_ex(egl->render, output->width, output->height, 0,
-                       0);
+  rn_resize_display_ex(egl->render, output->width, output->height, 0, 0);
 
   glBindFramebuffer(GL_FRAMEBUFFER, egl_output->fbo_id);
 }
@@ -1439,9 +1439,8 @@ void renderer_begin_frame_egl(struct vt_renderer_t *r,
 void renderer_draw_surface_egl(struct vt_renderer_t *r,
                                struct vt_output_t   *output,
                                struct vt_surface_t  *surface,
-                               struct vt_box_t *src_box,
-                               struct vt_box_t *dst_box
-                               ) {
+                               struct vt_box_t      *src_box,
+                               struct vt_box_t      *dst_box) {
   VT_TRACE(r->comp->log,
            "DRAW ENTER: surf=%p current_use=%p mapped=%d effective_mapped=%d",
            surface, surface ? surface->current_buf_use : NULL,

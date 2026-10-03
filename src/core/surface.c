@@ -94,7 +94,6 @@ void vt_surface_set_mapped(struct vt_surface_t *surf, bool mapped) {
 
     vt_seat_repick_pointer_focus(seat);
   }
-
 }
 
 struct vt_surface_t *focus_stack_pop(struct vt_compositor_t *comp) {
@@ -390,59 +389,50 @@ _content_update_add_child_dependencies(struct vt_content_update_t *cu) {
   return true;
 }
 
-bool vt_surface_emit_content_update(struct vt_surface_t *surf)
-{
-    if (!surf)
-        return false;
+bool vt_surface_emit_content_update(struct vt_surface_t *surf) {
+  if (!surf)
+    return false;
 
-    bool effectively_sync =
-        vt_surface_effectively_synchronized(surf);
+  bool effectively_sync = vt_surface_effectively_synchronized(surf);
 
-    struct vt_content_update_t *cu =
-        vt_content_update_create(
-            surf,
-            &surf->pending,
-            effectively_sync
-                ? VT_CU_SYNC
-                : VT_CU_DESYNC);
+  struct vt_content_update_t *cu = vt_content_update_create(
+      surf, &surf->pending, effectively_sync ? VT_CU_SYNC : VT_CU_DESYNC);
 
-    if (!cu)
-        return false;
+  if (!cu)
+    return false;
 
-    /* Addons capture */
-    struct vt_surface_addon_t *it;
-    wl_list_for_each(it, &surf->addons, link) {
-        if (it->impl.commit &&
-            !it->impl.commit(surf, cu))
-            goto fail;
-    }
+  /* Addons capture */
+  struct vt_surface_addon_t *it;
+  wl_list_for_each(it, &surf->addons, link) {
+    if (it->impl.commit && !it->impl.commit(surf, cu))
+      goto fail;
+  }
 
-    /* Role capture */
-    if (surf->role.impl &&
-        surf->role.impl->commit &&
-        !surf->role.impl->commit(surf, cu))
-        goto fail;
+  /* Role capture */
+  if (surf->role.impl && surf->role.impl->commit &&
+      !surf->role.impl->commit(surf, cu))
+    goto fail;
 
-    if (!vt_content_update_finish_create(cu))
-        goto fail;
+  if (!vt_content_update_finish_create(cu))
+    goto fail;
 
-    if (!_content_update_enqueue(cu))
-        goto fail;
+  if (!_content_update_enqueue(cu))
+    goto fail;
 
-    if (!_content_update_add_child_dependencies(cu))
-        goto fail;
+  if (!_content_update_add_child_dependencies(cu))
+    goto fail;
 
-    if (cu->type == VT_CU_SYNC)
-        return true;
-
-    if (!vt_content_update_apply_dag(cu))
-        goto fail;
-
+  if (cu->type == VT_CU_SYNC)
     return true;
 
+  if (!vt_content_update_apply_dag(cu))
+    goto fail;
+
+  return true;
+
 fail:
-    vt_content_update_destroy(cu);
-    return false;
+  vt_content_update_destroy(cu);
+  return false;
 }
 
 struct vt_content_update_t *vt_surface_last_scu(struct vt_surface_t *surf) {

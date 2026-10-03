@@ -37,10 +37,11 @@
 #define _SUBSYS_NAME "BUFFERS"
 
 static void _buffer_destroy(struct vt_buffer_t *buf);
-static void _buffer_remove_attachment(struct vt_buffer_attachment_t *attachment);
+static void
+_buffer_remove_attachment(struct vt_buffer_attachment_t *attachment);
 
-
-static void _buffer_remove_attachment(struct vt_buffer_attachment_t *attachment) {
+static void
+_buffer_remove_attachment(struct vt_buffer_attachment_t *attachment) {
   if (!attachment || !attachment->buf) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return;
@@ -77,9 +78,9 @@ static void _buffer_destroy(struct vt_buffer_t *buf) {
   free(buf);
 }
 
-struct vt_buffer_t *vt_buffer_create(struct vt_compositor_t *comp,
-                                     uint32_t width, uint32_t height,
-                                     const struct vt_buffer_implementation_t *impl) {
+struct vt_buffer_t *
+vt_buffer_create(struct vt_compositor_t *comp, uint32_t width, uint32_t height,
+                 const struct vt_buffer_implementation_t *impl) {
   if (!comp || !impl) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return NULL;
@@ -138,14 +139,15 @@ void vt_buffer_unref(struct vt_buffer_t **buf_ptr) {
   _buffer_destroy(buf);
 }
 
-bool vt_buffer_get_dmabuf(struct vt_buffer_t *buf, struct vt_dmabuf_attr_t * o_attr) {
+bool vt_buffer_get_dmabuf(struct vt_buffer_t      *buf,
+                          struct vt_dmabuf_attr_t *o_attr) {
   if (!buf || !buf->impl || !buf->impl->get_dmabuf)
     return NULL;
 
   return buf->impl->get_dmabuf(buf, o_attr);
 }
 
-bool vt_buffer_get_shm(struct vt_buffer_t *buf, struct vt_shm_attr_t* o_attr) {
+bool vt_buffer_get_shm(struct vt_buffer_t *buf, struct vt_shm_attr_t *o_attr) {
   if (!buf || !buf->impl || !buf->impl->get_shm)
     return NULL;
 
@@ -183,9 +185,9 @@ void vt_buffer_end_use(struct vt_buffer_t *buf) {
   }
 }
 
-struct vt_buffer_attachment_t *
-vt_buffer_add_attachment(struct vt_buffer_t *buf, const void *owner, void *data,
-                         const struct vt_buffer_attachment_implementation_t *impl) {
+struct vt_buffer_attachment_t *vt_buffer_add_attachment(
+    struct vt_buffer_t *buf, const void *owner, void *data,
+    const struct vt_buffer_attachment_implementation_t *impl) {
 
   if (!buf || !buf->comp) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
@@ -212,9 +214,9 @@ vt_buffer_add_attachment(struct vt_buffer_t *buf, const void *owner, void *data,
   return attachment;
 }
 
-struct vt_buffer_attachment_t *
-vt_buffer_find_attachment(struct vt_buffer_t *buf, const void *owner,
-                          const struct vt_buffer_attachment_implementation_t *impl) {
+struct vt_buffer_attachment_t *vt_buffer_find_attachment(
+    struct vt_buffer_t *buf, const void *owner,
+    const struct vt_buffer_attachment_implementation_t *impl) {
   if (!buf || !buf->comp || !impl) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return NULL;

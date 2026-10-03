@@ -63,6 +63,7 @@
 #include "render/dmabuf.h"
 #include "render/drm_format.h"
 
+#include "atomic.h"
 #include "drm_backend.h"
 #include "drm_types.h"
 #include "fb.h"
@@ -127,6 +128,11 @@ static bool _drm_output_sync_refresh(struct drm_output_state_t *drm_output);
 static bool _drm_plane_has_format(struct drm_plane_t *plane, uint32_t format,
                                   uint64_t modifier);
 static void _drm_on_drm_change(struct wl_listener *listener, void *data);
+
+bool _drm_legacy_test_output_layers(struct vt_backend_t            *backend,
+                                    struct vt_output_t             *output,
+                                    struct vt_output_layer_state_t *layers,
+                                    size_t layer_count);
 
 static bool _added_global_keybinds = false;
 
@@ -488,10 +494,7 @@ _drm_build_dmabuf_feedback(struct drm_backend_master_state_t *master,
     }
 
     struct vt_dmabuf_tranche_t *main_tranche = vt_dmabuf_feedback_add_tranche(
-        feedback, dev,
-        _drm_devices_equal(dev_main_drm, dev_drm)
-            ? VT_DMABUF_TRANCHE_FLAG_DIRECT_SCANOUT
-            : VT_DMABUF_TRANCHE_FLAG_COMPOSITE);
+        feedback, dev, VT_DMABUF_TRANCHE_FLAG_COMPOSITE);
 
     struct vt_renderer_t *r = master->comp->renderer;
     if (dev == master->main_drm->dev) {
@@ -777,13 +780,6 @@ static bool _drm_init_for_device(struct vt_compositor_t     *comp,
     return false;
   }
 
-  int ret = liftoff_device_register_all_planes(drm->liftoff_dev);
-  if (ret < 0) {
-    VT_ERROR(comp->log, "Failed to register liftoff planes: %s",
-             strerror(-ret));
-    return false;
-  }
-
   /* Renderer is only initialized on the main DRM device */
   if (!drm_master->main_drm && comp->renderer->impl.is_handle_renderable(
                                    comp->renderer, drm->native_handle)) {
@@ -1007,6 +1003,16 @@ static bool _drm_plane_init(struct drm_backend_state_t *drm,
     };
     if (!_drm_plane_init_cursor_sizes(plane, &size_hint, 1))
       return false;
+  }
+
+  if (drm->impl->atomic) {
+    plane->liftoff_plane = liftoff_plane_create(drm->liftoff_dev, plane->id);
+    if (!plane->liftoff_plane) {
+      VT_ERROR(comp->log,
+               "Failed to create liftoff plane for plane %p (plane ID: %d)",
+               plane, plane->id);
+      return false;
+    }
   }
 
   return true;
@@ -1547,7 +1553,7 @@ static bool _drm_create_output_for_device(struct drm_backend_state_t *drm,
     return false;
   }
 
-  if (drm->impl == &drm_kms_atomic_impl) {
+  if (drm->impl->atomic) {
     if (!(drm_output->liftoff_output =
               liftoff_output_create(drm->liftoff_dev, drm_output->crtc->id))) {
       VT_ERROR(comp->log, "Failed to create liftoff output for output.");
@@ -1743,6 +1749,12 @@ static void _drm_on_drm_change(struct wl_listener *listener, void *data) {
   }
 }
 
+static bool _drm_have_atomic(struct drm_backend_state_t *drm) {
+  assert(drm);
+  assert(drm->caps[VT_DRM_CAP_ATOMIC_MODESET]);
+  return drm->impl == &drm_kms_atomic_impl;
+}
+
 static bool _drm_destroy_output_for_device(struct drm_backend_state_t *drm,
                                            struct vt_output_t         *output) {
   if (!drm || !drm->comp)
@@ -1837,6 +1849,9 @@ static bool _drm_terminate_for_device(struct drm_backend_state_t *drm) {
   struct drm_plane_t *plane;
   wl_array_for_each(plane, &drm->planes) {
     vt_drm_format_array_free(&plane->formats);
+    if (plane->liftoff_plane) {
+      liftoff_plane_destroy(plane->liftoff_plane);
+    }
     free(plane->cursor_sizes);
   }
   wl_array_release(&drm->planes);
@@ -2543,9 +2558,8 @@ static struct drm_plane_t *_drm_plane_from_id(struct drm_backend_state_t *drm,
   return NULL;
 }
 
-
 static bool _drm_liftoff_ensure_layers(struct drm_output_state_t *output,
-                                       size_t count) {
+                                       size_t                     count) {
   assert(output && output->liftoff_output);
 
   if (count <= output->liftoff_layers_cap)
@@ -2568,8 +2582,7 @@ static bool _drm_liftoff_ensure_layers(struct drm_output_state_t *output,
     output->liftoff_layers[i] = NULL;
 
   for (size_t i = old_cap; i < new_cap; i++) {
-    output->liftoff_layers[i] =
-        liftoff_layer_create(output->liftoff_output);
+    output->liftoff_layers[i] = liftoff_layer_create(output->liftoff_output);
 
     if (!output->liftoff_layers[i]) {
       for (size_t j = old_cap; j < i; j++) {
@@ -2588,10 +2601,11 @@ static bool _drm_liftoff_ensure_layers(struct drm_output_state_t *output,
   return true;
 }
 
+bool _drm_legacy_test_output_layers(struct vt_backend_t            *backend,
+                                    struct vt_output_t             *output,
+                                    struct vt_output_layer_state_t *layers,
+                                    size_t layer_count) {
 
-bool backend_test_output_layers_drm(
-    struct vt_backend_t *backend, struct vt_output_t *output,
-    struct vt_output_layer_state_t *layers, size_t layer_count) {
   if (!backend || !backend->comp || !output || !output->user_data ||
       (layer_count > 0 && !layers)) {
     return false;
@@ -2634,8 +2648,6 @@ bool backend_test_output_layers_drm(
     goto reject;
   }
 
-
-
   if (!drm_output->crtc) {
     VT_TRACE(backend->comp->log,
              "DRM: direct scanout rejected for output %p: "
@@ -2651,7 +2663,6 @@ bool backend_test_output_layers_drm(
              output);
     goto reject;
   }
-
 
   if (!layer->surface) {
     VT_TRACE(backend->comp->log,
@@ -2684,20 +2695,18 @@ bool backend_test_output_layers_drm(
              "DRM: direct scanout rejected for output %p surface %p: "
              "destination does not cover the full output. "
              "dst=[x=%d y=%d w=%u h=%u], output=[w=%u h=%u].",
-             output, layer->surface,
-             layer->dst.x, layer->dst.y,
-             layer->dst.width, layer->dst.height,
-             output->width, output->height);
+             output, layer->surface, layer->dst.x, layer->dst.y,
+             layer->dst.width, layer->dst.height, output->width,
+             output->height);
     goto reject;
   }
 
-  if (layer->src.x < 0 || layer->src.y < 0 ||
-      layer->src.width <= 0 || layer->src.height <= 0) {
+  if (layer->src.x < 0 || layer->src.y < 0 || layer->src.width <= 0 ||
+      layer->src.height <= 0) {
     VT_TRACE(backend->comp->log,
              "DRM: direct scanout rejected for output %p surface %p: "
              "invalid source rectangle src=[x=%d y=%d w=%u h=%u].",
-             output, layer->surface,
-             layer->src.x, layer->src.y,
+             output, layer->surface, layer->src.x, layer->src.y,
              layer->src.width, layer->src.height);
     goto reject;
   }
@@ -2713,7 +2722,7 @@ bool backend_test_output_layers_drm(
     goto reject;
   }
 
-    const char *format_name = drmGetFormatName(attr.format);
+  const char *format_name = drmGetFormatName(attr.format);
 
   VT_TRACE(backend->comp->log,
            "DRM: direct scanout candidate: "
@@ -2730,10 +2739,8 @@ bool backend_test_output_layers_drm(
              "DRM: direct scanout rejected for output %p surface %p: "
              "source rectangle exceeds DMABUF bounds. "
              "src=[x=%d y=%d w=%u h=%u], buffer=[w=%d h=%d].",
-             output, layer->surface,
-             layer->src.x, layer->src.y,
-             layer->src.width, layer->src.height,
-             attr.width, attr.height);
+             output, layer->surface, layer->src.x, layer->src.y,
+             layer->src.width, layer->src.height, attr.width, attr.height);
     goto reject;
   }
 
@@ -2757,8 +2764,7 @@ bool backend_test_output_layers_drm(
              "DRM: direct scanout rejected for output %p surface %p: "
              "buffer has acquire fence fd=%d but primary plane %u has no "
              "IN_FENCE_FD property.",
-             output, layer->surface,
-             use->acquire_fence_fd, plane->id);
+             output, layer->surface, use->acquire_fence_fd, plane->id);
     goto reject;
   }
 
@@ -2853,6 +2859,239 @@ reject:
   return true;
 }
 
+static bool
+_drm_output_can_scanout_dmabuf(struct drm_backend_state_t    *drm,
+                               struct drm_output_state_t     *output,
+                               const struct vt_dmabuf_attr_t *attr) {
+  assert(drm && output && output->crtc && attr);
+
+  uint32_t crtc_mask = 1u << output->crtc->index;
+
+  struct drm_plane_t *plane;
+  wl_array_for_each(plane, &drm->planes) {
+    if (!(plane->possible_crtcs & crtc_mask))
+      continue;
+
+    if (plane->type == DRM_PLANE_TYPE_CURSOR)
+      continue;
+
+    struct vt_drm_format_t *format;
+    wl_array_for_each(format, &plane->formats) {
+      if (format->format != attr->format)
+        continue;
+
+      uint64_t *modifier;
+      wl_array_for_each(modifier, &format->mods) {
+        if (*modifier == attr->mod)
+          return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
+                                    struct vt_output_t             *output,
+                                    struct vt_output_layer_state_t *layers,
+                                    size_t layer_count) {
+  if (!backend || !backend->comp || !output || !output->user_data ||
+      (layer_count > 0 && !layers)) {
+    return false;
+  }
+
+  for (size_t i = 0; i < layer_count; i++)
+    layers[i].accepted = false;
+
+  if (layer_count == 0)
+    return true;
+
+  struct drm_output_state_t *drm_output =
+      BACKEND_DATA(output, struct drm_output_state_t);
+
+  if (!drm_output || !drm_output->drm_backend || !drm_output->crtc) {
+    return false;
+  }
+
+  struct drm_backend_state_t *drm = drm_output->drm_backend;
+
+  if (!drm->impl->atomic || !drm_output->liftoff_output) {
+    return _drm_legacy_test_output_layers(backend, output, layers, layer_count);
+    return true;
+  }
+
+  struct drm_liftoff_test_layer_t *test_layers =
+      VT_ALLOC_FRAME(drm->comp, layer_count * sizeof(*test_layers));
+
+  if (!test_layers)
+    return false;
+
+  bool ok = false;
+
+  for (size_t i = 0; i < layer_count; i++) {
+    struct vt_output_layer_state_t  *layer = &layers[i];
+    struct drm_liftoff_test_layer_t *test = &test_layers[i];
+
+    if (!layer->surface || !layer->surface->current_buf_use ||
+        !layer->surface->current_buf_use->buf) {
+      VT_TRACE(backend->comp->log,
+               "DRM: layer %zu rejected from liftoff test: "
+               "surface/buffer state unavailable.",
+               i);
+      continue;
+    }
+
+    struct vt_buffer_use_t *use = layer->surface->current_buf_use;
+
+    struct vt_dmabuf_attr_t attr = {0};
+
+    if (!vt_buffer_get_dmabuf(use->buf, &attr)) {
+      VT_TRACE(backend->comp->log,
+               "DRM: layer %zu surface=%p rejected from liftoff test: "
+               "buffer is not a DMABUF.",
+               i, (void *)layer->surface);
+      continue;
+    }
+
+    if (!_drm_output_can_scanout_dmabuf(drm, drm_output, &attr)) {
+      VT_TRACE(backend->comp->log,
+               "DRM: layer %zu surface=%p rejected from liftoff test: "
+               "format=0x%08" PRIx32 " modifier=0x%016" PRIx64
+               " is not scanout-capable on this output.",
+               i, (void *)layer->surface, attr.format, attr.mod);
+      continue;
+    }
+
+    if (layer->src.x < 0 || layer->src.y < 0 || layer->src.width == 0 ||
+        layer->src.height == 0) {
+      VT_TRACE(backend->comp->log,
+               "DRM: layer %zu surface=%p rejected from liftoff test: "
+               "invalid source geometry [%d,%d %ux%u].",
+               i, (void *)layer->surface, layer->src.x, layer->src.y,
+               layer->src.width, layer->src.height);
+      continue;
+    }
+
+    if ((uint64_t)layer->src.x + (uint64_t)layer->src.width >
+            (uint64_t)attr.width ||
+        (uint64_t)layer->src.y + (uint64_t)layer->src.height >
+            (uint64_t)attr.height) {
+      VT_TRACE(backend->comp->log,
+               "DRM: layer %zu surface=%p rejected from liftoff test: "
+               "source [%d,%d %ux%u] exceeds buffer bounds %ux%u.",
+               i, (void *)layer->surface, layer->src.x, layer->src.y,
+               layer->src.width, layer->src.height, attr.width, attr.height);
+      continue;
+    }
+
+    if (use->release && vt_buffer_release_needs_fence(use->release) &&
+        drm_output->crtc->props[VT_DRM_CRTC_OUT_FENCE_PTR] == 0) {
+      VT_TRACE(backend->comp->log,
+               "DRM: layer %zu surface=%p rejected from liftoff test: "
+               "buffer requires release fence but CRTC %" PRIu32
+               " has no OUT_FENCE_PTR property.",
+               i, (void *)layer->surface, drm_output->crtc->id);
+      continue;
+    }
+
+    if (!drm_fb_init_from_buffer(drm, &test->fb, use->buf)) {
+      VT_TRACE(backend->comp->log,
+               "DRM: layer %zu surface=%p rejected from liftoff test: "
+               "failed to import buffer as KMS framebuffer "
+               "(format=0x%08" PRIx32 " modifier=0x%016" PRIx64 ").",
+               i, (void *)layer->surface, attr.format, attr.mod);
+      continue;
+    }
+
+    test->use = vt_buffer_use_ref(use);
+
+    test->liftoff_layer = liftoff_layer_create(drm_output->liftoff_output);
+
+    if (!test->liftoff_layer) {
+      VT_ERROR(backend->comp->log,
+               "Failed to create temporary libliftoff layer "
+               "for layer %zu surface=%p.",
+               i, (void *)layer->surface);
+      goto done;
+    }
+
+    if (!drm_liftoff_testing_set_layer(test->liftoff_layer, layer, test->fb.id,
+                                       use->acquire_fence_fd, i)) {
+      VT_TRACE(backend->comp->log,
+               "DRM: layer %zu surface=%p rejected from liftoff test: "
+               "failed to set liftoff layer properties.",
+               i, (void *)layer->surface);
+
+      liftoff_layer_set_property(test->liftoff_layer, "FB_ID", 0);
+
+      continue;
+    }
+  }
+
+  uint32_t mode_blob = 0;
+  uint32_t flags = 0;
+
+  drmModeAtomicReq *req =
+      drm_atomic_create_test_req(drm, drm_output, &mode_blob, &flags);
+
+  if (!req)
+    goto done;
+
+  int ret = liftoff_output_apply(drm_output->liftoff_output, req, flags, NULL);
+
+  if (ret < 0) {
+    VT_TRACE(backend->comp->log,
+             "DRM: libliftoff test allocation failed for output %p: %s",
+             (void *)output, strerror(-ret));
+
+    goto done_req;
+  }
+
+  if (drmModeAtomicCommit(drm->drm_fd, req, flags, NULL) != 0) {
+    VT_TRACE(backend->comp->log,
+             "DRM: atomic TEST_ONLY failed for output %p: %s", (void *)output,
+             strerror(errno));
+
+    goto done_req;
+  }
+
+  for (size_t i = 0; i < layer_count; i++) {
+    struct drm_liftoff_test_layer_t *test = &test_layers[i];
+
+    if (!test->liftoff_layer || test->fb.id == 0) {
+      layers[i].accepted = false;
+
+      VT_TRACE(backend->comp->log,
+               "DRM: layer %zu surface=%p rejected after liftoff test: "
+               "no valid liftoff layer or framebuffer.",
+               i, (void *)layers[i].surface);
+
+      continue;
+    }
+
+    layers[i].accepted = !liftoff_layer_needs_composition(test->liftoff_layer);
+
+    VT_TRACE(backend->comp->log,
+             "DRM: layer test surface=%p accepted=%d "
+             "src=[%d,%d %ux%u] dst=[%d,%d %ux%u]",
+             (void *)layers[i].surface, layers[i].accepted, layers[i].src.x,
+             layers[i].src.y, layers[i].src.width, layers[i].src.height,
+             layers[i].dst.x, layers[i].dst.y, layers[i].dst.width,
+             layers[i].dst.height);
+  }
+
+  ok = true;
+done_req:
+  if (mode_blob != 0)
+    drmModeDestroyPropertyBlob(drm->drm_fd, mode_blob);
+
+  drmModeAtomicFree(req);
+
+done:
+  drm_liftoff_testing_finish(drm, test_layers, layer_count);
+
+  return ok;
+}
 
 bool backend_build_surface_feedback(struct vt_backend_t         *backend,
                                     struct vt_surface_t         *surface,

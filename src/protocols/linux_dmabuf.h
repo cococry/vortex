@@ -39,8 +39,8 @@ struct vt_output_t;
 
 struct vt_linux_dmabuf_v1_surface_state_t {
   struct vt_surface_addon_t addon;
-  struct vt_surface_t *surf;
-  struct wl_list       link;
+  struct vt_surface_t      *surf;
+  struct wl_list            link;
 
   struct vt_output_t *feedback_output;
   uint64_t            feedback_generation;
@@ -64,4 +64,3 @@ void vt_proto_linux_dmabuf_v1_forget_output_feedback(
     struct vt_output_t *output);
 struct vt_buffer_t *
 vt_proto_linux_dmabuf_v1_get_buffer(struct wl_resource *res);
-

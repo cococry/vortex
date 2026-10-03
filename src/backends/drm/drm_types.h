@@ -23,16 +23,16 @@
 #pragma once
 
 #include "core/buffer.h"
-#include "core/scene.h"
 #include "core/core_types.h"
+#include "core/scene.h"
 #include "core/session.h"
 #include "props.h"
 #include <gbm.h>
 #include <libliftoff.h>
+#include <wayland-server-core.h>
+#include <wayland-util.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
-#include <wayland-util.h>
-#include <wayland-server-core.h>
 
 struct drm_backend_master_state_t;
 struct drm_backend_state_t;
@@ -58,7 +58,7 @@ struct drm_scanout_buffer_t {
 
 struct drm_scanout_layer_t {
   struct vt_surface_t        *surface;
-  struct drm_plane_t *plane;
+  struct drm_plane_t         *plane;
   struct drm_scanout_buffer_t scanout;
 
   struct vt_box_t src;
@@ -75,7 +75,9 @@ struct drm_plane_t {
   struct wl_array formats;
 
   struct vt_output_cursor_size_t *cursor_sizes;
-  size_t                           n_cursor_sizes;
+  size_t                          n_cursor_sizes;
+
+  struct liftoff_plane *liftoff_plane;
 };
 
 struct drm_crtc_t {
@@ -111,7 +113,7 @@ struct drm_kms_commit_t {
   struct drm_output_state_t *output;
 
   struct drm_kms_plane_state_t *planes;
-  size_t                         plane_count;
+  size_t                        plane_count;
 
   bool active;
   bool modeset;
@@ -166,7 +168,7 @@ struct drm_backend_state_t {
 
   drmModeRes *res;
 
-  struct liftoff_device* liftoff_dev;
+  struct liftoff_device *liftoff_dev;
 };
 
 struct drm_backend_master_state_t {
@@ -183,7 +185,7 @@ struct drm_backend_master_state_t {
 };
 
 struct drm_output_state_t {
-  struct vt_output_t          *base;
+  struct vt_output_t         *base;
   struct drm_backend_state_t *drm_backend;
   struct drm_crtc_t          *crtc;
 
@@ -210,8 +212,8 @@ struct drm_output_state_t {
   uint32_t        conn_props[VT_DRM_CONNECTOR__COUNT];
 
   struct liftoff_output *liftoff_output;
-  
+
   struct liftoff_layer **liftoff_layers;
-  size_t liftoff_layers_len;
-  size_t liftoff_layers_cap;
+  size_t                 liftoff_layers_len;
+  size_t                 liftoff_layers_cap;
 };
