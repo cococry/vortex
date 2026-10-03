@@ -416,32 +416,6 @@ static void _log_dmabuf_tranche(struct vt_compositor_t           *comp,
   VT_TRACE(comp->log,
            "=========================================================== ");
 }
-
-static void _log_drm_format_array(struct vt_compositor_t *comp,
-                                  const char *name,
-                                  const struct wl_array *formats) {
-  VT_TRACE(comp->log, "========== %s ==========", name);
-
-  const struct vt_drm_format_t *fmt;
-  wl_array_for_each(fmt, formats) {
-    if (fmt->format != DRM_FORMAT_ARGB8888)
-      continue;
-
-    VT_TRACE(comp->log, "AR24: %zu modifiers",
-             vt_drm_format_mod_count(fmt));
-
-    const struct vt_drm_format_modifier_t *mod;
-    wl_array_for_each(mod, &fmt->mods) {
-      char mod_str[256];
-      _modifier_to_str(mod->mod, mod_str, sizeof(mod_str));
-
-      VT_TRACE(comp->log, "  - %s%s",
-               mod_str,
-               mod->_egl_ext_only ? " (EXT_ONLY)" : "");
-    }
-  }
-}
-
 static bool
 _drm_build_dmabuf_feedback(struct drm_backend_master_state_t *master,
                            struct vt_dmabuf_feedback_t       *feedback) {
@@ -1733,7 +1707,19 @@ static void _drm_on_drm_change(struct wl_listener *listener, void *data) {
 
     VT_TRACE(master->comp->log, "Rescanning DRM connectors on %s.",
              drm->dev->path);
-    _drm_scan_connectors(drm);
+
+    if (_drm_scan_connectors(drm) && master->comp->have_proto_dmabuf) {
+      /* Connector changes need re-evaluation of per-output and per-surface
+       * feedback*/
+      struct vt_output_t *output;
+      wl_list_for_each(output, &drm->outputs, link_local) {
+        vt_proto_linux_dmabuf_v1_invalidate_output_feedback(output);
+      }
+      struct vt_surface_t *surface;
+      wl_list_for_each(surface, &master->comp->surfaces, link) {
+        vt_proto_linux_dmabuf_v1_update_surface_feedback(surface);
+      }
+    }
     break;
   }
 }
@@ -1789,6 +1775,8 @@ static bool _drm_destroy_output_for_device(struct drm_backend_state_t *drm,
 
   wl_list_remove(&output->link_local);
   wl_list_remove(&output->link_global);
+
+  vt_proto_linux_dmabuf_v1_forget_output_feedback(output);
 
   return true;
 }
@@ -2788,7 +2776,6 @@ bool backend_test_output_layers_drm(
   return true;
 
 reject:
-  vt_proto_linux_dmabuf_v1_set_surface_feedback(layer->surface);
   return true;
 }
 
@@ -2829,12 +2816,6 @@ bool backend_build_surface_feedback(struct vt_backend_t         *backend,
              surface, output);
     return false;
   }
-
-  _log_drm_format_array(drm_master->comp, "Renderer sampling formats",
-                        &drm_master->main_drm->sampling_formats);
-
-  _log_drm_format_array(drm_master->comp, "Primary plane formats",
-                        &drm_output->crtc->plane_primary->formats);
 
   vt_drm_format_array_intersect(&scanout_tranche->formats,
                                 &drm_master->main_drm->sampling_formats,

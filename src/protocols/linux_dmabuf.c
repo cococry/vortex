@@ -58,6 +58,16 @@ struct vt_linux_dmabuf_v1_packed_feedback_t {
   struct vt_linux_dmabuf_v1_packed_feedback_tranche_t tranches[];
 };
 
+struct vt_linux_dmabuf_v1_output_feedback_t {
+  struct wl_list link;
+
+  struct vt_output_t *output;
+  uint64_t            generation;
+  bool                built;
+
+  struct vt_linux_dmabuf_v1_packed_feedback_t *feedback;
+};
+
 struct vt_linux_dmabuf_v1_packed_feedback_entry_t {
   uint32_t format;
   uint32_t pad; // unused
@@ -84,6 +94,7 @@ struct vt_proto_linux_dmabuf_v1_t {
   int32_t                                      fd_main_dev;
 
   struct wl_list dmabuf_surface_states;
+  struct wl_list output_feedbacks;
 };
 
 struct vt_linux_dmabuf_v1_params_t {
@@ -167,6 +178,20 @@ static bool _linux_dmabuf_pack_feedback(
 static void _linux_dmabuf_free_feedback(
     struct vt_linux_dmabuf_v1_packed_feedback_t *packed);
 
+static struct vt_linux_dmabuf_v1_output_feedback_t *
+_linux_dmabuf_output_feedback_get_or_create(struct vt_output_t *output, bool create);
+
+static void _linux_dmabuf_output_feedback_destroy(
+    struct vt_linux_dmabuf_v1_output_feedback_t *cache);
+
+static bool _linux_dmabuf_output_feedback_build(
+    struct vt_linux_dmabuf_v1_output_feedback_t *cache,
+    struct vt_surface_t                         *surface);
+
+static struct vt_linux_dmabuf_v1_packed_feedback_t *
+_linux_dmabuf_surface_packed_feedback(
+    struct vt_linux_dmabuf_v1_surface_state_t *state);
+
 static void
 _linux_dmabuf_close_params(struct vt_linux_dmabuf_v1_params_t *params);
 
@@ -222,11 +247,6 @@ _linux_dmabuf_surface_destroy_addon(struct vt_surface_addon_t *addon)
     struct wl_list *link = wl_resource_get_link(resource);
     wl_list_remove(link);
     wl_list_init(link);
-  }
-
-  if (state->feedback) {
-    _linux_dmabuf_free_feedback(state->feedback);
-    state->feedback = NULL;
   }
 
   /* Remove from protocol-wide state list. */
@@ -311,6 +331,14 @@ void _proto_linux_dmabuf_v1_destroy(struct vt_proto_linux_dmabuf_v1_t *dmabuf) {
     vt_surface_addon_destroy(&surface->addon);
   }
 
+  /* Destroy per-output feedbacks */
+  struct vt_linux_dmabuf_v1_output_feedback_t *output_feedback;
+  struct vt_linux_dmabuf_v1_output_feedback_t *output_feedback_tmp;
+  wl_list_for_each_safe(output_feedback, output_feedback_tmp,
+                        &dmabuf->output_feedbacks, link) {
+    _linux_dmabuf_output_feedback_destroy(output_feedback);
+  }
+
   vt_drm_format_array_free(&dmabuf->default_formats);
 
   /* 4. Close main device FD if valid */
@@ -339,15 +367,16 @@ void _proto_linux_dmabuf_v1_handle_dsp_destroy(struct wl_listener *listener,
   VT_TRACE(dmabuf->comp->log,
            "linux_dmabuf.display_destroy: compositor display destroyed.");
 }
-// ===================================================
-// ============== PER-BUFFER PROTOCOL ================
-// ===================================================
 
 void _linux_dmabuf_v1_destroy(struct wl_client   *client,
                               struct wl_resource *resource) {
   /* Destroy the linux-dmabuf global resource */
   wl_resource_destroy(resource);
 }
+
+// ===================================================
+// ============== PER-BUFFER PROTOCOL ================
+// ===================================================
 
 void _linux_dmabuf_v1_create_params(struct wl_client   *client,
                                     struct wl_resource *resource,
@@ -451,14 +480,23 @@ void _linux_dmabuf_v1_get_surface_feedback(struct wl_client   *client,
       res_feedback, &_dmabuf_feedback_impl, NULL,
       _linux_dmabuf_v1_surf_feedback_handle_res_destroy);
 
-  /* 5. Track resource in DMA-BUF surface list */
+  /* 5. Update the surface's current feedback before inserting the feedback
+   * resource to the per-surface list, which would double send the feedback,
+   * because step 7 already sends the feedback of this surface. */
+  if (!vt_proto_linux_dmabuf_v1_update_surface_feedback(surf)) {
+    VT_WARN(_proto->comp->log,
+            "Failed to update DMABUF feedback for surface %p; using default "
+            "feedback.",
+            surf);
+  }
+
+  /* 6. Track resource in DMA-BUF surface list */
   wl_list_insert(&dmabuf_surf->res_feedback,
                  wl_resource_get_link(res_feedback));
 
-  /* 6. Send feedback for surface or fallback to default */
-  _linux_dmabuf_send_feedback(res_feedback, dmabuf_surf->feedback
-                                                ? dmabuf_surf->feedback
-                                                : _proto->default_feedback);
+  /* 7. Send the current output cache, or the default fallback. */
+  _linux_dmabuf_send_feedback(
+      res_feedback, _linux_dmabuf_surface_packed_feedback(dmabuf_surf));
 
   VT_TRACE(_proto->comp->log,
            "linux_dmabuf.get_surface_feedback: sent feedback to surface %p "
@@ -1212,6 +1250,108 @@ void _linux_dmabuf_free_feedback(
            "linux_dmabuf.free_feedback: freed packed feedback %p.", packed);
 }
 
+static struct vt_linux_dmabuf_v1_output_feedback_t *
+_linux_dmabuf_output_feedback_get_or_create(struct vt_output_t *output, bool create) {
+  if (!_proto || !output)
+    return NULL;
+
+
+  struct vt_linux_dmabuf_v1_output_feedback_t *cache;
+  wl_list_for_each(cache, &_proto->output_feedbacks, link) {
+    if (cache->output == output)
+      return cache;
+  }
+
+  if (!create)
+    return NULL;
+
+  cache = VT_ALLOC(_proto->comp, sizeof(*cache));
+
+  if (!cache) {
+    VT_ERROR(_proto->comp->log,
+             "Failed to allocate output DMABUF feedback cache.");
+    return NULL;
+  }
+
+  cache->output = output;
+  cache->generation = 1;
+  wl_list_insert(&_proto->output_feedbacks, &cache->link);
+
+  return cache;
+}
+
+static void _linux_dmabuf_output_feedback_destroy(
+    struct vt_linux_dmabuf_v1_output_feedback_t *cache) {
+  if (!cache)
+    return;
+
+  if (cache->feedback)
+    _linux_dmabuf_free_feedback(cache->feedback);
+
+  wl_list_remove(&cache->link);
+  /*free(cache); (arena allocated)*/
+}
+
+static bool _linux_dmabuf_output_feedback_build(
+    struct vt_linux_dmabuf_v1_output_feedback_t *cache,
+    struct vt_surface_t                         *surface) {
+  assert(cache && cache->output && surface && surface->comp);
+
+  if (cache->built)
+    return true;
+
+  /* A failed build is cached as the default fallback until the output is
+   * invalidated. This prevents a bad/transient candidate from rebuilding and
+   * repacking feedback on every surface commit. */
+  cache->built = true;
+
+  struct vt_backend_t *backend = surface->comp->backend;
+  if (!backend || !backend->impl.build_surface_feedback)
+    return true;
+
+  struct vt_dmabuf_feedback_t *feedback =
+      vt_dmabuf_feedback_create(surface->comp, NULL);
+  if (!feedback)
+    return false;
+
+  if (!backend->impl.build_surface_feedback(backend, surface, cache->output,
+                                            feedback)) {
+    vt_dmabuf_feedback_fini(feedback);
+    return false;
+  }
+
+  struct vt_linux_dmabuf_v1_packed_feedback_t *packed = NULL;
+  if (!_linux_dmabuf_pack_feedback(feedback, &packed)) {
+    vt_dmabuf_feedback_fini(feedback);
+    return false;
+  }
+
+  vt_dmabuf_feedback_fini(feedback);
+  cache->feedback = packed;
+
+  return true;
+}
+
+static struct vt_linux_dmabuf_v1_packed_feedback_t *
+_linux_dmabuf_surface_packed_feedback(
+    struct vt_linux_dmabuf_v1_surface_state_t *state) {
+  if (!_proto || !state)
+    return NULL;
+
+  if (!state->feedback_output)
+    return _proto->default_feedback;
+
+  struct vt_linux_dmabuf_v1_output_feedback_t *cache =
+      _linux_dmabuf_output_feedback_get_or_create(state->feedback_output, false);
+
+  if (!cache || cache->generation != state->feedback_generation ||
+      !cache->feedback) {
+    return _proto->default_feedback;
+  }
+
+  return cache->feedback;
+}
+
 void _linux_dmabuf_close_params(struct vt_linux_dmabuf_v1_params_t *params) {
   /* 1. Validate params */
   if (!params) {
@@ -1461,6 +1601,7 @@ bool vt_proto_linux_dmabuf_v1_init(
 
   /* 4. Initialize surface list */
   wl_list_init(&_proto->dmabuf_surface_states);
+  wl_list_init(&_proto->output_feedbacks);
 
   /* 5. Attach display destroy listener */
   _proto->dsp_destroy.notify = _proto_linux_dmabuf_v1_handle_dsp_destroy;
@@ -1491,66 +1632,114 @@ vt_proto_linux_dmabuf_v1_from_buffer_res(struct wl_resource *res) {
   return buf;
 }
 
-bool vt_proto_linux_dmabuf_v1_set_surface_feedback(struct vt_surface_t *surf) {
+bool vt_proto_linux_dmabuf_v1_update_surface_feedback(struct vt_surface_t *surf) {
   assert(surf && surf->comp);
 
-  struct vt_linux_dmabuf_v1_surface_state_t *dmabuf_surf =
-      _linux_dmabuf_surface_from_surf(surf);
-  if (dmabuf_surf == NULL) {
+  if (!_proto)
     return false;
-  }
 
-  if (!surf->comp->backend->impl.build_surface_feedback)
-    return false;
+  /* Scene/output changes should not create protocol state for surfaces whose
+   * clients never requested surface feedback. */
+  struct vt_linux_dmabuf_v1_surface_state_t *dmabuf_surf =
+      surf->proto_state.linux_dmabuf_v1;
+  if (!dmabuf_surf)
+    return true;
 
   struct vt_linux_dmabuf_v1_packed_feedback_t *packed_feedback =
       _proto->default_feedback;
-  bool packed = false;
 
   struct vt_output_t *primary_output = NULL;
-  if (surf->scene_node) {
+
+  /* Before the first buffer is applied there is no useful surface geometry to
+   * select an output from, so we don't compute primary_output and thus use the
+   * default feedback */
+  if (surf->scene_node && surf->applied.width > 0 && surf->applied.height > 0) {
     primary_output = vt_scene_node_primary_output(surf->comp, surf->scene_node);
   }
 
-  if (!primary_output) {
-    VT_WARN(surf->comp->log, "Cannot get primary output of surface %p; Will "
-                             "send default fallback feedback for surface.");
-  } else {
-    struct vt_dmabuf_feedback_t *feedback =
-        vt_dmabuf_feedback_create(surf->comp, NULL);
-    if (!feedback) {
-      VT_ERROR(surf->comp->log, "Failed to create surface DMABUF feedback");
-      return false;
-    }
-    if (!surf->comp->backend->impl.build_surface_feedback(
-            surf->comp->backend, surf, primary_output, feedback)) {
-      VT_ERROR(surf->comp->log, "Failed to build surface DMABUF feedback");
-      vt_dmabuf_feedback_fini(feedback);
-      return false;
-    }
+  uint64_t generation = 0;
+  bool     success = true;
 
-    if (!_linux_dmabuf_pack_feedback(feedback, &packed_feedback)) {
-      VT_ERROR(surf->comp->log, "Failed to pack surface DMABUF feedback");
-      vt_dmabuf_feedback_fini(feedback);
-      return false;
+  if (primary_output) {
+    struct vt_linux_dmabuf_v1_output_feedback_t *cache =
+        _linux_dmabuf_output_feedback_get_or_create(primary_output, true);
+
+    if (!cache) {
+      /* Use default feedback on failure */
+      primary_output = NULL;
+      success = false;
+    } else {
+      if (!cache->built &&
+          !_linux_dmabuf_output_feedback_build(cache, surf)) {
+        VT_WARN(surf->comp->log,
+                "Failed to build cached DMABUF feedback for output %p; using "
+                "default feedback.",
+                primary_output);
+      }
+
+      generation = cache->generation;
+      if (cache->feedback)
+        packed_feedback = cache->feedback;
     }
-
-    vt_dmabuf_feedback_fini(feedback);
-
-    packed = true;
   }
 
-  if (dmabuf_surf->feedback)
-    _linux_dmabuf_free_feedback(dmabuf_surf->feedback);
+  if (dmabuf_surf->feedback_output == primary_output &&
+      dmabuf_surf->feedback_generation == generation) {
+    return success;
+  }
 
-  dmabuf_surf->feedback = packed ? packed_feedback : NULL;
+  dmabuf_surf->feedback_output = primary_output;
+  dmabuf_surf->feedback_generation = generation;
 
   struct wl_resource *resource;
   wl_resource_for_each(resource, &dmabuf_surf->res_feedback) {
     _linux_dmabuf_send_feedback(resource, packed_feedback);
   }
 
-  return true;
+  return success;
+}
+
+void vt_proto_linux_dmabuf_v1_invalidate_output_feedback(
+    struct vt_output_t *output) {
+  if (!_proto || !output)
+    return;
+
+  struct vt_linux_dmabuf_v1_output_feedback_t *cache =
+      _linux_dmabuf_output_feedback_get_or_create(output, false);
+  if (!cache)
+    return;
+
+  if (cache->feedback) {
+    _linux_dmabuf_free_feedback(cache->feedback);
+    cache->feedback = NULL;
+  }
+
+  cache->built = false;
+  cache->generation++;
+  if (cache->generation == 0)
+    cache->generation = 1;
+}
+
+void vt_proto_linux_dmabuf_v1_forget_output_feedback(
+    struct vt_output_t *output) {
+  if (!_proto || !output)
+    return;
+
+  struct vt_linux_dmabuf_v1_output_feedback_t *cache =
+      _linux_dmabuf_output_feedback_get_or_create(output, false);
+  if (cache)
+    _linux_dmabuf_output_feedback_destroy(cache);
+
+  struct vt_linux_dmabuf_v1_surface_state_t *state;
+  wl_list_for_each(state, &_proto->dmabuf_surface_states, link) {
+    if (state->feedback_output != output || !state->surf)
+      continue;
+
+    state->feedback_output = NULL;
+    /* for re-eval of feedback */
+    state->feedback_generation = UINT64_MAX;
+    vt_proto_linux_dmabuf_v1_update_surface_feedback(state->surf);
+  }
 }
 
 struct vt_buffer_t *

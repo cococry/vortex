@@ -238,6 +238,9 @@ static bool _content_update_apply_one(struct vt_content_update_t *cu) {
 
   vt_surface_set_mapped(surf, surf->current_buf_use != NULL);
 
+  if (surf->proto_state.linux_dmabuf_v1)
+    vt_proto_linux_dmabuf_v1_update_surface_feedback(surf);
+
   bool damaged = vt_scene_node_damage_whole(surf->comp, surf->scene_node);
   assert(damaged);
 

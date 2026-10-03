@@ -1173,8 +1173,8 @@ bool renderer_setup_renderable_output_egl(struct vt_renderer_t *r,
 
   vt_comp_schedule_repaint(r->comp, output);
 
-  VT_TRACE(r->comp->log, "Created surface %p (%ux%u)", egl_surf, output->width,
-           output->height);
+  VT_TRACE(r->comp->log, "Created EGL render surface %p for output %p (%ux%u)",
+           egl_surf, output, output->width, output->height);
   return true;
 }
 

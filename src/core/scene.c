@@ -56,17 +56,7 @@ static void _composite_pass(struct vt_scene_t  *scene,
 static void _scene_node_get_size(struct vt_scene_node_t *node, uint32_t *o_w,
                                  uint32_t *o_h);
 
-static bool _box_intersect_box(float x1, float y1, float w1, float h1, float x2,
-                               float y2, float w2, float h2) {
-  return x1 + w1 >= x2 && x1 <= x2 + w2 && y1 + h1 >= y2 && y1 <= y2 + h2;
-}
-
-static void sceneprintindent(int indent) {
-  for (int i = 0; i < indent; i++)
-    printf("  ");
-  for (int i = 0; i < indent; i++)
-    printf("━");
-}
+static void _scene_node_update_surface_feedback(struct vt_scene_node_t *node);
 
 static struct vt_output_layer_state_t *
 _scene_push_layer(struct vt_scene_t *scene) {
@@ -114,8 +104,7 @@ static bool _scene_node_on_output(struct vt_scene_node_t *node,
   struct vt_box_t *box = vt_scene_node_get_global_bounds(node);
   if (!box) {
     VT_TRACE(output->backend->comp->log,
-             "SCENE: node_on_output: node=%p has no global bounds",
-             node);
+             "SCENE: node_on_output: node=%p has no global bounds", node);
     return false;
   }
 
@@ -313,6 +302,18 @@ static void _scene_node_get_size(struct vt_scene_node_t *node, uint32_t *o_w,
   }
 }
 
+static void _scene_node_update_surface_feedback(struct vt_scene_node_t *node) {
+  if (!node)
+    return;
+
+  if (node->surf && node->surf->proto_state.linux_dmabuf_v1)
+    vt_proto_linux_dmabuf_v1_update_surface_feedback(node->surf);
+
+  for (uint32_t i = 0; i < node->child_count; i++) {
+    _scene_node_update_surface_feedback(node->childs[i]);
+  }
+}
+
 struct vt_scene_node_t *
 _scene_node_create_rect(struct vt_compositor_t *c, float x, float y, float w,
                         float h, uint32_t color,
@@ -419,7 +420,13 @@ bool vt_scene_node_reparent(struct vt_compositor_t *c,
     vt_scene_node_remove_child(node->parent, node);
   }
 
-  return vt_scene_node_add_child(c, new_parent, node);
+  if (!vt_scene_node_add_child(c, new_parent, node))
+    return false;
+
+  vt_scene_node_mark_geometry_dirty(node);
+  _scene_node_update_surface_feedback(node);
+
+  return true;
 }
 
 bool vt_scene_node_add_child(struct vt_compositor_t *c,
@@ -503,8 +510,8 @@ void vt_scene_render(struct vt_scene_t *scene, struct vt_output_t *output) {
   struct vt_renderer_t *r = scene->renderer;
 
   bool need_compositing = false;
-  for(size_t i = 0; i < scene->n_layers; i++) {
-    if(!scene->layers[i].accepted) {
+  for (size_t i = 0; i < scene->n_layers; i++) {
+    if (!scene->layers[i].accepted) {
       need_compositing = true;
       break;
     }
@@ -537,6 +544,7 @@ void vt_scene_node_set_position(struct vt_scene_node_t *node, int32_t x,
   node->y = y;
 
   vt_scene_node_mark_geometry_dirty(node);
+  _scene_node_update_surface_feedback(node);
 }
 
 void vt_scene_node_mark_geometry_dirty(struct vt_scene_node_t *node) {
