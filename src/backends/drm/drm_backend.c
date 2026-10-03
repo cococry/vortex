@@ -32,11 +32,11 @@
 #include <linux/vt.h>
 #include <pthread.h>
 #include <stdarg.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <stdlib.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <xkbcommon/xkbcommon-keysyms.h>
@@ -71,6 +71,7 @@
 
 #include "props.h"
 
+#include <libliftoff.h>
 #include <linux/input-event-codes.h>
 
 #define _SUBSYS_NAME "DRM"
@@ -116,22 +117,22 @@ static bool _drm_handle_frame_for_device(struct drm_backend_state_t *drm,
 
 static void _drm_update_tearing_cap(struct drm_backend_state_t *drm);
 
-static bool _drm_verify_caps(struct drm_backend_state_t *drm);
-static bool _drm_resources_init(struct drm_backend_state_t *drm);
-static bool _drm_scan_connectors(struct drm_backend_state_t *drm);
+static bool               _drm_verify_caps(struct drm_backend_state_t *drm);
+static bool               _drm_resources_init(struct drm_backend_state_t *drm);
+static bool               _drm_scan_connectors(struct drm_backend_state_t *drm);
 static struct drm_crtc_t *_drm_pick_crtc(struct drm_backend_state_t *drm,
-                                         drmModeConnector *conn);
+                                         drmModeConnector           *conn);
 static void _drm_assign_crtc_planes(struct drm_backend_state_t *drm);
 static bool _drm_output_sync_refresh(struct drm_output_state_t *drm_output);
-static bool _drm_plane_has_format(struct drm_plane_t *plane,
-                                  uint32_t format, uint64_t modifier);
+static bool _drm_plane_has_format(struct drm_plane_t *plane, uint32_t format,
+                                  uint64_t modifier);
 static void _drm_on_drm_change(struct wl_listener *listener, void *data);
 
 static bool _added_global_keybinds = false;
 
-static void _drm_scanout_finish(struct drm_output_state_t *drm_output,
+static void _drm_scanout_finish(struct drm_output_state_t   *drm_output,
                                 struct drm_scanout_buffer_t *scanout,
-                                int release_fence_fd) {
+                                int                          release_fence_fd) {
   if (!drm_output || !drm_output->drm_backend || !scanout)
     return;
 
@@ -152,7 +153,7 @@ static void _drm_scanout_finish(struct drm_output_state_t *drm_output,
 }
 
 static void _drm_scanout_layers_finish(struct drm_output_state_t *drm_output,
-                                       struct wl_array *layers,
+                                       struct wl_array           *layers,
                                        int release_fence_fd) {
   if (!drm_output || !layers)
     return;
@@ -205,8 +206,7 @@ static void _drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec,
 
   struct drm_output_state_t *drm_output =
       BACKEND_DATA(output, struct drm_output_state_t);
-  if (!drm_output || !drm_output->flip_inflight ||
-      !drm_output->pending_valid) {
+  if (!drm_output || !drm_output->flip_inflight || !drm_output->pending_valid) {
     VT_WARN(output->backend->comp->log,
             "Ignoring page flip without pending scanout state.");
     return;
@@ -400,8 +400,7 @@ static void _log_dmabuf_tranche(struct vt_compositor_t           *comp,
     const char *format_name = drmGetFormatName(fmt->format);
 
     VT_TRACE(comp->log, "        • %s (%4.4s), %zu modifiers:",
-             format_name ? format_name : "UNKNOWN",
-             _fourcc_to_str(fmt->format),
+             format_name ? format_name : "UNKNOWN", _fourcc_to_str(fmt->format),
              vt_drm_format_mod_count(fmt));
 
     struct vt_drm_format_modifier_t *mod;
@@ -507,8 +506,8 @@ _drm_build_dmabuf_feedback(struct drm_backend_master_state_t *master,
       }
     } else {
       if (r->impl.query_dmabuf_formats) {
-        if (!r->impl.query_dmabuf_formats(
-                master->comp, drm->gbm_dev, &drm->sampling_formats)) {
+        if (!r->impl.query_dmabuf_formats(master->comp, drm->gbm_dev,
+                                          &drm->sampling_formats)) {
           VT_WARN(
               master->comp->log,
               "Cannot query DMABUF formats for tranche device '%s' from EGL.",
@@ -540,7 +539,8 @@ _drm_build_dmabuf_feedback(struct drm_backend_master_state_t *master,
     _log_dmabuf_tranche(master->comp, main_tranche, dev->path);
   }
 
-  struct vt_dmabuf_tranche_t* fallback_tranche = vt_dmabuf_feedback_add_tranche(feedback, feedback->dev_main, 0);
+  struct vt_dmabuf_tranche_t *fallback_tranche =
+      vt_dmabuf_feedback_add_tranche(feedback, feedback->dev_main, 0);
   wl_array_init(&fallback_tranche->formats);
 
   struct vt_drm_format_t fallback_fmt = {0};
@@ -640,7 +640,6 @@ static bool _drm_suspend(struct drm_backend_state_t *backend) {
   return true;
 }
 
-
 static bool _drm_resume(struct drm_backend_state_t *backend) {
   if (!backend || !backend->comp || backend->drm_fd < 0)
     return false;
@@ -681,7 +680,6 @@ static bool _drm_resume(struct drm_backend_state_t *backend) {
 
   return true;
 }
-
 
 static int _drm_dispatch(int fd, uint32_t mask, void *data) {
   if (!data || fd < 0)
@@ -766,10 +764,29 @@ static bool _drm_init_for_device(struct vt_compositor_t     *comp,
 
   _drm_update_tearing_cap(drm);
 
+  int liftoff_fd = dup(drm->drm_fd);
+  if (liftoff_fd < 0) {
+    VT_ERROR(comp->log, "Failed to dup DRM fd for libliftoff.");
+    return false;
+  }
+
+  drm->liftoff_dev = liftoff_device_create(liftoff_fd);
+  if (!drm->liftoff_dev) {
+    close(liftoff_fd);
+    VT_ERROR(comp->log, "Failed to create liftoff device.");
+    return false;
+  }
+
+  int ret = liftoff_device_register_all_planes(drm->liftoff_dev);
+  if (ret < 0) {
+    VT_ERROR(comp->log, "Failed to register liftoff planes: %s",
+             strerror(-ret));
+    return false;
+  }
+
   /* Renderer is only initialized on the main DRM device */
-  if (!drm_master->main_drm &&
-      comp->renderer->impl.is_handle_renderable(comp->renderer,
-                                                drm->native_handle)) {
+  if (!drm_master->main_drm && comp->renderer->impl.is_handle_renderable(
+                                   comp->renderer, drm->native_handle)) {
     comp->renderer->impl.init(comp->backend, comp->renderer,
                               drm->native_handle);
     drm_master->main_drm = drm;
@@ -783,7 +800,6 @@ static bool _drm_init_for_device(struct vt_compositor_t     *comp,
 
   return true;
 }
-
 
 static bool
 _drm_plane_init_cursor_sizes(struct drm_plane_t               *plane,
@@ -1068,16 +1084,13 @@ static bool _drm_init_crtc(struct vt_compositor_t *comp,
   if (!drm_kms_props_get_crtc(drm_fd, id, crtc->props)) {
     memset(crtc->props, 0, sizeof(crtc->props));
     VT_WARN(comp->log,
-            "Failed to populate DRM properties of CRTC with ID: %" PRIu32,
-            id);
+            "Failed to populate DRM properties of CRTC with ID: %" PRIu32, id);
   }
 
   return true;
 }
 
-
-static bool
-_drm_init_crtcs_and_planes(struct drm_backend_state_t *drm) {
+static bool _drm_init_crtcs_and_planes(struct drm_backend_state_t *drm) {
   if (!drm || !drm->comp)
     return false;
 
@@ -1085,7 +1098,7 @@ _drm_init_crtcs_and_planes(struct drm_backend_state_t *drm) {
 
   VT_TRACE(comp->log, "Initializing CRTCs");
 
-  drmModeRes* res = drmModeGetResources(drm->drm_fd);
+  drmModeRes *res = drmModeGetResources(drm->drm_fd);
 
   if (!res) {
     int err = errno;
@@ -1094,16 +1107,15 @@ _drm_init_crtcs_and_planes(struct drm_backend_state_t *drm) {
     return false;
   }
 
-	if (res->count_crtcs == 0) {
+  if (res->count_crtcs == 0) {
     VT_WARN(comp->log, "No CRTCs are available");
-		drmModeFreeResources(res);
-		return true;
-	}
+    drmModeFreeResources(res);
+    return true;
+  }
 
   size_t crtc_bytes = res->count_crtcs * sizeof(struct drm_crtc_t);
 
-  struct drm_crtc_t *crtcs =
-      wl_array_add(&drm->crtcs, crtc_bytes);
+  struct drm_crtc_t *crtcs = wl_array_add(&drm->crtcs, crtc_bytes);
 
   if (!crtcs) {
     VT_ERROR(comp->log, "Out of memory");
@@ -1264,7 +1276,7 @@ static const char *_drm_connector_type_name(uint32_t type) {
 }
 
 static bool _drm_plane_is_assigned(struct drm_backend_state_t *drm,
-                                   struct drm_plane_t *plane) {
+                                   struct drm_plane_t         *plane) {
   struct drm_crtc_t *crtc;
   wl_array_for_each(crtc, &drm->crtcs) {
     if (crtc->plane_primary == plane || crtc->plane_cursor == plane)
@@ -1275,13 +1287,12 @@ static bool _drm_plane_is_assigned(struct drm_backend_state_t *drm,
 }
 
 static struct drm_plane_t *_drm_pick_plane(struct drm_backend_state_t *drm,
-                                           struct drm_crtc_t *crtc,
-                                           uint32_t type) {
+                                           struct drm_crtc_t          *crtc,
+                                           uint32_t                    type) {
   struct drm_plane_t *fallback = NULL;
   struct drm_plane_t *plane;
   wl_array_for_each(plane, &drm->planes) {
-    if (plane->type != type ||
-        !(plane->possible_crtcs & (1u << crtc->index)) ||
+    if (plane->type != type || !(plane->possible_crtcs & (1u << crtc->index)) ||
         _drm_plane_is_assigned(drm, plane)) {
       continue;
     }
@@ -1305,7 +1316,7 @@ static void _drm_assign_crtc_planes(struct drm_backend_state_t *drm) {
 }
 
 static struct drm_crtc_t *_drm_find_crtc(struct drm_backend_state_t *drm,
-                                         uint32_t id) {
+                                         uint32_t                    id) {
   struct drm_crtc_t *crtc;
   wl_array_for_each(crtc, &drm->crtcs) {
     if (crtc->id == id)
@@ -1316,7 +1327,7 @@ static struct drm_crtc_t *_drm_find_crtc(struct drm_backend_state_t *drm,
 }
 
 static struct drm_crtc_t *_drm_pick_crtc(struct drm_backend_state_t *drm,
-                                         drmModeConnector *conn) {
+                                         drmModeConnector           *conn) {
   if (!drm || !conn)
     return NULL;
 
@@ -1340,8 +1351,7 @@ static struct drm_crtc_t *_drm_pick_crtc(struct drm_backend_state_t *drm,
 
     struct drm_crtc_t *crtc;
     wl_array_for_each(crtc, &drm->crtcs) {
-      if (!crtc->in_use &&
-          (encoder->possible_crtcs & (1u << crtc->index))) {
+      if (!crtc->in_use && (encoder->possible_crtcs & (1u << crtc->index))) {
         drmModeFreeEncoder(encoder);
         return crtc;
       }
@@ -1357,7 +1367,7 @@ static bool _drm_atomic_output_supported(struct drm_output_state_t *output) {
   if (!output || !output->crtc || !output->crtc->plane_primary)
     return false;
 
-  struct drm_crtc_t *crtc = output->crtc;
+  struct drm_crtc_t  *crtc = output->crtc;
   struct drm_plane_t *plane = crtc->plane_primary;
 
   return output->conn_props[VT_DRM_CONNECTOR_CRTC_ID] != 0 &&
@@ -1408,7 +1418,7 @@ static bool _drm_create_output_for_device(struct drm_backend_state_t *drm,
   drmModeModeInfo         *selected_drm = NULL;
 
   for (int j = 0; j < conn->count_modes; j++) {
-    drmModeModeInfo *drm_mode = &conn->modes[j];
+    drmModeModeInfo         *drm_mode = &conn->modes[j];
     struct vt_output_mode_t *mode =
         _drm_create_output_mode(&output->physical.modes, drm_mode);
 
@@ -1444,6 +1454,7 @@ static bool _drm_create_output_for_device(struct drm_backend_state_t *drm,
   drm_output->connector_seen = true;
 
   drm_output->crtc = _drm_pick_crtc(drm, conn);
+
   if (!drm_output->crtc) {
     VT_ERROR(comp->log, "Failed to find CRTC for connector %u",
              drm_output->conn_id);
@@ -1456,7 +1467,8 @@ static bool _drm_create_output_for_device(struct drm_backend_state_t *drm,
                                      drm_output->conn_props) ||
         !_drm_atomic_output_supported(drm_output)) {
       VT_WARN(comp->log,
-              "Atomic properties are incomplete for connector %u, using legacy KMS.",
+              "Atomic properties are incomplete for connector %u, using legacy "
+              "KMS.",
               drm_output->conn_id);
       drm->impl = &drm_kms_legacy_impl;
       _drm_update_tearing_cap(drm);
@@ -1491,11 +1503,10 @@ static bool _drm_create_output_for_device(struct drm_backend_state_t *drm,
     return false;
   }
 
-  VT_TRACE(comp->log,
-           "Acknowledged connector: %u, CRTC %u, mode %ux%u@%u (%p)",
-           drm_output->conn_id, drm_output->crtc->id,
-           drm_output->mode.hdisplay, drm_output->mode.vdisplay,
-           drm_output->mode.vrefresh, (void *)output);
+  VT_TRACE(comp->log, "Acknowledged connector: %u, CRTC %u, mode %ux%u@%u (%p)",
+           drm_output->conn_id, drm_output->crtc->id, drm_output->mode.hdisplay,
+           drm_output->mode.vdisplay, drm_output->mode.vrefresh,
+           (void *)output);
 
   output->needs_repaint = true;
   output->width = (uint32_t)selected->width;
@@ -1536,12 +1547,19 @@ static bool _drm_create_output_for_device(struct drm_backend_state_t *drm,
     return false;
   }
 
+  if (drm->impl == &drm_kms_atomic_impl) {
+    if (!(drm_output->liftoff_output =
+              liftoff_output_create(drm->liftoff_dev, drm_output->crtc->id))) {
+      VT_ERROR(comp->log, "Failed to create liftoff output for output.");
+      return false;
+    }
+  }
+
   /* TODO: Monitor position system */
   drm_master->x_ptr += output->width;
 
   return true;
 }
-
 
 static bool _drm_resources_init(struct drm_backend_state_t *drm) {
   if (!drm || !drm->comp || drm->drm_fd < 0)
@@ -1577,7 +1595,6 @@ static bool _drm_resources_init(struct drm_backend_state_t *drm) {
 
   return _drm_scan_connectors(drm);
 }
-
 
 static struct vt_output_t *_drm_find_output(struct drm_backend_state_t *drm,
                                             uint32_t conn_id) {
@@ -1618,7 +1635,7 @@ static bool _drm_scan_connectors(struct drm_backend_state_t *drm) {
   }
 
   for (int i = 0; i < drm->res->count_connectors; i++) {
-    uint32_t connector_id = drm->res->connectors[i];
+    uint32_t          connector_id = drm->res->connectors[i];
     drmModeConnector *conn = drmModeGetConnector(drm->drm_fd, connector_id);
     if (!conn)
       continue;
@@ -1656,8 +1673,8 @@ static bool _drm_scan_connectors(struct drm_backend_state_t *drm) {
         BACKEND_DATA(output, struct drm_output_state_t);
 
     if (!drm->comp->renderer->impl.setup_renderable_output ||
-        !drm->comp->renderer->impl.setup_renderable_output(
-            drm->comp->renderer, output)) {
+        !drm->comp->renderer->impl.setup_renderable_output(drm->comp->renderer,
+                                                           output)) {
       VT_ERROR(drm->comp->log, "Failed to setup renderable DRM output %p.",
                (void *)output);
       drmModeFreeConnector(conn);
@@ -1783,7 +1800,6 @@ static bool _drm_destroy_output_for_device(struct drm_backend_state_t *drm,
   return true;
 }
 
-
 static bool _drm_terminate_for_device(struct drm_backend_state_t *drm) {
   if (!drm || !drm->comp)
     return false;
@@ -1828,8 +1844,7 @@ static bool _drm_terminate_for_device(struct drm_backend_state_t *drm) {
 
   struct drm_backend_master_state_t *drm_master = NULL;
   if (drm->backend)
-    drm_master =
-        BACKEND_DATA(drm->backend, struct drm_backend_master_state_t);
+    drm_master = BACKEND_DATA(drm->backend, struct drm_backend_master_state_t);
 
   if (drm_master && drm_master->main_drm == drm && comp->renderer &&
       comp->renderer->impl.destroy) {
@@ -1949,7 +1964,7 @@ static bool _drm_output_sync_refresh(struct drm_output_state_t *drm_output) {
     return false;
 
   struct vt_output_t *output = drm_output->base;
-  uint32_t refresh = output->refresh_rate;
+  uint32_t            refresh = output->refresh_rate;
 
   if (drm_output->mode.hdisplay != output->width ||
       drm_output->mode.vdisplay != output->height)
@@ -1958,8 +1973,8 @@ static bool _drm_output_sync_refresh(struct drm_output_state_t *drm_output) {
   if (drm_output->mode.vrefresh * 1000 == refresh)
     return true;
 
-  drmModeConnector *conn = drmModeGetConnector(
-      drm_output->drm_backend->drm_fd, drm_output->conn_id);
+  drmModeConnector *conn =
+      drmModeGetConnector(drm_output->drm_backend->drm_fd, drm_output->conn_id);
   if (!conn)
     return false;
 
@@ -1994,8 +2009,8 @@ static bool _drm_output_sync_refresh(struct drm_output_state_t *drm_output) {
   return true;
 }
 
-static bool _drm_plane_has_format(struct drm_plane_t *plane,
-                                  uint32_t format, uint64_t modifier) {
+static bool _drm_plane_has_format(struct drm_plane_t *plane, uint32_t format,
+                                  uint64_t modifier) {
   if (!plane)
     return false;
 
@@ -2031,9 +2046,10 @@ static bool _drm_handle_frame_for_device(struct drm_backend_state_t *drm,
   }
 
   if (!_drm_output_sync_refresh(drm_output)) {
-    VT_WARN(comp->log,
-            "Requested DRM output refresh rate is not available on connector %u.",
-            drm_output->conn_id);
+    VT_WARN(
+        comp->log,
+        "Requested DRM output refresh rate is not available on connector %u.",
+        drm_output->conn_id);
   }
 
   VT_TRACE(comp->log, "Handling frame...");
@@ -2041,7 +2057,7 @@ static bool _drm_handle_frame_for_device(struct drm_backend_state_t *drm,
   drm_output->pending_layers = drm_output->layer_plan;
   wl_array_init(&drm_output->layer_plan);
 
-  bool primary_assigned = false;
+  bool                        primary_assigned = false;
   struct drm_scanout_layer_t *scanout_layer;
   wl_array_for_each(scanout_layer, &drm_output->pending_layers) {
     if (drm_output->crtc &&
@@ -2062,8 +2078,8 @@ static bool _drm_handle_frame_for_device(struct drm_backend_state_t *drm,
       return true;
     }
 
-    scanout_layer = wl_array_add(&drm_output->pending_layers,
-                                 sizeof(*scanout_layer));
+    scanout_layer =
+        wl_array_add(&drm_output->pending_layers, sizeof(*scanout_layer));
     if (!scanout_layer) {
       gbm_surface_release_buffer(drm_output->gbm_surf, bo);
       _drm_scanout_layers_finish(drm_output, &drm_output->pending_layers, -1);
@@ -2072,9 +2088,8 @@ static bool _drm_handle_frame_for_device(struct drm_backend_state_t *drm,
     }
 
     memset(scanout_layer, 0, sizeof(*scanout_layer));
-    scanout_layer->plane = drm_output->crtc
-                               ? drm_output->crtc->plane_primary
-                               : NULL;
+    scanout_layer->plane =
+        drm_output->crtc ? drm_output->crtc->plane_primary : NULL;
     scanout_layer->scanout.bo = bo;
     scanout_layer->scanout.surface = drm_output->gbm_surf;
     scanout_layer->src = (struct vt_box_t){
@@ -2100,8 +2115,8 @@ static bool _drm_handle_frame_for_device(struct drm_backend_state_t *drm,
     }
   }
 
-  size_t plane_count = drm_output->pending_layers.size /
-                       sizeof(struct drm_scanout_layer_t);
+  size_t plane_count =
+      drm_output->pending_layers.size / sizeof(struct drm_scanout_layer_t);
   if (plane_count == 0) {
     output->needs_repaint = true;
     return false;
@@ -2195,7 +2210,6 @@ static bool _drm_handle_frame_for_device(struct drm_backend_state_t *drm,
   return true;
 }
 
-
 static void _drm_update_tearing_cap(struct drm_backend_state_t *drm) {
   if (!drm || !drm->impl)
     return;
@@ -2263,7 +2277,6 @@ static bool _drm_verify_caps(struct drm_backend_state_t *drm) {
   return true;
 }
 
-
 // ===================================================
 // =================== PUBLIC API ====================
 // ===================================================
@@ -2283,6 +2296,8 @@ bool backend_init_drm(struct vt_backend_t *backend) {
   assert(drm_master);
 
   drm_master->comp = backend->comp;
+
+  liftoff_log_set_priority(LIFTOFF_DEBUG);
 
   wl_list_init(&drm_master->backends);
   wl_list_init(&drm_master->session_terminate_listener.link);
@@ -2423,7 +2438,6 @@ fail:
   return false;
 }
 
-
 bool backend_handle_frame_drm(struct vt_backend_t *backend,
                               struct vt_output_t  *output) {
   if (!backend || !backend->comp || !backend->user_data || !output ||
@@ -2516,6 +2530,64 @@ bool backend_is_dmabuf_importable_drm(struct vt_backend_t     *backend,
 
   return drm_prime_test_import(master->main_drm->drm_fd, attr);
 }
+
+static struct drm_plane_t *_drm_plane_from_id(struct drm_backend_state_t *drm,
+                                              uint32_t plane_id) {
+  struct drm_plane_t *plane;
+
+  wl_array_for_each(plane, &drm->planes) {
+    if (plane->id == plane_id)
+      return plane;
+  }
+
+  return NULL;
+}
+
+
+static bool _drm_liftoff_ensure_layers(struct drm_output_state_t *output,
+                                       size_t count) {
+  assert(output && output->liftoff_output);
+
+  if (count <= output->liftoff_layers_cap)
+    return true;
+
+  size_t old_cap = output->liftoff_layers_cap;
+  size_t new_cap = old_cap ? old_cap : 4;
+
+  while (new_cap < count)
+    new_cap *= 2;
+
+  struct liftoff_layer **layers =
+      realloc(output->liftoff_layers, new_cap * sizeof(*layers));
+  if (!layers)
+    return false;
+
+  output->liftoff_layers = layers;
+
+  for (size_t i = old_cap; i < new_cap; i++)
+    output->liftoff_layers[i] = NULL;
+
+  for (size_t i = old_cap; i < new_cap; i++) {
+    output->liftoff_layers[i] =
+        liftoff_layer_create(output->liftoff_output);
+
+    if (!output->liftoff_layers[i]) {
+      for (size_t j = old_cap; j < i; j++) {
+        liftoff_layer_destroy(output->liftoff_layers[j]);
+        output->liftoff_layers[j] = NULL;
+      }
+
+      return false;
+    }
+
+    liftoff_layer_set_property(output->liftoff_layers[i], "FB_ID", 0);
+  }
+
+  output->liftoff_layers_cap = new_cap;
+
+  return true;
+}
+
 
 bool backend_test_output_layers_drm(
     struct vt_backend_t *backend, struct vt_output_t *output,
@@ -2781,6 +2853,7 @@ reject:
   return true;
 }
 
+
 bool backend_build_surface_feedback(struct vt_backend_t         *backend,
                                     struct vt_surface_t         *surface,
                                     struct vt_output_t          *output,
@@ -2858,6 +2931,135 @@ bool backend_build_surface_feedback(struct vt_backend_t         *backend,
   return true;
 }
 
+static bool _drm_output_scanout_formats(struct drm_backend_state_t *drm,
+                                        struct drm_output_state_t  *drm_output,
+                                        struct wl_array            *formats) {
+  assert(drm && drm_output && drm_output->crtc && formats);
+  assert(drm_output->crtc->index < 32);
+
+  struct wl_array out;
+  wl_array_init(&out);
+
+  uint32_t crtc_mask = 1u << drm_output->crtc->index;
+
+  struct drm_plane_t *plane;
+  wl_array_for_each(plane, &drm->planes) {
+    if (!(plane->possible_crtcs & crtc_mask))
+      continue;
+
+    /* Normal surfaces shouldn't use cursor-plane capabilities. */
+    if (plane->type == DRM_PLANE_TYPE_CURSOR)
+      continue;
+
+    if (!vt_drm_format_array_union(&out, &out, &plane->formats)) {
+      vt_drm_format_array_free(&out);
+      return false;
+    }
+  }
+
+  if (vt_drm_format_array_count(&out) == 0) {
+    vt_drm_format_array_free(&out);
+    return false;
+  }
+
+  vt_drm_format_array_free(formats);
+  *formats = out;
+
+  return true;
+}
+
+bool backend_build_surface_feedback_drm(struct vt_backend_t         *backend,
+                                        struct vt_surface_t         *surface,
+                                        struct vt_output_t          *output,
+                                        struct vt_dmabuf_feedback_t *feedback) {
+
+  assert(backend && surface && output && feedback);
+
+  struct drm_backend_master_state_t *drm_master =
+      BACKEND_DATA(backend, struct drm_backend_master_state_t);
+
+  struct drm_output_state_t *drm_output =
+      BACKEND_DATA(output, struct drm_output_state_t);
+
+  assert(drm_master && drm_output && drm_master->main_drm &&
+         drm_master->main_drm->dev);
+
+  if (!drm_output->crtc || !drm_output->crtc->plane_primary) {
+    VT_ERROR(drm_master->comp->log,
+             "Cannot build surface feedback for surface %p, output %p; CRTC or"
+             "primary plane is not available",
+             surface, output);
+    return false;
+  }
+
+  feedback->dev_main = drm_master->main_drm->dev;
+
+  struct vt_dmabuf_tranche_t *scanout_tranche =
+      vt_dmabuf_feedback_add_tranche(feedback, drm_master->main_drm->dev,
+                                     VT_DMABUF_TRANCHE_FLAG_DIRECT_SCANOUT);
+
+  if (!scanout_tranche) {
+    VT_ERROR(drm_master->comp->log,
+             "Failed to create direct-scanout tranche for surface feedback of "
+             "surface %p, output %p",
+             surface, output);
+    return false;
+  }
+
+  struct wl_array scanout_formats;
+  wl_array_init(&scanout_formats);
+
+  if (!_drm_output_scanout_formats(drm_output->drm_backend, drm_output,
+                                   &scanout_formats)) {
+    VT_ERROR(drm_master->comp->log,
+             "Failed to collect scanout formats for output %p", output);
+    return false;
+  }
+
+  bool ok = vt_drm_format_array_intersect(
+      &scanout_tranche->formats, &drm_master->main_drm->sampling_formats,
+      &scanout_formats);
+
+  vt_drm_format_array_free(&scanout_formats);
+
+  if (!ok)
+    return false;
+
+  VT_TRACE(drm_master->comp->log,
+           "Surface feedback for surface=%p output=%p: direct scanout tranche",
+           surface, output);
+
+  _log_dmabuf_tranche(drm_master->comp, scanout_tranche,
+                      drm_master->main_drm->dev->path);
+
+  struct vt_dmabuf_tranche_t *fallback_tranche = vt_dmabuf_feedback_add_tranche(
+      feedback, drm_master->main_drm->dev, VT_DMABUF_TRANCHE_FLAG_COMPOSITE);
+
+  if (!fallback_tranche) {
+    VT_ERROR(drm_master->comp->log,
+             "Failed to create fallback tranche for surface feedback of "
+             "surface %p, output %p",
+             surface, output);
+    return false;
+  }
+
+  if (!vt_drm_format_array_copy(&fallback_tranche->formats,
+                                &drm_master->main_drm->sampling_formats)) {
+    VT_ERROR(drm_master->comp->log,
+             "Failed to copy renderer formats into fallback tranche");
+    return false;
+  }
+
+  VT_TRACE(drm_master->comp->log,
+           "Surface feedback for surface=%p output=%p: composite tranche",
+           surface, output);
+
+  _log_dmabuf_tranche(drm_master->comp, fallback_tranche,
+                      drm_master->main_drm->dev->path);
+
+  return true;
+}
+
 bool backend_prepare_output_frame_drm(struct vt_backend_t *backend,
                                       struct vt_output_t  *output) {
   if (!backend || !backend->comp || backend->comp->suspended || !output ||
@@ -2876,7 +3078,6 @@ bool backend_prepare_output_frame_drm(struct vt_backend_t *backend,
   return true;
 }
 
-
 bool backend_implement_drm(struct vt_compositor_t *comp) {
   if (!comp || !comp->backend || !comp->session)
     return false;
@@ -2892,7 +3093,7 @@ bool backend_implement_drm(struct vt_compositor_t *comp) {
       .terminate = backend_terminate_drm,
       .prepare_output_frame = backend_prepare_output_frame_drm,
       .test_output_layers = backend_test_output_layers_drm,
-      .build_surface_feedback = backend_build_surface_feedback,
+      .build_surface_feedback = backend_build_surface_feedback_drm,
   };
 
   comp->session->impl = (struct vt_session_interface_t){
@@ -2910,5 +3111,3 @@ bool backend_implement_drm(struct vt_compositor_t *comp) {
 
   return true;
 }
-
-

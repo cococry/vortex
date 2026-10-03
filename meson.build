@@ -148,7 +148,7 @@ deps = [
   dep_wayland_server, dep_wayland_egl,
   dep_egl, dep_input, dep_udev, dep_gl,
   runara_dep, dep_pixman, dep_seat, dep_udev,
-  dep_input
+  dep_input 
 ]
 if dep_xkbcommon.found()
   deps += dep_xkbcommon

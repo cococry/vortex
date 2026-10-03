@@ -24,6 +24,8 @@ dep_wayland_server  = dependency('wayland-server', required: true)
 dep_seat            = dependency('libseat', required: true)
 dep_udev            = dependency('libudev', required: true)
 dep_libinput        = dependency('libinput', required: true)
+dep_liftoff         = dependency('libinput', required: true)
+dep_libliftoff = dependency('libliftoff',version: '>=0.5.0', fallback: 'libliftoff')
 
 vortex_inc = include_directories('../../', '/usr/include/pixman-1/')
 
@@ -31,7 +33,7 @@ shared_module(
   'drm-backend',
   ['drm_backend.c', 'session_drm.c', 'props.c', 'prime.c', 'fb.c', 'atomic.c', 'legacy.c'],
   dependencies: [dep_gbm, dep_drm, dep_wayland_server, dep_seat, dep_udev, dep_libinput,
-    dep_runara_headers],
+    dep_runara_headers, dep_libliftoff],
   install: true,
   include_directories: vortex_inc,
   install_dir: join_paths(get_option('libdir'), 'vortex/backends'),

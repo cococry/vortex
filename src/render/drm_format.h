@@ -69,3 +69,6 @@ bool vt_drm_format_array_intersect(struct wl_array       *dst,
 
 bool vt_drm_format_array_copy(struct wl_array       *dst,
                               const struct wl_array *src);
+
+bool vt_drm_format_array_union(struct wl_array *dst, const struct wl_array *a,
+                               const struct wl_array *b);

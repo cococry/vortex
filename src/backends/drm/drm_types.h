@@ -28,6 +28,7 @@
 #include "core/session.h"
 #include "props.h"
 #include <gbm.h>
+#include <libliftoff.h>
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 #include <wayland-util.h>
@@ -164,6 +165,8 @@ struct drm_backend_state_t {
   struct wl_array sampling_formats;
 
   drmModeRes *res;
+
+  struct liftoff_device* liftoff_dev;
 };
 
 struct drm_backend_master_state_t {
@@ -205,4 +208,10 @@ struct drm_output_state_t {
   drmModeModeInfo mode;
   uint32_t        conn_id;
   uint32_t        conn_props[VT_DRM_CONNECTOR__COUNT];
+
+  struct liftoff_output *liftoff_output;
+  
+  struct liftoff_layer **liftoff_layers;
+  size_t liftoff_layers_len;
+  size_t liftoff_layers_cap;
 };

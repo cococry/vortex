@@ -271,3 +271,70 @@ bool vt_drm_format_array_copy(struct wl_array       *dst,
 
   return true;
 }
+
+bool vt_drm_format_array_union(struct wl_array *dst, const struct wl_array *a,
+                               const struct wl_array *b) {
+  assert(dst && a && b);
+
+  struct wl_array out;
+  wl_array_init(&out);
+
+  const struct vt_drm_format_t *fmt;
+
+  wl_array_for_each(fmt, a) {
+    if (!vt_drm_format_array_push(&out, fmt)) {
+      vt_drm_format_array_free(&out);
+      return false;
+    }
+  }
+
+  wl_array_for_each(fmt, b) {
+    struct vt_drm_format_t *ofmt = NULL;
+
+    wl_array_for_each(ofmt, &out) {
+      if (ofmt->format == fmt->format)
+        break;
+    }
+
+    if (ofmt == NULL || ofmt->format != fmt->format) {
+      if (!vt_drm_format_array_push(&out, fmt)) {
+        vt_drm_format_array_free(&out);
+        return false;
+      }
+
+      continue;
+    }
+
+    const struct vt_drm_format_modifier_t *mod;
+    wl_array_for_each(mod, &fmt->mods) {
+      struct vt_drm_format_modifier_t *omod = NULL;
+
+      wl_array_for_each(omod, &ofmt->mods) {
+        if (omod->mod == mod->mod)
+          break;
+      }
+
+      if (omod != NULL && omod->mod == mod->mod) {
+        /*
+         * It is extension-only only if neither side has a normal
+         * representation of this modifier.
+         */
+        omod->_egl_ext_only = omod->_egl_ext_only && mod->_egl_ext_only;
+        continue;
+      }
+
+      omod = vt_drm_format_add_mod(ofmt, mod->mod);
+      if (!omod) {
+        vt_drm_format_array_free(&out);
+        return false;
+      }
+
+      omod->_egl_ext_only = mod->_egl_ext_only;
+    }
+  }
+
+  vt_drm_format_array_free(dst);
+  *dst = out;
+
+  return true;
+}

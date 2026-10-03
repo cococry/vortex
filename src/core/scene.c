@@ -271,7 +271,7 @@ static void _composite_pass(struct vt_scene_t  *scene,
 
   _scene_render_layers(scene, output);
 
-  _scene_render_cursor(scene, output);
+  /*_scene_render_cursor(scene, output);*/
 
   r->impl.end_scene(r, output);
 }
