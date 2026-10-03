@@ -254,9 +254,6 @@ static void _scene_render_cursor(struct vt_scene_t  *scene,
       r->impl.draw_surface_simple(r, output, cursor, cursor_x - output->x,
                                   cursor_y - output->y);
     }
-    r->impl.draw_surface_simple(r, output, cursor,
-                                seat->pointer_x - seat->cursor.hotspot_x,
-                                seat->pointer_y - seat->cursor.hotspot_y);
   }
 }
 
