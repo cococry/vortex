@@ -94,6 +94,7 @@ Or load a custom shared object backend manually:
 vortex -bp /usr/lib/vortex/backends/libcustom.so
 ```
 
-[`runara`](https://github.com/cococry/runara) is currently vendored into `subprojects/` but might not be in the future.
+## Notes
+- [`runara`](https://github.com/cococry/runara) is currently vendored into `subprojects/` but might not be in the future.
 
 ---
