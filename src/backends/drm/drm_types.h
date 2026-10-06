@@ -45,24 +45,9 @@ struct drm_framebuffer_t {
 
   uint32_t handles[4];
   bool     owns_handles;
-};
 
-struct drm_scanout_buffer_t {
-  struct drm_framebuffer_t fb;
-
-  struct gbm_bo      *bo;
-  struct gbm_surface *surface;
-
-  struct vt_buffer_use_t *use;
-};
-
-struct drm_scanout_layer_t {
-  struct vt_surface_t        *surface;
-  struct drm_plane_t         *plane;
-  struct drm_scanout_buffer_t scanout;
-
-  struct vt_box_t src;
-  struct vt_box_t dst;
+  struct gbm_bo      *_gbm_bo;
+  struct gbm_surface *_gbm_surface;
 };
 
 struct drm_plane_t {
@@ -99,21 +84,36 @@ enum {
   VT_DRM_CAP__COUNT,
 };
 
-struct drm_kms_plane_state_t {
-  struct drm_plane_t       *plane;
-  struct drm_framebuffer_t *fb;
+enum drm_layer_role_t {
+  VT_DRM_LAYER_DIRECT,
+
+  VT_DRM_LAYER_COMPOSITED,
+
+  VT_DRM_LAYER_COMPOSITED_SCENE,
+};
+
+struct drm_layer_state_t {
+  struct drm_framebuffer_t fb;
+  bool                     has_fb;
 
   struct vt_box_t src;
   struct vt_box_t dst;
 
   int acquire_fence_fd;
+
+  uint64_t zpos;
+
+  struct vt_surface_t    *surface;
+  struct vt_buffer_use_t *use;
+
+  enum drm_layer_role_t role;
+  struct liftoff_layer *liftoff_layer;
 };
 
 struct drm_kms_commit_t {
   struct drm_output_state_t *output;
 
-  struct drm_kms_plane_state_t *planes;
-  size_t                        plane_count;
+  struct wl_array layers;
 
   bool active;
   bool modeset;
@@ -212,8 +212,7 @@ struct drm_output_state_t {
   uint32_t        conn_props[VT_DRM_CONNECTOR__COUNT];
 
   struct liftoff_output *liftoff_output;
+  struct liftoff_layer  *liftoff_composition_layer;
 
-  struct liftoff_layer **liftoff_layers;
-  size_t                 liftoff_layers_len;
-  size_t                 liftoff_layers_cap;
+  bool needs_compositing;
 };

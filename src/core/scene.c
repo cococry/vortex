@@ -215,13 +215,13 @@ static void _scene_render_layers(struct vt_scene_t  *scene,
   for (size_t i = 0; i < scene->n_layers; i++) {
     struct vt_output_layer_state_t *layer = &scene->layers[i];
 
-    /*if (layer->accepted) {
+    if (layer->accepted) {
       VT_TRACE(
           renderer->comp->log,
           "Surface=%p accepted as direct-scanout layer; Will not be rendered.",
           layer->surface);
       continue;
-    }*/
+    }
 
     renderer->impl.draw_surface(renderer, output, layer->surface, &layer->src,
                                 &layer->dst);
@@ -498,16 +498,13 @@ void vt_scene_render(struct vt_scene_t *scene, struct vt_output_t *output) {
 
   _scene_accumulate_layers(scene, output);
 
-  if (scene->n_layers > 0) {
-    if (output->backend->impl.test_output_layers)
-      output->backend->impl.test_output_layers(output->backend, output,
-                                               scene->layers, scene->n_layers);
-  }
+  if (output->backend->impl.test_output_layers)
+    output->backend->impl.test_output_layers(output->backend, output,
+                                             scene->layers, scene->n_layers);
 
   struct vt_renderer_t *r = scene->renderer;
-  bool                  need_compositing = true;
+  bool                  need_compositing = false;
 
-  /*
   for (size_t i = 0; i < scene->n_layers; i++) {
     if (!scene->layers[i].accepted) {
       need_compositing = true;
@@ -515,7 +512,7 @@ void vt_scene_render(struct vt_scene_t *scene, struct vt_output_t *output) {
     }
   }
   if (!need_compositing && scene->n_layers == 0)
-    need_compositing = true;*/
+    need_compositing = true;
 
   if (need_compositing) {
     r->impl.begin_frame(r, output);

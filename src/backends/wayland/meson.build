@@ -18,19 +18,41 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-# src/backends/wayland/meson.build
-dep_wayland_client  = dependency('wayland-client', required: true)
-dep_wayland_protos  = dependency('wayland-protocols', required: true)
-wayland_scanner     = find_program('wayland-scanner', required: true)
+
+dep_wayland_client = dependency('wayland-client', required: true)
+dep_wayland_protos = dependency('wayland-protocols', required: true)
+wayland_scanner = find_program('wayland-scanner', required: true)
 
 protocols_dir = dep_wayland_protos.get_variable(pkgconfig: 'pkgdatadir')
-xdg_shell_xml = join_paths(protocols_dir, 'stable', 'xdg-shell', 'xdg-shell.xml')
+xdg_shell_xml = join_paths(
+  protocols_dir,
+  'stable',
+  'xdg-shell',
+  'xdg-shell.xml'
+)
 
 xdg_client_header = custom_target(
-  'xdg-shell-client-header',
+  'wl-backend-xdg-shell-client-header',
   input: xdg_shell_xml,
   output: 'xdg-shell-client-protocol.h',
-  command: [wayland_scanner, 'client-header', '@INPUT@', '@OUTPUT@'],
+  command: [
+    wayland_scanner,
+    'client-header',
+    '@INPUT@',
+    '@OUTPUT@'
+  ],
+)
+
+xdg_client_code = custom_target(
+  'wl-backend-xdg-shell-protocol-code',
+  input: xdg_shell_xml,
+  output: 'xdg-shell-client-protocol.c',
+  command: [
+    wayland_scanner,
+    'private-code',
+    '@INPUT@',
+    '@OUTPUT@'
+  ],
 )
 
 vortex_inc = include_directories('/usr/include/pixman-1/')
@@ -40,9 +62,16 @@ shared_module(
   [
     'wayland.c',
     xdg_client_header,
+    xdg_client_code,
   ],
-  dependencies: [dep_wayland_client, dep_runara_headers],
+  dependencies: [
+    dep_wayland_client,
+    dep_runara_headers,
+  ],
   install: true,
   include_directories: vortex_inc,
-  install_dir: join_paths(get_option('libdir'), 'vortex/backends'),
+  install_dir: join_paths(
+    get_option('libdir'),
+    'vortex/backends'
+  ),
 )

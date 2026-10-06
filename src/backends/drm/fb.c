@@ -114,7 +114,8 @@ bool drm_fb_init_from_buffer(struct drm_backend_state_t *drm,
 }
 
 bool drm_fb_init_from_gbm(struct drm_backend_state_t *drm,
-                          struct drm_framebuffer_t *fb, struct gbm_bo *bo) {
+                          struct drm_framebuffer_t *fb, struct gbm_bo *bo,
+                          struct gbm_surface *surf) {
   if (!drm || !fb || !bo)
     return false;
 
@@ -163,6 +164,9 @@ bool drm_fb_init_from_gbm(struct drm_backend_state_t *drm,
     fb->owns_handles = true;
   }
 
+  fb->_gbm_bo = bo;
+  fb->_gbm_surface = surf;
+
   return true;
 }
 
@@ -179,6 +183,9 @@ void drm_fb_finish(struct drm_backend_state_t *drm,
 
   if (fb->buf)
     vt_buffer_unref(&fb->buf);
+
+  if (fb->_gbm_bo && fb->_gbm_surface)
+    gbm_surface_release_buffer(fb->_gbm_surface, fb->_gbm_bo);
 
   memset(fb, 0, sizeof(*fb));
 }

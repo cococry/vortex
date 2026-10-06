@@ -31,44 +31,81 @@
 
 static bool _legacy_commit(struct drm_backend_state_t *drm,
                            struct drm_kms_commit_t    *commit) {
-  if (!drm || !commit || !commit->output || !commit->output->crtc ||
-      commit->plane_count != 1 || !commit->planes[0].fb)
+  if (!drm || !commit || !commit->output || !commit->output->crtc)
     return false;
 
   if (commit->test_only)
     return false;
 
+  /*
+   * The legacy pipeline expects exactly one logical layer: the
+   * Vulkan/GL produced framebuffer covering the output.
+   */
+  if (commit->layers.size != sizeof(struct drm_layer_state_t)) {
+    VT_ERROR(drm->comp->log,
+             "Legacy DRM commit requires exactly one composition layer, "
+             "got %zu.",
+             commit->layers.size / sizeof(struct drm_layer_state_t));
+    return false;
+  }
+
+  struct drm_layer_state_t *layer = commit->layers.data;
+
+  if (!layer || layer->role != VT_DRM_LAYER_COMPOSITED_SCENE ||
+      !layer->has_fb || layer->fb.id == 0) {
+    VT_ERROR(drm->comp->log,
+             "Legacy DRM commit requires one valid composition framebuffer.");
+    return false;
+  }
+
+  assert(!layer->liftoff_layer);
+
   struct drm_output_state_t *output = commit->output;
-  uint32_t                   fb_id = commit->planes[0].fb->id;
+  uint32_t                   fb_id = layer->fb.id;
 
   if (commit->modeset) {
     if (drmModeSetCrtc(drm->drm_fd, output->crtc->id, fb_id, 0, 0,
                        &output->conn_id, 1, &output->mode) != 0) {
-      VT_ERROR(drm->comp->log, "drmModeSetCrtc() failed: %s", strerror(errno));
+      VT_ERROR(drm->comp->log,
+               "drmModeSetCrtc() failed for connector %" PRIu32 ": %s",
+               output->conn_id, strerror(errno));
       return false;
     }
 
     commit->event_pending = false;
     commit->out_fence_fd = -1;
+
     return true;
   }
 
   uint32_t flags = DRM_MODE_PAGE_FLIP_EVENT;
+
   if (commit->async)
     flags |= DRM_MODE_PAGE_FLIP_ASYNC;
 
   if (drmModePageFlip(drm->drm_fd, output->crtc->id, fb_id, flags,
                       output->base) != 0) {
+    int flip_errno = errno;
+
     if (!commit->async ||
         drmModePageFlip(drm->drm_fd, output->crtc->id, fb_id,
                         DRM_MODE_PAGE_FLIP_EVENT, output->base) != 0) {
-      VT_ERROR(drm->comp->log, "drmModePageFlip() failed: %s", strerror(errno));
+      VT_ERROR(drm->comp->log,
+               "drmModePageFlip() failed for connector %" PRIu32 ": %s",
+               output->conn_id, strerror(commit->async ? errno : flip_errno));
       return false;
     }
+
+    VT_TRACE(drm->comp->log,
+             "Legacy async page flip rejected for connector %" PRIu32
+             "; fell back to normal page flip.",
+             output->conn_id);
   }
 
   commit->event_pending = true;
+
   commit->out_fence_fd = -1;
+
   return true;
 }
 

@@ -79,7 +79,7 @@
 
 static void _drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec,
                                    unsigned int usec, void *data);
-static void _drm_release_all_scanout(struct vt_output_t *output);
+static void _drm_release_all_layers(struct vt_output_t *output);
 static bool _drm_devices_equal(drmDevicePtr a, drmDevicePtr b);
 static bool _drm_can_share_dmabuf(struct vt_device_t *main_dev,
                                   struct vt_device_t *dev);
@@ -136,37 +136,41 @@ bool _drm_legacy_test_output_layers(struct vt_backend_t            *backend,
 
 static bool _added_global_keybinds = false;
 
-static void _drm_scanout_finish(struct drm_output_state_t   *drm_output,
-                                struct drm_scanout_buffer_t *scanout,
-                                int                          release_fence_fd) {
-  if (!drm_output || !drm_output->drm_backend || !scanout)
+static void _drm_layer_finish(struct drm_output_state_t *drm_output,
+                              struct drm_layer_state_t  *layer,
+                              int                        release_fence_fd) {
+  if (!drm_output || !drm_output->drm_backend || !layer)
     return;
 
-  if (scanout->use && release_fence_fd >= 0 && scanout->use->release &&
-      vt_buffer_release_needs_fence(scanout->use->release)) {
-    vt_buffer_use_set_release_fence_fd(scanout->use, release_fence_fd);
+  if (layer->use && release_fence_fd >= 0 && layer->use->release &&
+      vt_buffer_release_needs_fence(layer->use->release)) {
+    vt_buffer_use_set_release_fence_fd(layer->use, release_fence_fd);
   }
 
-  drm_fb_finish(drm_output->drm_backend, &scanout->fb);
+  if (layer->liftoff_layer) {
+    liftoff_layer_destroy(layer->liftoff_layer);
+    layer->liftoff_layer = NULL;
+  }
 
-  if (scanout->bo && scanout->surface)
-    gbm_surface_release_buffer(scanout->surface, scanout->bo);
+  if (layer->has_fb) {
+    drm_fb_finish(drm_output->drm_backend, &layer->fb);
+    layer->has_fb = false;
+  }
 
-  if (scanout->use)
-    vt_buffer_use_unref(&scanout->use);
+  if (layer->use)
+    vt_buffer_use_unref(&layer->use);
 
-  memset(scanout, 0, sizeof(*scanout));
+  memset(layer, 0, sizeof(*layer));
 }
 
-static void _drm_scanout_layers_finish(struct drm_output_state_t *drm_output,
-                                       struct wl_array           *layers,
-                                       int release_fence_fd) {
+static void _drm_layers_finish(struct drm_output_state_t *drm_output,
+                               struct wl_array *layers, int release_fence_fd) {
   if (!drm_output || !layers)
     return;
 
-  struct drm_scanout_layer_t *layer;
+  struct drm_layer_state_t *layer;
   wl_array_for_each(layer, layers) {
-    _drm_scanout_finish(drm_output, &layer->scanout, release_fence_fd);
+    _drm_layer_finish(drm_output, layer, release_fence_fd);
   }
 
   wl_array_release(layers);
@@ -178,8 +182,8 @@ static void _drm_complete_pending(struct drm_output_state_t *drm_output) {
     return;
 
   if (drm_output->current_valid) {
-    _drm_scanout_layers_finish(drm_output, &drm_output->current_layers,
-                               drm_output->pending_out_fence_fd);
+    _drm_layers_finish(drm_output, &drm_output->current_layers,
+                       drm_output->pending_out_fence_fd);
   }
 
   drm_output->current_layers = drm_output->pending_layers;
@@ -232,7 +236,7 @@ static void _drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec,
     vt_comp_schedule_repaint(output->backend->comp, output);
 }
 
-static void _drm_release_all_scanout(struct vt_output_t *output) {
+static void _drm_release_all_layers(struct vt_output_t *output) {
   if (!output || !output->user_data)
     return;
 
@@ -242,16 +246,16 @@ static void _drm_release_all_scanout(struct vt_output_t *output) {
     return;
 
   if (drm_output->pending_valid) {
-    _drm_scanout_layers_finish(drm_output, &drm_output->pending_layers, -1);
+    _drm_layers_finish(drm_output, &drm_output->pending_layers, -1);
     drm_output->pending_valid = false;
   }
 
   if (drm_output->current_valid) {
-    _drm_scanout_layers_finish(drm_output, &drm_output->current_layers, -1);
+    _drm_layers_finish(drm_output, &drm_output->current_layers, -1);
     drm_output->current_valid = false;
   }
 
-  _drm_scanout_layers_finish(drm_output, &drm_output->layer_plan, -1);
+  _drm_layers_finish(drm_output, &drm_output->layer_plan, -1);
 
   if (drm_output->pending_out_fence_fd >= 0) {
     close(drm_output->pending_out_fence_fd);
@@ -635,7 +639,7 @@ static bool _drm_suspend(struct drm_backend_state_t *backend) {
               drm_output->conn_id);
     }
 
-    _drm_release_all_scanout(output);
+    _drm_release_all_layers(output);
     drm_output->needs_modeset = true;
     drm_output->flip_inflight = false;
   }
@@ -869,7 +873,7 @@ static bool _drm_plane_init(struct drm_backend_state_t *drm,
                               drm->caps[VT_DRM_CAP_ADDFB2_MODIFIERS];
 
   VT_TRACE(comp->log,
-           "DRM: discovering plane %" PRIu32 ": type=%s crtc=%" PRIu32
+           "discovering plane %" PRIu32 ": type=%s crtc=%" PRIu32
            " possible_crtcs=0x%" PRIx32 " legacy_formats=%u in_formats=%s.",
            plane_id, _drm_plane_type_name(plane_type), drm_plane->crtc_id,
            drm_plane->possible_crtcs, drm_plane->count_formats,
@@ -882,7 +886,7 @@ static bool _drm_plane_init(struct drm_backend_state_t *drm,
     if (!in_formats_supported && plane_type == DRM_PLANE_TYPE_CURSOR) {
 
       VT_TRACE(comp->log,
-               "DRM: plane %" PRIu32 " supports legacy format=%s" PRIx32
+               "plane %" PRIu32 " supports legacy format=%s" PRIx32
                " modifier=LINEAR.",
                plane_id, format_name);
 
@@ -894,7 +898,7 @@ static bool _drm_plane_init(struct drm_backend_state_t *drm,
 
     if (plane_type != DRM_PLANE_TYPE_CURSOR) {
       VT_TRACE(comp->log,
-               "DRM: plane %" PRIu32 " supports legacy format=%s" PRIx32
+               "plane %" PRIu32 " supports legacy format=%s" PRIx32
                " modifier=INVALID.",
                plane_id, format_name);
 
@@ -918,8 +922,7 @@ static bool _drm_plane_init(struct drm_backend_state_t *drm,
       return false;
     }
 
-    VT_TRACE(comp->log,
-             "DRM: plane %" PRIu32 " has IN_FORMATS blob id=%" PRIu64 ".",
+    VT_TRACE(comp->log, "plane %" PRIu32 " has IN_FORMATS blob id=%" PRIu64 ".",
              plane_id, in_formats_id);
 
     drmModePropertyBlobRes *blob =
@@ -940,8 +943,7 @@ static bool _drm_plane_init(struct drm_backend_state_t *drm,
       char        mod_str[256];
       _modifier_to_str(iter.mod, mod_str, sizeof(mod_str));
       VT_TRACE(comp->log,
-               "DRM: plane %" PRIu32 " supports format=%s" PRIx32
-               " modifier=%s.",
+               "plane %" PRIu32 " supports format=%s" PRIx32 " modifier=%s.",
                plane_id, format_name, mod_str);
 
       if (!vt_drm_format_array_push_pair(&plane->formats, iter.fmt, iter.mod)) {
@@ -959,8 +961,7 @@ static bool _drm_plane_init(struct drm_backend_state_t *drm,
     }
 
     VT_TRACE(comp->log,
-             "DRM: plane %" PRIu32
-             " IN_FORMATS parsed: %zu format/modifier pairs.",
+             "plane %" PRIu32 " IN_FORMATS parsed: %zu format/modifier pairs.",
              plane_id, modifier_count);
 
     drmModeFreePropertyBlob(blob);
@@ -1559,6 +1560,14 @@ static bool _drm_create_output_for_device(struct drm_backend_state_t *drm,
       VT_ERROR(comp->log, "Failed to create liftoff output for output.");
       return false;
     }
+    if (!(drm_output->liftoff_composition_layer =
+              liftoff_layer_create(drm_output->liftoff_output))) {
+      VT_ERROR(comp->log,
+               "Failed to create liftoff composition layer for output.");
+      return false;
+    }
+    liftoff_output_set_composition_layer(drm_output->liftoff_output,
+                                         drm_output->liftoff_composition_layer);
   }
 
   /* TODO: Monitor position system */
@@ -1770,7 +1779,19 @@ static bool _drm_destroy_output_for_device(struct drm_backend_state_t *drm,
   if (!drm->comp->suspended && drm->impl && drm_output->crtc)
     drm->impl->disable(drm, drm_output);
 
-  _drm_release_all_scanout(output);
+  _drm_release_all_layers(output);
+
+  if (drm->impl->atomic) {
+    if (drm_output->liftoff_composition_layer) {
+      liftoff_layer_destroy(drm_output->liftoff_composition_layer);
+      drm_output->liftoff_composition_layer = NULL;
+    }
+
+    if (drm_output->liftoff_output) {
+      liftoff_output_destroy(drm_output->liftoff_output);
+      drm_output->liftoff_output = NULL;
+    }
+  }
 
   if (drm_output->crtc)
     drm_output->crtc->in_use = false;
@@ -1845,6 +1866,9 @@ static bool _drm_terminate_for_device(struct drm_backend_state_t *drm) {
   wl_list_for_each_safe(output, tmp, &drm->outputs, link_local) {
     _drm_destroy_output_for_device(drm, output);
   }
+
+  if (drm->impl->atomic)
+    liftoff_device_destroy(drm->liftoff_dev);
 
   struct drm_plane_t *plane;
   wl_array_for_each(plane, &drm->planes) {
@@ -2041,6 +2065,71 @@ static bool _drm_plane_has_format(struct drm_plane_t *plane, uint32_t format,
   return false;
 }
 
+static bool
+_drm_output_add_composition_layer(struct drm_backend_state_t *drm,
+                                  struct drm_output_state_t  *drm_output,
+                                  struct vt_output_t         *output) {
+  if (!drm || !drm_output || !output || !drm_output->gbm_surf)
+    return false;
+
+  struct gbm_bo *bo = gbm_surface_lock_front_buffer(drm_output->gbm_surf);
+
+  if (!bo) {
+    VT_WARN(drm->comp->log,
+            "Failed to lock compositor GBM front buffer for output %p.",
+            (void *)output);
+    return false;
+  }
+
+  struct drm_layer_state_t *layer =
+      wl_array_add(&drm_output->layer_plan, sizeof(*layer));
+
+  if (!layer) {
+    gbm_surface_release_buffer(drm_output->gbm_surf, bo);
+    return false;
+  }
+
+  memset(layer, 0, sizeof(*layer));
+
+  layer->role = VT_DRM_LAYER_COMPOSITED_SCENE;
+  layer->acquire_fence_fd = -1;
+  layer->use = NULL;
+
+  layer->src = (struct vt_box_t){
+      .x = 0,
+      .y = 0,
+      .width = gbm_bo_get_width(bo),
+      .height = gbm_bo_get_height(bo),
+  };
+
+  layer->dst = (struct vt_box_t){
+      .x = 0,
+      .y = 0,
+      .width = output->width,
+      .height = output->height,
+  };
+
+  if (!drm_fb_init_from_gbm(drm, &layer->fb, bo, drm_output->gbm_surf)) {
+    /*
+     * drm_fb_init_from_gbm() did not take ownership,
+     * so release our locked front buffer ourselves.
+     */
+    gbm_surface_release_buffer(drm_output->gbm_surf, bo);
+
+    drm_output->layer_plan.size -= sizeof(*layer);
+
+    VT_ERROR(drm->comp->log,
+             "Failed to import compositor GBM buffer for connector %u.",
+             drm_output->conn_id);
+
+    return false;
+  }
+
+  layer->has_fb = true;
+
+  return true;
+}
+
 static bool _drm_handle_frame_for_device(struct drm_backend_state_t *drm,
                                          struct vt_output_t         *output) {
   if (!drm || !drm->comp || !output || !output->user_data || !drm->impl)
@@ -2069,99 +2158,21 @@ static bool _drm_handle_frame_for_device(struct drm_backend_state_t *drm,
 
   VT_TRACE(comp->log, "Handling frame...");
 
+  if (drm_output->needs_compositing) {
+    if (!_drm_output_add_composition_layer(drm, drm_output, output)) {
+      _drm_layers_finish(drm_output, &drm_output->layer_plan, -1);
+
+      output->needs_repaint = true;
+      return false;
+    }
+  }
+
   drm_output->pending_layers = drm_output->layer_plan;
   wl_array_init(&drm_output->layer_plan);
 
-  bool                        primary_assigned = false;
-  struct drm_scanout_layer_t *scanout_layer;
-  wl_array_for_each(scanout_layer, &drm_output->pending_layers) {
-    if (drm_output->crtc &&
-        scanout_layer->plane == drm_output->crtc->plane_primary) {
-      primary_assigned = true;
-      break;
-    }
-  }
-
-  if (!primary_assigned) {
-    struct gbm_bo *bo = gbm_surface_lock_front_buffer(drm_output->gbm_surf);
-    if (!bo) {
-      VT_WARN(comp->log,
-              "Failed to get the GBM front buffer for frame in output %p.",
-              (void *)output);
-      _drm_scanout_layers_finish(drm_output, &drm_output->pending_layers, -1);
-      output->needs_repaint = true;
-      return true;
-    }
-
-    scanout_layer =
-        wl_array_add(&drm_output->pending_layers, sizeof(*scanout_layer));
-    if (!scanout_layer) {
-      gbm_surface_release_buffer(drm_output->gbm_surf, bo);
-      _drm_scanout_layers_finish(drm_output, &drm_output->pending_layers, -1);
-      output->needs_repaint = true;
-      return false;
-    }
-
-    memset(scanout_layer, 0, sizeof(*scanout_layer));
-    scanout_layer->plane =
-        drm_output->crtc ? drm_output->crtc->plane_primary : NULL;
-    scanout_layer->scanout.bo = bo;
-    scanout_layer->scanout.surface = drm_output->gbm_surf;
-    scanout_layer->src = (struct vt_box_t){
-        .x = 0,
-        .y = 0,
-        .width = gbm_bo_get_width(bo),
-        .height = gbm_bo_get_height(bo),
-    };
-    scanout_layer->dst = (struct vt_box_t){
-        .x = 0,
-        .y = 0,
-        .width = output->width,
-        .height = output->height,
-    };
-
-    if (!drm_fb_init_from_gbm(drm, &scanout_layer->scanout.fb, bo)) {
-      _drm_scanout_layers_finish(drm_output, &drm_output->pending_layers, -1);
-      output->needs_repaint = true;
-      VT_ERROR(comp->log,
-               "Failed to import GBM buffer for connector %u into DRM.",
-               drm_output->conn_id);
-      return false;
-    }
-  }
-
-  size_t plane_count =
-      drm_output->pending_layers.size / sizeof(struct drm_scanout_layer_t);
-  if (plane_count == 0) {
-    output->needs_repaint = true;
-    return false;
-  }
-
-  struct drm_kms_plane_state_t *plane_states =
-      calloc(plane_count, sizeof(*plane_states));
-  if (!plane_states) {
-    _drm_scanout_layers_finish(drm_output, &drm_output->pending_layers, -1);
-    output->needs_repaint = true;
-    return false;
-  }
-
-  size_t plane_index = 0;
-  wl_array_for_each(scanout_layer, &drm_output->pending_layers) {
-    plane_states[plane_index++] = (struct drm_kms_plane_state_t){
-        .plane = scanout_layer->plane,
-        .fb = &scanout_layer->scanout.fb,
-        .src = scanout_layer->src,
-        .dst = scanout_layer->dst,
-        .acquire_fence_fd = scanout_layer->scanout.use
-                                ? scanout_layer->scanout.use->acquire_fence_fd
-                                : -1,
-    };
-  }
-
   struct drm_kms_commit_t commit = {
       .output = drm_output,
-      .planes = plane_states,
-      .plane_count = plane_count,
+      .layers = drm_output->pending_layers,
       .active = true,
       .modeset = drm_output->needs_modeset,
       .test_only = false,
@@ -2173,18 +2184,19 @@ static bool _drm_handle_frame_for_device(struct drm_backend_state_t *drm,
 
   bool was_bootstrapped = drm_output->modeset_bootstrapped;
   if (!drm->impl->commit(drm, &commit)) {
-    free(plane_states);
-    _drm_scanout_layers_finish(drm_output, &drm_output->pending_layers, -1);
+    _drm_layers_finish(drm_output, &drm_output->pending_layers, -1);
     drm_output->pending_valid = false;
     output->needs_repaint = true;
     return false;
   }
-  free(plane_states);
 
-  struct drm_scanout_layer_t *layer;
+  struct drm_layer_state_t *layer;
 
   wl_array_for_each(layer, &drm_output->pending_layers) {
-    if (!layer->surface || !layer->scanout.use)
+    if (layer->role != VT_DRM_LAYER_DIRECT)
+      continue;
+
+    if (!layer->surface || !layer->use)
       continue;
 
     if (!vt_output_track_presented_surface(output, layer->surface)) {
@@ -2198,10 +2210,9 @@ static bool _drm_handle_frame_for_device(struct drm_backend_state_t *drm,
   }
 
   VT_TRACE(comp->log,
-           "DRM: real commit succeeded output=%p event_pending=%d layers=%zu",
+           "real commit succeeded output=%p event_pending=%d layers=%zu",
            output, commit.event_pending,
-           drm_output->pending_layers.size /
-               sizeof(struct drm_scanout_layer_t));
+           drm_output->pending_layers.size / sizeof(struct drm_layer_state_t));
 
   drm_output->pending_valid = true;
   drm_output->needs_modeset = false;
@@ -2558,307 +2569,6 @@ static struct drm_plane_t *_drm_plane_from_id(struct drm_backend_state_t *drm,
   return NULL;
 }
 
-static bool _drm_liftoff_ensure_layers(struct drm_output_state_t *output,
-                                       size_t                     count) {
-  assert(output && output->liftoff_output);
-
-  if (count <= output->liftoff_layers_cap)
-    return true;
-
-  size_t old_cap = output->liftoff_layers_cap;
-  size_t new_cap = old_cap ? old_cap : 4;
-
-  while (new_cap < count)
-    new_cap *= 2;
-
-  struct liftoff_layer **layers =
-      realloc(output->liftoff_layers, new_cap * sizeof(*layers));
-  if (!layers)
-    return false;
-
-  output->liftoff_layers = layers;
-
-  for (size_t i = old_cap; i < new_cap; i++)
-    output->liftoff_layers[i] = NULL;
-
-  for (size_t i = old_cap; i < new_cap; i++) {
-    output->liftoff_layers[i] = liftoff_layer_create(output->liftoff_output);
-
-    if (!output->liftoff_layers[i]) {
-      for (size_t j = old_cap; j < i; j++) {
-        liftoff_layer_destroy(output->liftoff_layers[j]);
-        output->liftoff_layers[j] = NULL;
-      }
-
-      return false;
-    }
-
-    liftoff_layer_set_property(output->liftoff_layers[i], "FB_ID", 0);
-  }
-
-  output->liftoff_layers_cap = new_cap;
-
-  return true;
-}
-
-bool _drm_legacy_test_output_layers(struct vt_backend_t            *backend,
-                                    struct vt_output_t             *output,
-                                    struct vt_output_layer_state_t *layers,
-                                    size_t layer_count) {
-
-  if (!backend || !backend->comp || !output || !output->user_data ||
-      (layer_count > 0 && !layers)) {
-    return false;
-  }
-
-  for (size_t i = 0; i < layer_count; i++)
-    layers[i].accepted = false;
-
-  struct drm_output_state_t *drm_output =
-      BACKEND_DATA(output, struct drm_output_state_t);
-  struct drm_backend_state_t *drm = drm_output->drm_backend;
-  if (!drm || !drm->impl)
-    return false;
-
-  _drm_scanout_layers_finish(drm_output, &drm_output->layer_plan, -1);
-
-  if (layer_count != 1) {
-    VT_TRACE(backend->comp->log,
-             "DRM: direct scanout rejected for output %p: "
-             "expected exactly one layer, got %zu.",
-             output, layer_count);
-    return false;
-  }
-
-  struct vt_output_layer_state_t *layer = &layers[0];
-
-  if (!drm->impl->atomic) {
-    VT_TRACE(backend->comp->log,
-             "DRM: direct scanout rejected for output %p: "
-             "atomic modesetting is unavailable.",
-             output);
-    goto reject;
-  }
-
-  if (drm_output->flip_inflight) {
-    VT_TRACE(backend->comp->log,
-             "DRM: direct scanout rejected for output %p: "
-             "page flip is still in flight.",
-             output);
-    goto reject;
-  }
-
-  if (!drm_output->crtc) {
-    VT_TRACE(backend->comp->log,
-             "DRM: direct scanout rejected for output %p: "
-             "output has no assigned CRTC.",
-             output);
-    goto reject;
-  }
-
-  if (!drm_output->crtc->plane_primary) {
-    VT_TRACE(backend->comp->log,
-             "DRM: direct scanout rejected for output %p: "
-             "CRTC has no primary plane.",
-             output);
-    goto reject;
-  }
-
-  if (!layer->surface) {
-    VT_TRACE(backend->comp->log,
-             "DRM: direct scanout rejected for output %p: "
-             "layer has no surface.",
-             output);
-    goto reject;
-  }
-
-  if (!layer->surface->current_buf_use) {
-    VT_TRACE(backend->comp->log,
-             "DRM: direct scanout rejected for output %p surface %p: "
-             "surface has no current buffer use.",
-             output, layer->surface);
-    goto reject;
-  }
-
-  if (!layer->surface->current_buf_use->buf) {
-    VT_TRACE(backend->comp->log,
-             "DRM: direct scanout rejected for output %p surface %p: "
-             "current buffer use has no buffer.",
-             output, layer->surface);
-    goto reject;
-  }
-
-  if (layer->dst.x != 0 || layer->dst.y != 0 ||
-      layer->dst.width != output->width ||
-      layer->dst.height != output->height) {
-    VT_TRACE(backend->comp->log,
-             "DRM: direct scanout rejected for output %p surface %p: "
-             "destination does not cover the full output. "
-             "dst=[x=%d y=%d w=%u h=%u], output=[w=%u h=%u].",
-             output, layer->surface, layer->dst.x, layer->dst.y,
-             layer->dst.width, layer->dst.height, output->width,
-             output->height);
-    goto reject;
-  }
-
-  if (layer->src.x < 0 || layer->src.y < 0 || layer->src.width <= 0 ||
-      layer->src.height <= 0) {
-    VT_TRACE(backend->comp->log,
-             "DRM: direct scanout rejected for output %p surface %p: "
-             "invalid source rectangle src=[x=%d y=%d w=%u h=%u].",
-             output, layer->surface, layer->src.x, layer->src.y,
-             layer->src.width, layer->src.height);
-    goto reject;
-  }
-
-  struct vt_buffer_use_t *use = layer->surface->current_buf_use;
-
-  struct vt_dmabuf_attr_t attr = {0};
-  if (!vt_buffer_get_dmabuf(use->buf, &attr)) {
-    VT_TRACE(backend->comp->log,
-             "DRM: direct scanout rejected for output %p surface %p: "
-             "buffer %p is not a DMABUF.",
-             output, layer->surface, use->buf);
-    goto reject;
-  }
-
-  const char *format_name = drmGetFormatName(attr.format);
-
-  VT_TRACE(backend->comp->log,
-           "DRM: direct scanout candidate: "
-           "surface=%p buffer=%p format=%s modifier=0x%016" PRIx64
-           " size=%dx%d planes=%u",
-           layer->surface, use->buf, format_name, attr.mod, attr.width,
-           attr.height, attr.num_planes);
-
-  if ((uint64_t)layer->src.x + (uint64_t)layer->src.width >
-          (uint64_t)attr.width ||
-      (uint64_t)layer->src.y + (uint64_t)layer->src.height >
-          (uint64_t)attr.height) {
-    VT_TRACE(backend->comp->log,
-             "DRM: direct scanout rejected for output %p surface %p: "
-             "source rectangle exceeds DMABUF bounds. "
-             "src=[x=%d y=%d w=%u h=%u], buffer=[w=%d h=%d].",
-             output, layer->surface, layer->src.x, layer->src.y,
-             layer->src.width, layer->src.height, attr.width, attr.height);
-    goto reject;
-  }
-
-  struct drm_plane_t *plane = drm_output->crtc->plane_primary;
-
-  if (!_drm_plane_has_format(plane, attr.format, attr.mod)) {
-
-    VT_TRACE(
-        backend->comp->log,
-        "DRM: direct scanout rejected for output %p surface %p: "
-        "primary plane %u does not support format=%s modifier=0x%016" PRIx64
-        ".",
-        output, layer->surface, plane->id,
-        format_name ? format_name : "UNKNOWN", attr.mod);
-    goto reject;
-  }
-
-  if (use->acquire_fence_fd >= 0 &&
-      plane->props[VT_DRM_PLANE_IN_FENCE_FD] == 0) {
-    VT_TRACE(backend->comp->log,
-             "DRM: direct scanout rejected for output %p surface %p: "
-             "buffer has acquire fence fd=%d but primary plane %u has no "
-             "IN_FENCE_FD property.",
-             output, layer->surface, use->acquire_fence_fd, plane->id);
-    goto reject;
-  }
-
-  if (use->release && vt_buffer_release_needs_fence(use->release) &&
-      drm_output->crtc->props[VT_DRM_CRTC_OUT_FENCE_PTR] == 0) {
-    VT_TRACE(backend->comp->log,
-             "DRM: direct scanout rejected for output %p surface %p: "
-             "buffer release requires explicit fence but CRTC %u has no "
-             "OUT_FENCE_PTR property.",
-             output, layer->surface, drm_output->crtc->id);
-    goto reject;
-  }
-
-  struct drm_scanout_layer_t plan = {
-      .surface = layer->surface,
-      .plane = plane,
-      .src = layer->src,
-      .dst = layer->dst,
-  };
-
-  if (!drm_fb_init_from_buffer(drm, &plan.scanout.fb, use->buf)) {
-    VT_TRACE(backend->comp->log,
-             "DRM: direct scanout rejected for output %p surface %p: "
-             "failed to create DRM framebuffer from buffer %p.",
-             output, layer->surface, use->buf);
-    goto reject;
-  }
-
-  plan.scanout.use = vt_buffer_use_ref(use);
-
-  struct drm_kms_plane_state_t plane_state = {
-      .plane = plane,
-      .fb = &plan.scanout.fb,
-      .src = plan.src,
-      .dst = plan.dst,
-      .acquire_fence_fd = use->acquire_fence_fd,
-  };
-
-  struct drm_kms_commit_t commit = {
-      .output = drm_output,
-      .planes = &plane_state,
-      .plane_count = 1,
-      .active = true,
-      .modeset = drm_output->needs_modeset,
-      .test_only = true,
-      .async = false,
-      .out_fence_fd = -1,
-  };
-
-  if (!drm->impl->commit(drm, &commit)) {
-    VT_TRACE(backend->comp->log,
-             "DRM: direct scanout rejected for output %p surface %p: "
-             "atomic TEST_ONLY commit failed. "
-             "plane=%u src=[x=%d y=%d w=%u h=%u] "
-             "dst=[x=%d y=%d w=%u h=%u].",
-             output, layer->surface, plane->id, layer->src.x, layer->src.y,
-             layer->src.width, layer->src.height, layer->dst.x, layer->dst.y,
-             layer->dst.width, layer->dst.height);
-
-    _drm_scanout_finish(drm_output, &plan.scanout, -1);
-    goto reject;
-  }
-
-  struct drm_scanout_layer_t *stored =
-      wl_array_add(&drm_output->layer_plan, sizeof(*stored));
-
-  if (!stored) {
-    VT_TRACE(backend->comp->log,
-             "DRM: direct scanout preparation failed for output %p surface %p: "
-             "could not store validated layer plan.",
-             output, layer->surface);
-
-    _drm_scanout_finish(drm_output, &plan.scanout, -1);
-    goto reject;
-  }
-
-  *stored = plan;
-  layer->accepted = true;
-
-  VT_TRACE(backend->comp->log,
-           "DRM: direct scanout accepted for output %p surface %p: "
-           "plane=%u buffer=%p format=%s modifier=0x%016" PRIx64 " "
-           "src=[x=%d y=%d w=%u h=%u] "
-           "dst=[x=%d y=%d w=%u h=%u].",
-           output, layer->surface, plane->id, use->buf, format_name, attr.mod,
-           layer->src.x, layer->src.y, layer->src.width, layer->src.height,
-           layer->dst.x, layer->dst.y, layer->dst.width, layer->dst.height);
-
-  return true;
-
-reject:
-  return true;
-}
-
 static bool
 _drm_output_can_scanout_dmabuf(struct drm_backend_state_t    *drm,
                                struct drm_output_state_t     *output,
@@ -2903,22 +2613,71 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
   for (size_t i = 0; i < layer_count; i++)
     layers[i].accepted = false;
 
-  if (layer_count == 0)
-    return true;
-
   struct drm_output_state_t *drm_output =
       BACKEND_DATA(output, struct drm_output_state_t);
 
-  if (!drm_output || !drm_output->drm_backend || !drm_output->crtc) {
+  if (!drm_output || !drm_output->drm_backend)
     return false;
+
+  drm_output->needs_compositing = true;
+
+  /* No scene layers, but we still need to composite the clear color of the
+   * scene (TODO, probably have the scene insert a background layer)*/
+
+  if (layer_count == 0) {
+    /* add synthetic composited layer so liftoff thinks it needs to offload to
+     * the composite layer and we see the empty scene */
+    struct drm_layer_state_t *planned =
+        wl_array_add(&drm_output->layer_plan, sizeof(*planned));
+
+    if (!planned)
+      return false;
+
+    memset(planned, 0, sizeof(*planned));
+
+    planned->role = VT_DRM_LAYER_COMPOSITED;
+
+    planned->src = (struct vt_box_t){
+        .x = 0,
+        .y = 0,
+        .width = output->width,
+        .height = output->height,
+    };
+
+    planned->dst = (struct vt_box_t){
+        .x = 0,
+        .y = 0,
+        .width = output->width,
+        .height = output->height,
+    };
+
+    planned->zpos = 0;
+    planned->acquire_fence_fd = -1;
+
+    planned->liftoff_layer = liftoff_layer_create(drm_output->liftoff_output);
+
+    if (!planned->liftoff_layer) {
+      drm_output->layer_plan.size -= sizeof(*planned);
+      return false;
+    }
+
+    planned->has_fb = false;
+    planned->use = NULL;
+    planned->surface = NULL;
+
+    drm_output->needs_compositing = true;
+    return true;
   }
+
+  if (!drm_output->crtc)
+    return false;
 
   struct drm_backend_state_t *drm = drm_output->drm_backend;
 
-  if (!drm->impl->atomic || !drm_output->liftoff_output) {
-    return _drm_legacy_test_output_layers(backend, output, layers, layer_count);
+  /* No atomic/liftoff pipeline means we cannot prove if the scene
+   * needs composition or not -> fallback to compositing */
+  if (!drm->impl->atomic || !drm_output->liftoff_output)
     return true;
-  }
 
   struct drm_liftoff_test_layer_t *test_layers =
       VT_ALLOC_FRAME(drm->comp, layer_count * sizeof(*test_layers));
@@ -2926,7 +2685,20 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
   if (!test_layers)
     return false;
 
+  memset(test_layers, 0, layer_count * sizeof(*test_layers));
+
+  /*
+   * Remember where this test's additions to layer_plan begin so that a
+   * failure while promoting accepted layers can roll back only the layers
+   * created by this invocation.
+   */
+  const size_t layer_plan_start = drm_output->layer_plan.size;
+
   bool ok = false;
+
+  uint32_t          mode_blob = 0;
+  uint32_t          flags = 0;
+  drmModeAtomicReq *req = NULL;
 
   for (size_t i = 0; i < layer_count; i++) {
     struct vt_output_layer_state_t  *layer = &layers[i];
@@ -2935,7 +2707,7 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
     if (!layer->surface || !layer->surface->current_buf_use ||
         !layer->surface->current_buf_use->buf) {
       VT_TRACE(backend->comp->log,
-               "DRM: layer %zu rejected from liftoff test: "
+               "layer %zu rejected from liftoff test: "
                "surface/buffer state unavailable.",
                i);
       continue;
@@ -2945,65 +2717,83 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
 
     struct vt_dmabuf_attr_t attr = {0};
 
+    /* 1. Prove layer has a DMABUF */
     if (!vt_buffer_get_dmabuf(use->buf, &attr)) {
       VT_TRACE(backend->comp->log,
-               "DRM: layer %zu surface=%p rejected from liftoff test: "
+               "layer %zu surface=%p rejected from liftoff test: "
                "buffer is not a DMABUF.",
                i, (void *)layer->surface);
-      continue;
+      goto composited;
     }
 
+    /* 2. Prove this output can scan out the layer's DMABUF */
     if (!_drm_output_can_scanout_dmabuf(drm, drm_output, &attr)) {
       VT_TRACE(backend->comp->log,
-               "DRM: layer %zu surface=%p rejected from liftoff test: "
+               "layer %zu surface=%p rejected from liftoff test: "
                "format=0x%08" PRIx32 " modifier=0x%016" PRIx64
                " is not scanout-capable on this output.",
                i, (void *)layer->surface, attr.format, attr.mod);
-      continue;
+      goto composited;
     }
 
+    /* 3. Prove the source geometry of the layer is valid */
     if (layer->src.x < 0 || layer->src.y < 0 || layer->src.width == 0 ||
         layer->src.height == 0) {
       VT_TRACE(backend->comp->log,
-               "DRM: layer %zu surface=%p rejected from liftoff test: "
+               "layer %zu surface=%p rejected from liftoff test: "
                "invalid source geometry [%d,%d %ux%u].",
                i, (void *)layer->surface, layer->src.x, layer->src.y,
                layer->src.width, layer->src.height);
-      continue;
+      goto composited;
     }
 
+    /* 4. Prove the source geometry is contained within the DMABUF of the layer
+     */
     if ((uint64_t)layer->src.x + (uint64_t)layer->src.width >
             (uint64_t)attr.width ||
         (uint64_t)layer->src.y + (uint64_t)layer->src.height >
             (uint64_t)attr.height) {
       VT_TRACE(backend->comp->log,
-               "DRM: layer %zu surface=%p rejected from liftoff test: "
+               "layer %zu surface=%p rejected from liftoff test: "
                "source [%d,%d %ux%u] exceeds buffer bounds %ux%u.",
                i, (void *)layer->surface, layer->src.x, layer->src.y,
                layer->src.width, layer->src.height, attr.width, attr.height);
-      continue;
+      goto composited;
     }
 
+    /* 5. Prove that this output can satisfy the need for a release fence
+     */
     if (use->release && vt_buffer_release_needs_fence(use->release) &&
         drm_output->crtc->props[VT_DRM_CRTC_OUT_FENCE_PTR] == 0) {
       VT_TRACE(backend->comp->log,
-               "DRM: layer %zu surface=%p rejected from liftoff test: "
+               "layer %zu surface=%p rejected from liftoff test: "
                "buffer requires release fence but CRTC %" PRIu32
                " has no OUT_FENCE_PTR property.",
                i, (void *)layer->surface, drm_output->crtc->id);
-      continue;
+      goto composited;
     }
 
+    /* 6. Prove that we can get a PRIME fb handle from the layer's buffer
+     */
     if (!drm_fb_init_from_buffer(drm, &test->fb, use->buf)) {
       VT_TRACE(backend->comp->log,
-               "DRM: layer %zu surface=%p rejected from liftoff test: "
+               "layer %zu surface=%p rejected from liftoff test: "
                "failed to import buffer as KMS framebuffer "
                "(format=0x%08" PRIx32 " modifier=0x%016" PRIx64 ").",
                i, (void *)layer->surface, attr.format, attr.mod);
-      continue;
+      goto composited;
     }
 
+    test->has_fb = true;
+
     test->use = vt_buffer_use_ref(use);
+    if (!test->use) {
+      VT_ERROR(backend->comp->log,
+               "failed to reference buffer use for layer %zu "
+               "surface=%p.",
+               i, (void *)layer->surface);
+      goto done;
+    }
 
     test->liftoff_layer = liftoff_layer_create(drm_output->liftoff_output);
 
@@ -3015,77 +2805,201 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
       goto done;
     }
 
-    if (!drm_liftoff_testing_set_layer(test->liftoff_layer, layer, test->fb.id,
-                                       use->acquire_fence_fd, i)) {
+    if (!drm_liftoff_set_layer_props(test->liftoff_layer, layer, test->fb.id,
+                                     use->acquire_fence_fd, i)) {
       VT_TRACE(backend->comp->log,
-               "DRM: layer %zu surface=%p rejected from liftoff test: "
+               "layer %zu surface=%p rejected from liftoff test: "
                "failed to set liftoff layer properties.",
                i, (void *)layer->surface);
 
-      liftoff_layer_set_property(test->liftoff_layer, "FB_ID", 0);
+      liftoff_layer_set_fb_composited(test->liftoff_layer);
 
       continue;
     }
+
+    continue;
+
+  composited:
+    test->use = vt_buffer_use_ref(use);
+    if (!test->use) {
+      VT_ERROR(backend->comp->log,
+               "failed to reference buffer use for layer %zu "
+               "surface=%p.",
+               i, (void *)layer->surface);
+      goto done;
+    }
+
+    test->liftoff_layer = liftoff_layer_create(drm_output->liftoff_output);
+
+    if (!test->liftoff_layer) {
+      VT_ERROR(backend->comp->log,
+               "Failed to create temporary libliftoff layer "
+               "for layer %zu surface=%p.",
+               i, (void *)layer->surface);
+      goto done;
+    }
+
+    if (!drm_liftoff_set_layer_props_composited(test->liftoff_layer, layer,
+                                                i)) {
+      goto done;
+    }
   }
 
-  uint32_t mode_blob = 0;
-  uint32_t flags = 0;
-
-  drmModeAtomicReq *req =
-      drm_atomic_create_test_req(drm, drm_output, &mode_blob, &flags);
+  req = drm_atomic_create_test_req(drm, drm_output, &mode_blob, &flags);
 
   if (!req)
+    goto done_req;
+
+  if (liftoff_layer_set_property(drm_output->liftoff_composition_layer, "FB_ID",
+                                 0) < 0) {
     goto done;
+  }
+
+  liftoff_layer_unset_property(drm_output->liftoff_composition_layer,
+                               "IN_FENCE_FD");
 
   int ret = liftoff_output_apply(drm_output->liftoff_output, req, flags, NULL);
 
   if (ret < 0) {
     VT_TRACE(backend->comp->log,
-             "DRM: libliftoff test allocation failed for output %p: %s",
+             "libliftoff test allocation failed for output %p: %s",
              (void *)output, strerror(-ret));
 
     goto done_req;
   }
 
   if (drmModeAtomicCommit(drm->drm_fd, req, flags, NULL) != 0) {
-    VT_TRACE(backend->comp->log,
-             "DRM: atomic TEST_ONLY failed for output %p: %s", (void *)output,
-             strerror(errno));
+    VT_TRACE(backend->comp->log, "atomic TEST_ONLY failed for output %p: %s",
+             (void *)output, strerror(errno));
 
     goto done_req;
   }
 
+  bool all_accepted = true;
+
   for (size_t i = 0; i < layer_count; i++) {
+    struct vt_output_layer_state_t  *layer = &layers[i];
     struct drm_liftoff_test_layer_t *test = &test_layers[i];
 
-    if (!test->liftoff_layer || test->fb.id == 0) {
+    if (!test->liftoff_layer) {
       layers[i].accepted = false;
+      all_accepted = false;
 
       VT_TRACE(backend->comp->log,
-               "DRM: layer %zu surface=%p rejected after liftoff test: "
+               "layer %zu surface=%p rejected after liftoff test: "
                "no valid liftoff layer or framebuffer.",
-               i, (void *)layers[i].surface);
+               i, (void *)layer->surface);
 
       continue;
     }
 
-    layers[i].accepted = !liftoff_layer_needs_composition(test->liftoff_layer);
+    bool layer_needs_composition =
+        liftoff_layer_needs_composition(test->liftoff_layer);
+
+    /* Each accepted layer must pass liftoff plane allocation to be accepted
+     * */
+    layers[i].accepted = !layer_needs_composition;
 
     VT_TRACE(backend->comp->log,
-             "DRM: layer test surface=%p accepted=%d "
+             "layer test surface=%p accepted=%d "
              "src=[%d,%d %ux%u] dst=[%d,%d %ux%u]",
-             (void *)layers[i].surface, layers[i].accepted, layers[i].src.x,
-             layers[i].src.y, layers[i].src.width, layers[i].src.height,
-             layers[i].dst.x, layers[i].dst.y, layers[i].dst.width,
-             layers[i].dst.height);
+             (void *)layer->surface, layers[i].accepted, layer->src.x,
+             layer->src.y, layer->src.width, layer->src.height, layer->dst.x,
+             layer->dst.y, layer->dst.width, layer->dst.height);
+
+    if (!layers[i].accepted) {
+      all_accepted = false;
+    }
+
+    struct drm_layer_state_t *planned =
+        wl_array_add(&drm_output->layer_plan, sizeof(*planned));
+
+    if (!planned)
+      goto fail_plan;
+
+    memset(planned, 0, sizeof(*planned));
+
+    planned->role =
+        layer_needs_composition ? VT_DRM_LAYER_COMPOSITED : VT_DRM_LAYER_DIRECT;
+
+    planned->surface = layer->surface;
+    planned->src = layer->src;
+    planned->dst = layer->dst;
+    planned->zpos = i;
+
+    planned->liftoff_layer = test->liftoff_layer;
+    test->liftoff_layer = NULL;
+
+    if (planned->role == VT_DRM_LAYER_DIRECT) {
+      /* For direct-capable layers, move the test's fb ownership to the planned
+       * layer */
+      if (!test->has_fb || test->fb.id == 0)
+        goto fail_plan;
+
+      planned->fb = test->fb;
+      planned->has_fb = test->has_fb;
+
+      memset(&test->fb, 0, sizeof(test->fb));
+      test->has_fb = false;
+
+      /* because this layer's buffer will be scanned out, we need to increase
+       * its use count */
+      planned->use = vt_buffer_use_ref(test->use);
+      if (!planned->use)
+        goto fail_plan;
+
+      planned->acquire_fence_fd = test->use->acquire_fence_fd;
+    } else {
+      /*
+       * the renderer is going to draw this surface into the compositor FB.
+       * The imported test FB can die with drm_liftoff_testing_finish()
+       */
+      planned->has_fb = false;
+      planned->acquire_fence_fd = -1;
+
+      layers[i].accepted = false;
+    }
   }
 
+  /* If every layer was accepted, we don't need the composition layer later */
+  if (all_accepted)
+    drm_output->needs_compositing = false;
+
   ok = true;
+  goto done_req;
+
+fail_plan:
+  /* Roll back only the drm_layer_state_t entries appended by this
+   * invocation. Some of them own FBs moved out of test_layers, so they
+   * must be fully finished here with _drm_layer_finish()
+   */
+  {
+    uint8_t *base = drm_output->layer_plan.data;
+
+    for (size_t offset = layer_plan_start; offset < drm_output->layer_plan.size;
+         offset += sizeof(struct drm_layer_state_t)) {
+      struct drm_layer_state_t *planned =
+          (struct drm_layer_state_t *)(base + offset);
+
+      _drm_layer_finish(drm_output, planned, -1);
+    }
+
+    drm_output->layer_plan.size = layer_plan_start;
+  }
+
+  for (size_t i = 0; i < layer_count; i++) {
+    layers[i].accepted = false;
+  }
+  drm_output->needs_compositing = true;
+
+  ok = false;
+
 done_req:
   if (mode_blob != 0)
     drmModeDestroyPropertyBlob(drm->drm_fd, mode_blob);
 
-  drmModeAtomicFree(req);
+  if (req)
+    drmModeAtomicFree(req);
 
 done:
   drm_liftoff_testing_finish(drm, test_layers, layer_count);
