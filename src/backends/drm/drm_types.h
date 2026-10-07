@@ -184,6 +184,23 @@ struct drm_backend_master_state_t {
   uint32_t                    n_drm;
 };
 
+struct drm_cursor_state_t {
+  struct drm_framebuffer_t fb;
+  bool has_fb;
+
+  struct gbm_bo *bo;
+
+  struct vt_buffer_use_t *use;
+
+  uint32_t width;
+  uint32_t height;
+
+  int32_t x;
+  int32_t y;
+
+  bool visible;
+};
+
 struct drm_output_state_t {
   struct vt_output_t         *base;
   struct drm_backend_state_t *drm_backend;
@@ -215,4 +232,6 @@ struct drm_output_state_t {
   struct liftoff_layer  *liftoff_composition_layer;
 
   bool needs_compositing;
+
+  struct drm_cursor_state_t cursor;
 };

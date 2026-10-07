@@ -193,8 +193,8 @@ static bool _atomic_prepare_liftoff(struct drm_backend_state_t *drm,
 
   /*
    * The composition layer belongs to the output and persists between
-   * frames. Start disabled every time so a composition FB from a
-   * previous frame can never accidentally survive into this one.
+   * frames. Frames begin with the FB disabled so a composition FB
+   * from a previous frame can never accidentally survive into this one.
    */
   if (liftoff_layer_set_property(output->liftoff_composition_layer, "FB_ID",
                                  0) < 0) {
@@ -423,6 +423,67 @@ static void _atomic_trace_liftoff_allocation(struct drm_backend_state_t *drm,
   }
 }
 
+static bool
+_atomic_add_cursor(struct drm_backend_state_t *drm,
+                   drmModeAtomicReq           *req,
+                   struct drm_output_state_t  *output) {
+  if (!drm || !req || !output || !output->crtc)
+    return false;
+
+  struct drm_plane_t *plane = output->crtc->plane_cursor;
+  if (!plane)
+    return true;
+
+  struct drm_cursor_state_t *cursor = &output->cursor;
+
+  if (!cursor->visible || !cursor->has_fb || cursor->fb.id == 0) {
+    return
+        _atomic_add_prop(drm, req, plane->id,
+                         plane->props[VT_DRM_PLANE_FB_ID], 0) &&
+        _atomic_add_prop(drm, req, plane->id,
+                         plane->props[VT_DRM_PLANE_CRTC_ID], 0);
+  }
+
+  return
+      _atomic_add_prop(drm, req, plane->id,
+                       plane->props[VT_DRM_PLANE_FB_ID],
+                       cursor->fb.id) &&
+
+      _atomic_add_prop(drm, req, plane->id,
+                       plane->props[VT_DRM_PLANE_CRTC_ID],
+                       output->crtc->id) &&
+
+      _atomic_add_prop(drm, req, plane->id,
+                       plane->props[VT_DRM_PLANE_CRTC_X],
+                       (uint64_t)(int64_t)cursor->x) &&
+
+      _atomic_add_prop(drm, req, plane->id,
+                       plane->props[VT_DRM_PLANE_CRTC_Y],
+                       (uint64_t)(int64_t)cursor->y) &&
+
+      _atomic_add_prop(drm, req, plane->id,
+                       plane->props[VT_DRM_PLANE_CRTC_W],
+                       cursor->width) &&
+
+      _atomic_add_prop(drm, req, plane->id,
+                       plane->props[VT_DRM_PLANE_CRTC_H],
+                       cursor->height) &&
+
+      _atomic_add_prop(drm, req, plane->id,
+                       plane->props[VT_DRM_PLANE_SRC_X], 0) &&
+
+      _atomic_add_prop(drm, req, plane->id,
+                       plane->props[VT_DRM_PLANE_SRC_Y], 0) &&
+
+      _atomic_add_prop(drm, req, plane->id,
+                       plane->props[VT_DRM_PLANE_SRC_W],
+                       (uint64_t)cursor->width << 16) &&
+
+      _atomic_add_prop(drm, req, plane->id,
+                       plane->props[VT_DRM_PLANE_SRC_H],
+                       (uint64_t)cursor->height << 16);
+}
+
 static drmModeAtomicReq *_atomic_build_req(struct drm_backend_state_t *drm,
                                            struct drm_kms_commit_t    *commit,
                                            uint32_t flags, uint32_t *mode_blob,
@@ -475,6 +536,9 @@ static drmModeAtomicReq *_atomic_build_req(struct drm_backend_state_t *drm,
              (void *)output->base, strerror(-ret));
     goto fail;
   }
+
+  if (!_atomic_add_cursor(drm, req, output))
+    goto fail;
 
   _atomic_trace_liftoff_allocation(drm, commit);
 

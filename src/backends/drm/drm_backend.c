@@ -129,10 +129,11 @@ static bool _drm_plane_has_format(struct drm_plane_t *plane, uint32_t format,
                                   uint64_t modifier);
 static void _drm_on_drm_change(struct wl_listener *listener, void *data);
 
-bool _drm_legacy_test_output_layers(struct vt_backend_t            *backend,
-                                    struct vt_output_t             *output,
-                                    struct vt_output_layer_state_t *layers,
-                                    size_t layer_count);
+static void
+_drm_output_cursor_update_position(struct drm_output_state_t *drm_output);
+
+static void
+_drm_output_cursor_import_image(struct drm_output_state_t *drm_output);
 
 static bool _added_global_keybinds = false;
 
@@ -1006,7 +1007,7 @@ static bool _drm_plane_init(struct drm_backend_state_t *drm,
       return false;
   }
 
-  if (drm->impl->atomic) {
+  if (drm->impl->atomic && plane->type != DRM_PLANE_TYPE_CURSOR) {
     plane->liftoff_plane = liftoff_plane_create(drm->liftoff_dev, plane->id);
     if (!plane->liftoff_plane) {
       VT_ERROR(comp->log,
@@ -1756,6 +1757,24 @@ static void _drm_on_drm_change(struct wl_listener *listener, void *data) {
     }
     break;
   }
+}
+
+static void _drm_output_cursor_update_position(struct drm_output_state_t *drm_output) {
+  struct vt_output_t *output = drm_output->base;
+  struct vt_seat_t   *seat = drm_output->drm_backend->comp->seat;
+
+  struct vt_surface_t *surface = seat->cursor.surf;
+
+  if (!surface || !surface->mapped) {
+    drm_output->cursor.visible = false;
+    return;
+  }
+
+  drm_output->cursor.x = seat->pointer_x - seat->cursor.hotspot_x - output->x;
+
+  drm_output->cursor.y = seat->pointer_y - seat->cursor.hotspot_y - output->y;
+
+  drm_output->cursor.visible = true;
 }
 
 static bool _drm_have_atomic(struct drm_backend_state_t *drm) {
