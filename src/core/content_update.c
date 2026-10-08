@@ -241,11 +241,13 @@ static bool _content_update_apply_one(struct vt_content_update_t *cu) {
   if (surf->proto_state.linux_dmabuf_v1)
     vt_proto_linux_dmabuf_v1_update_surface_feedback(surf);
 
-  bool damaged = vt_scene_node_damage_whole(surf->comp, surf->scene_node);
-  assert(damaged);
+  if (!vt_surface_has_role(surf, VT_SURFACE_ROLE_CURSOR)) {
+    bool damaged = vt_scene_node_damage_whole(surf->comp, surf->scene_node);
+    assert(damaged);
 
-  if (!damaged)
-    return false;
+    if (!damaged)
+      return false;
+  }
 
   return true;
 }

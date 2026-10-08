@@ -79,6 +79,8 @@ struct vt_backend_interface_t {
                        struct vt_output_t  *output);
   bool (*prepare_output_frame)(struct vt_backend_t *backend,
                                struct vt_output_t  *output);
+  bool (*commit_cursor_only)(struct vt_backend_t *backend,
+                             struct vt_output_t  *output);
 
   bool (*test_output_layers)(struct vt_backend_t            *backend,
                              struct vt_output_t             *output,

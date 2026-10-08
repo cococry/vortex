@@ -20,9 +20,9 @@
  * SOFTWARE.
  */
 
+#include "drm_types.h"
 #include "kms.h"
 
-#include "core/compositor.h"
 #include <errno.h>
 #include <string.h>
 #include <xf86drmMode.h>

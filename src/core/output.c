@@ -24,6 +24,20 @@
 
 #include "core_types.h"
 
+struct vt_output_t *vt_output_init(struct vt_backend_t               *backend,
+                                   struct vt_output_implementation_t *impl) {
+  assert(backend && backend->comp && impl);
+
+  struct vt_output_t *output = VT_ALLOC(backend->comp, sizeof(*output));
+  if (!output)
+    return NULL;
+
+  output->backend = backend;
+  output->impl = impl;
+
+  return output;
+}
+
 bool vt_output_track_presented_surface(struct vt_output_t  *output,
                                        struct vt_surface_t *surface) {
   assert(output && surface);

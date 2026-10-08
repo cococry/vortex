@@ -117,11 +117,17 @@ struct drm_kms_commit_t {
 
   bool active;
   bool modeset;
-  bool test_only;
+  bool test_only, cursor_only;
   bool async;
   bool event_pending;
 
   int out_fence_fd;
+
+  bool cursor_submitted;
+  struct drm_cursor_image_t *cursor_image;
+  int32_t cursor_x;
+  int32_t cursor_y;
+  bool cursor_visible;
 };
 
 struct drm_kms_impl_t {
@@ -184,9 +190,11 @@ struct drm_backend_master_state_t {
   uint32_t                    n_drm;
 };
 
-struct drm_cursor_state_t {
+struct drm_cursor_image_t {
+  struct drm_backend_state_t *drm;
+
   struct drm_framebuffer_t fb;
-  bool has_fb;
+  bool                     has_fb;
 
   struct gbm_bo *bo;
 
@@ -195,10 +203,16 @@ struct drm_cursor_state_t {
   uint32_t width;
   uint32_t height;
 
+  uint32_t refcount;
+};
+
+struct drm_cursor_state_t {
+  struct drm_cursor_image_t* image;
+
   int32_t x;
   int32_t y;
 
-  bool visible;
+  bool visible; 
 };
 
 struct drm_output_state_t {
@@ -234,4 +248,6 @@ struct drm_output_state_t {
   bool needs_compositing;
 
   struct drm_cursor_state_t cursor;
+  struct drm_cursor_image_t *kms_cursor_image;
+  struct drm_cursor_image_t *pending_cursor_image;
 };

@@ -47,6 +47,7 @@
 #include <wayland-util.h>
 
 #include "core/compositor.h"
+#include "core/output.h"
 #include "core/surface.h"
 #include "render/renderer.h"
 
@@ -64,6 +65,7 @@
 #include "render/drm_format.h"
 
 #include "atomic.h"
+#include "cursor.h"
 #include "drm_backend.h"
 #include "drm_types.h"
 #include "fb.h"
@@ -115,6 +117,9 @@ static void _drm_keybind_switch_vt(struct vt_compositor_t *comp,
 static void _drm_on_seat_enable(struct wl_listener *listener, void *data);
 static bool _drm_handle_frame_for_device(struct drm_backend_state_t *drm,
                                          struct vt_output_t         *output);
+static bool
+_drm_handle_cursor_commit_for_device(struct drm_backend_state_t *drm,
+                                     struct vt_output_t         *output);
 
 static void _drm_update_tearing_cap(struct drm_backend_state_t *drm);
 
@@ -129,13 +134,26 @@ static bool _drm_plane_has_format(struct drm_plane_t *plane, uint32_t format,
                                   uint64_t modifier);
 static void _drm_on_drm_change(struct wl_listener *listener, void *data);
 
+static void _drm_output_move_cursor(struct vt_output_t *output, int32_t x,
+                                    int32_t y);
+static bool _drm_output_update_cursor_image(struct vt_output_t     *output,
+                                            struct vt_buffer_use_t *use);
+static bool _drm_import_cursor_image(struct drm_output_state_t *drm_output,
+                                     struct vt_buffer_use_t    *use,
+                                     struct drm_cursor_image_t *next);
 static void
-_drm_output_cursor_update_position(struct drm_output_state_t *drm_output);
+_drm_take_commited_cursor_image(struct drm_output_state_t *drm_output,
+                                struct drm_kms_commit_t   *commit);
 
 static void
-_drm_output_cursor_import_image(struct drm_output_state_t *drm_output);
+_drm_output_cursor_update_visibility(struct vt_output_t        *output,
+                                     struct drm_cursor_state_t *cursor);
 
 static bool _added_global_keybinds = false;
+
+static struct vt_output_implementation_t drm_output_impl = {
+    .move_cursor = _drm_output_move_cursor,
+    .update_cursor_image = _drm_output_update_cursor_image};
 
 static void _drm_layer_finish(struct drm_output_state_t *drm_output,
                               struct drm_layer_state_t  *layer,
@@ -177,20 +195,29 @@ static void _drm_layers_finish(struct drm_output_state_t *drm_output,
   wl_array_release(layers);
   wl_array_init(layers);
 }
-
 static void _drm_complete_pending(struct drm_output_state_t *drm_output) {
   if (!drm_output || !drm_output->base || !drm_output->pending_valid)
     return;
 
-  if (drm_output->current_valid) {
-    _drm_layers_finish(drm_output, &drm_output->current_layers,
-                       drm_output->pending_out_fence_fd);
+  if (drm_output->pending_layers.size != 0) {
+    if (drm_output->current_valid) {
+      _drm_layers_finish(drm_output, &drm_output->current_layers,
+                         drm_output->pending_out_fence_fd);
+    }
+
+    drm_output->current_layers = drm_output->pending_layers;
+    wl_array_init(&drm_output->pending_layers);
+
+    drm_output->current_valid = drm_output->current_layers.size != 0;
   }
 
-  drm_output->current_layers = drm_output->pending_layers;
-  wl_array_init(&drm_output->pending_layers);
+  /* replace old scanned out KMS cursor image with newly scanned out image
+   * (pending_cursor_image was scanned out at this time)*/
+  if (drm_output->kms_cursor_image)
+    drm_cursor_image_unref(&drm_output->kms_cursor_image);
+  drm_output->kms_cursor_image = drm_output->pending_cursor_image;
+  drm_output->pending_cursor_image = NULL;
 
-  drm_output->current_valid = drm_output->current_layers.size != 0;
   drm_output->pending_valid = false;
   drm_output->flip_inflight = false;
   drm_output->modeset_bootstrapped = true;
@@ -223,6 +250,8 @@ static void _drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec,
     return;
   }
 
+  bool frame_commit = drm_output->pending_layers.size != 0;
+
   _drm_complete_pending(drm_output);
 
   if (!drm_output->connector_seen) {
@@ -230,11 +259,18 @@ static void _drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec,
     return;
   }
 
-  uint32_t t = vt_util_get_time_msec();
-  vt_comp_frame_done(output->backend->comp, output, t);
+  /* We only send frame_done's to our clients when this page flip event was not
+   * caused by a cursor-only commit */
+  if (frame_commit) {
+    uint32_t t = vt_util_get_time_msec();
+    vt_comp_frame_done(output->backend->comp, output, t);
+  }
 
-  if (output->needs_repaint)
+  if (output->needs_repaint) {
     vt_comp_schedule_repaint(output->backend->comp, output);
+  } else if (output->cursor_dirty) {
+    vt_comp_schedule_cursor_commit(output->backend->comp, output);
+  }
 }
 
 static void _drm_release_all_layers(struct vt_output_t *output) {
@@ -262,6 +298,13 @@ static void _drm_release_all_layers(struct vt_output_t *output) {
     close(drm_output->pending_out_fence_fd);
     drm_output->pending_out_fence_fd = -1;
   }
+
+  /* realease cursor resources*/
+  if (drm_output->pending_cursor_image)
+    drm_cursor_image_unref(&drm_output->pending_cursor_image);
+
+  if (drm_output->kms_cursor_image)
+    drm_cursor_image_unref(&drm_output->kms_cursor_image);
 }
 
 static bool _drm_devices_equal(drmDevicePtr a, drmDevicePtr b) {
@@ -1343,11 +1386,19 @@ static struct drm_crtc_t *_drm_pick_crtc(struct drm_backend_state_t *drm,
     drmModeEncoder *encoder = drmModeGetEncoder(drm->drm_fd, conn->encoder_id);
     if (encoder) {
       struct drm_crtc_t *crtc = _drm_find_crtc(drm, encoder->crtc_id);
+
       if (crtc && !crtc->in_use &&
           (encoder->possible_crtcs & (1u << crtc->index))) {
+        VT_TRACE(
+            drm->comp->log,
+            "Picked CRTC %" PRIu32 " (index=%" PRIu32 ") for connector %" PRIu32
+            " using current encoder %" PRIu32 ".",
+            crtc->id, crtc->index, conn->connector_id, encoder->encoder_id);
+
         drmModeFreeEncoder(encoder);
         return crtc;
       }
+
       drmModeFreeEncoder(encoder);
     }
   }
@@ -1360,6 +1411,12 @@ static struct drm_crtc_t *_drm_pick_crtc(struct drm_backend_state_t *drm,
     struct drm_crtc_t *crtc;
     wl_array_for_each(crtc, &drm->crtcs) {
       if (!crtc->in_use && (encoder->possible_crtcs & (1u << crtc->index))) {
+        VT_TRACE(
+            drm->comp->log,
+            "Picked CRTC %" PRIu32 " (index=%" PRIu32 ") for connector %" PRIu32
+            " using compatible encoder %" PRIu32 ".",
+            crtc->id, crtc->index, conn->connector_id, encoder->encoder_id);
+
         drmModeFreeEncoder(encoder);
         return crtc;
       }
@@ -1481,6 +1538,20 @@ static bool _drm_create_output_for_device(struct drm_backend_state_t *drm,
       drm->impl = &drm_kms_legacy_impl;
       _drm_update_tearing_cap(drm);
     }
+  }
+
+  if (!drm_output->crtc->plane_cursor) {
+    VT_WARN(comp->log,
+            "CRTC %" PRIu32
+            " does not have a cursor plane. Using software cursor on output %p",
+            drm_output->crtc->id, output);
+    output->cursor_mode = VT_CURSOR_MODE_SOFTWARE;
+  } else {
+    VT_TRACE(comp->log,
+             "CRTC %" PRIu32
+             " has a cursor plane. Using hardware cursor on output %p",
+             drm_output->crtc->id, output);
+    output->cursor_mode = VT_CURSOR_MODE_HARDWARE;
   }
 
   struct drm_backend_master_state_t *drm_master =
@@ -1668,14 +1739,12 @@ static bool _drm_scan_connectors(struct drm_backend_state_t *drm) {
       continue;
     }
 
-    output = VT_ALLOC(drm->comp, sizeof(*output));
+    output = vt_output_init(drm->backend, &drm_output_impl);
     if (!output) {
       drmModeFreeConnector(conn);
       continue;
     }
 
-    memset(output, 0, sizeof(*output));
-    output->backend = drm->backend;
     pixman_region32_init(&output->damage);
 
     if (!_drm_create_output_for_device(drm, output, conn)) {
@@ -1759,28 +1828,316 @@ static void _drm_on_drm_change(struct wl_listener *listener, void *data) {
   }
 }
 
-static void _drm_output_cursor_update_position(struct drm_output_state_t *drm_output) {
-  struct vt_output_t *output = drm_output->base;
-  struct vt_seat_t   *seat = drm_output->drm_backend->comp->seat;
+static void _drm_output_move_cursor(struct vt_output_t *output, int32_t x,
+                                    int32_t y) {
+  assert(output);
 
-  struct vt_surface_t *surface = seat->cursor.surf;
+  struct drm_output_state_t *drm_output =
+      BACKEND_DATA(output, struct drm_output_state_t);
 
-  if (!surface || !surface->mapped) {
-    drm_output->cursor.visible = false;
+  assert(drm_output && drm_output->base && drm_output->drm_backend);
+
+  struct drm_cursor_state_t *cursor = &drm_output->cursor;
+
+  int32_t old_x = cursor->x;
+  int32_t old_y = cursor->y;
+  bool    old_visible = cursor->visible;
+
+  cursor->x = x;
+  cursor->y = y;
+
+  const struct drm_cursor_image_t *image = cursor->image;
+
+  _drm_output_cursor_update_visibility(output, cursor);
+
+  cursor->visible = image && image->has_fb && x + (int32_t)image->width > 0 &&
+                    y + (int32_t)image->height > 0 &&
+                    x < (int32_t)output->width && y < (int32_t)output->height;
+
+  bool changed = old_x != cursor->x || old_y != cursor->y ||
+                 old_visible != cursor->visible;
+
+  if (!changed)
     return;
-  }
 
-  drm_output->cursor.x = seat->pointer_x - seat->cursor.hotspot_x - output->x;
+  VT_TRACE(drm_output->drm_backend->comp->log,
+           "DRM cursor moved on output=%p CRTC=%" PRIu32
+           " from [x: %d, y: %d, visible: %d] "
+           "to [x: %d, y: %d, visible: %d].",
+           (void *)output, drm_output->crtc->id, old_x, old_y, old_visible,
+           cursor->x, cursor->y, cursor->visible);
 
-  drm_output->cursor.y = seat->pointer_y - seat->cursor.hotspot_y - output->y;
-
-  drm_output->cursor.visible = true;
+  vt_comp_schedule_cursor_commit(output->backend->comp, output);
 }
 
-static bool _drm_have_atomic(struct drm_backend_state_t *drm) {
-  assert(drm);
-  assert(drm->caps[VT_DRM_CAP_ATOMIC_MODESET]);
-  return drm->impl == &drm_kms_atomic_impl;
+static bool _drm_output_update_cursor_image(struct vt_output_t     *output,
+                                            struct vt_buffer_use_t *use) {
+  assert(output);
+
+  struct drm_output_state_t *drm_output =
+      BACKEND_DATA(output, struct drm_output_state_t);
+
+  assert(drm_output && drm_output->drm_backend);
+
+  struct drm_backend_state_t *drm = drm_output->drm_backend;
+  struct drm_cursor_state_t  *cursor = &drm_output->cursor;
+
+  if (!use || !use->buf) {
+    VT_TRACE(drm->comp->log,
+             "DRM cursor image cleared on output=%p CRTC=%" PRIu32
+             "; disabling hardware cursor.",
+             (void *)drm_output->base, drm_output->crtc->id);
+
+    if (cursor->image)
+      drm_cursor_image_unref(&cursor->image);
+
+    cursor->visible = false;
+
+    vt_comp_schedule_cursor_commit(output->backend->comp, output);
+
+    return true;
+  }
+
+  struct drm_cursor_image_t *next_image = calloc(1, sizeof(*next_image));
+  if (!next_image)
+    return false;
+
+  next_image->drm = drm;
+  /* allocation owns the initial reference */
+  next_image->refcount = 1;
+
+  if (!_drm_import_cursor_image(drm_output, use, next_image)) {
+    /* clean up every partially created resource */
+    drm_cursor_image_unref(&next_image);
+
+    if (cursor->image)
+      drm_cursor_image_unref(&cursor->image);
+
+    VT_TRACE(drm->comp->log,
+             "Failed to import cursor image for output=%p CRTC=%" PRIu32
+             "; falling back to software cursor.",
+             (void *)output, drm_output->crtc->id);
+
+    cursor->visible = false;
+
+    output->cursor_mode = VT_CURSOR_MODE_SOFTWARE;
+    vt_comp_schedule_repaint(output->backend->comp, output);
+
+    return false;
+  }
+
+  if (cursor->image)
+    drm_cursor_image_unref(&cursor->image);
+
+  /* move reference */
+  cursor->image = next_image;
+
+  _drm_output_cursor_update_visibility(output, cursor);
+
+  output->cursor_mode = VT_CURSOR_MODE_HARDWARE;
+  vt_comp_schedule_cursor_commit(output->backend->comp, output);
+
+  return true;
+}
+
+static bool _drm_import_cursor_image(struct drm_output_state_t *drm_output,
+                                     struct vt_buffer_use_t    *use,
+                                     struct drm_cursor_image_t *next) {
+  assert(drm_output && drm_output->drm_backend && drm_output->crtc);
+
+  assert(use && use->buf);
+
+  struct drm_backend_state_t *drm = drm_output->drm_backend;
+  struct drm_plane_t         *plane = drm_output->crtc->plane_cursor;
+
+  if (!plane || plane->type != DRM_PLANE_TYPE_CURSOR)
+    return false;
+
+  struct vt_buffer_t *buf = use->buf;
+
+  /* DMABUF path. In principle, clients could have dmabuf cursors, which would
+   * be the fastest import. However, the overwhelming majority of clients use
+   * SHM */
+  struct vt_dmabuf_attr_t dmabuf = {0};
+  if (vt_buffer_get_dmabuf(buf, &dmabuf) &&
+      dmabuf.format == DRM_FORMAT_ARGB8888 &&
+      dmabuf.mod == DRM_FORMAT_MOD_LINEAR &&
+      _drm_plane_has_format(plane, DRM_FORMAT_ARGB8888,
+                            DRM_FORMAT_MOD_LINEAR)) {
+    /* We force ARGB and LINEAR for DMABUF cursors */
+
+    bool size_supported = false;
+
+    for (size_t i = 0; i < plane->n_cursor_sizes; i++) {
+      if (plane->cursor_sizes[i].width == dmabuf.width &&
+          plane->cursor_sizes[i].height == dmabuf.height) {
+        size_supported = true;
+        break;
+      }
+    }
+
+    if (size_supported && drm_fb_init_from_buffer(drm, &next->fb, buf)) {
+      next->has_fb = true;
+      next->use = vt_buffer_use_ref(use);
+
+      if (!next->use) {
+        drm_fb_finish(drm, &next->fb);
+        return false;
+      }
+
+      next->width = dmabuf.width;
+      next->height = dmabuf.height;
+
+      VT_TRACE(drm->comp->log,
+               "cursor image direct: buffer=%p fb=%" PRIu32
+               " size=%ux%u AR24 LINEAR",
+               (void *)buf, next->fb.id, next->width, next->height);
+
+      return true;
+    }
+  }
+  /* SHM path. Copy the client pixels into the GBM bo */
+  struct vt_shm_attr_t shm = {0};
+  if (!vt_buffer_get_shm(buf, &shm)) {
+    VT_TRACE(drm->comp->log,
+             "cursor image buffer=%p is neither directly scanout-capable "
+             "DMABUF nor CPU-readable SHM",
+             (void *)buf);
+    return false;
+  }
+
+  if (!shm.data || shm.width == 0 || shm.height == 0 || shm.stride == 0)
+    return false;
+
+  /* Pick viable supported hardware cursor size */
+  uint32_t bo_width = 0;
+  uint32_t bo_height = 0;
+  for (size_t i = 0; i < plane->n_cursor_sizes; i++) {
+    uint32_t w = plane->cursor_sizes[i].width;
+    uint32_t h = plane->cursor_sizes[i].height;
+
+    if (w < shm.width || h < shm.height)
+      continue;
+
+    if (bo_width == 0 || (uint64_t)w * h < (uint64_t)bo_width * bo_height) {
+      bo_width = w;
+      bo_height = h;
+    }
+  }
+
+  if (bo_width == 0 || bo_height == 0) {
+    VT_TRACE(drm->comp->log, "cursor %ux%u exceeds hardware cursor size",
+             shm.width, shm.height);
+    return false;
+  }
+
+  next->bo =
+      gbm_bo_create(drm->gbm_dev, bo_width, bo_height, GBM_FORMAT_ARGB8888,
+                    GBM_BO_USE_CURSOR | GBM_BO_USE_WRITE);
+
+  if (!next->bo) {
+    VT_WARN(drm->comp->log, "failed to allocate %ux%u cursor GBM BO", bo_width,
+            bo_height);
+    return false;
+  }
+
+  uint32_t dst_stride = 0;
+  void    *map_data = NULL;
+
+  uint8_t *dst = gbm_bo_map(next->bo, 0, 0, bo_width, bo_height,
+                            GBM_BO_TRANSFER_WRITE, &dst_stride, &map_data);
+
+  if (!dst) {
+    VT_WARN(drm->comp->log, "failed to map cursor GBM BO");
+    gbm_bo_destroy(next->bo);
+    return false;
+  }
+
+  /* The entire hardware cursor BO must be transparent outside the actual
+   * cursor image */
+  for (uint32_t y = 0; y < bo_height; y++)
+    memset(dst + (size_t)y * dst_stride, 0, dst_stride);
+
+  const uint8_t *src = shm.data;
+
+  switch (shm.format) {
+
+  case WL_SHM_FORMAT_ARGB8888:
+    for (uint32_t y = 0; y < shm.height; y++) {
+      memcpy(dst + (size_t)y * dst_stride, src + (size_t)y * shm.stride,
+             (size_t)shm.width * 4);
+    }
+    break;
+  case WL_SHM_FORMAT_XRGB8888:
+    /* XRGB -> ARGB. Cursor planes require meaningful alpha, so we force
+     * fully opaque alpha */
+    for (uint32_t y = 0; y < shm.height; y++) {
+      const uint32_t *src_row =
+          (const uint32_t *)(src + (size_t)y * shm.stride);
+
+      uint32_t *dst_row = (uint32_t *)(dst + (size_t)y * dst_stride);
+
+      for (uint32_t x = 0; x < shm.width; x++)
+        dst_row[x] = src_row[x] | 0xff000000u;
+    }
+    break;
+  default:
+    VT_TRACE(drm->comp->log, "unsupported SHM cursor format=0x%08" PRIx32,
+             shm.format);
+    break;
+  }
+
+  gbm_bo_unmap(next->bo, map_data);
+
+  /* The created drm_framebuffer_t will not cleanup this GBM bo at
+   * drm_fb_finish() as it is standalone and not owned by a GBM surface.
+   * _drm_cursor_image_finish() thus manually destroys the GBO bo */
+  if (!drm_fb_init_from_gbm(drm, &next->fb, next->bo, NULL)) {
+    VT_WARN(drm->comp->log, "failed to create KMS FB for cursor BO");
+
+    gbm_bo_destroy(next->bo);
+    return false;
+  }
+
+  next->has_fb = true;
+
+  /* size is full hardware cursor size (not image size)*/
+  next->width = bo_width;
+  next->height = bo_height;
+
+  VT_TRACE(drm->comp->log,
+           "cursor image copied: surface=%p %ux%u -> "
+           "BO=%ux%u fb=%" PRIu32 " AR24",
+           (void *)buf, shm.width, shm.height, bo_width, bo_height,
+           next->fb.id);
+
+  return true;
+}
+
+static void
+_drm_take_commited_cursor_image(struct drm_output_state_t *drm_output,
+                                struct drm_kms_commit_t   *commit) {
+  assert(drm_output && commit);
+  assert(!drm_output->pending_valid);
+  assert(commit->cursor_submitted);
+
+  if (drm_output->pending_cursor_image)
+    drm_cursor_image_unref(&drm_output->pending_cursor_image);
+
+  drm_output->pending_cursor_image = commit->cursor_image;
+  commit->cursor_image = NULL;
+  commit->cursor_submitted = false;
+}
+
+static void
+_drm_output_cursor_update_visibility(struct vt_output_t        *output,
+                                     struct drm_cursor_state_t *cursor) {
+  const struct drm_cursor_image_t *image = cursor->image;
+
+  cursor->visible =
+      image && image->has_fb && cursor->x + (int32_t)image->width > 0 &&
+      cursor->y + (int32_t)image->height > 0 &&
+      cursor->x < (int32_t)output->width && cursor->y < (int32_t)output->height;
 }
 
 static bool _drm_destroy_output_for_device(struct drm_backend_state_t *drm,
@@ -2148,7 +2505,6 @@ _drm_output_add_composition_layer(struct drm_backend_state_t *drm,
 
   return true;
 }
-
 static bool _drm_handle_frame_for_device(struct drm_backend_state_t *drm,
                                          struct vt_output_t         *output) {
   if (!drm || !drm->comp || !output || !output->user_data || !drm->impl)
@@ -2195,6 +2551,7 @@ static bool _drm_handle_frame_for_device(struct drm_backend_state_t *drm,
       .active = true,
       .modeset = drm_output->needs_modeset,
       .test_only = false,
+      .cursor_only = false,
       .async = drm_output->allow_tearing &&
                drm->caps[VT_DRM_CAP_TEARING_PAGE_FLIPS] &&
                !drm_output->needs_modeset,
@@ -2208,6 +2565,8 @@ static bool _drm_handle_frame_for_device(struct drm_backend_state_t *drm,
     output->needs_repaint = true;
     return false;
   }
+
+  _drm_take_commited_cursor_image(drm_output, &commit);
 
   struct drm_layer_state_t *layer;
 
@@ -2252,6 +2611,60 @@ static bool _drm_handle_frame_for_device(struct drm_backend_state_t *drm,
   }
 
   output->needs_repaint = false;
+  return true;
+}
+static bool
+_drm_handle_cursor_commit_for_device(struct drm_backend_state_t *drm,
+                                     struct vt_output_t         *output) {
+  if (!drm || !output || !output->user_data || !drm->impl)
+    return false;
+
+  struct drm_output_state_t *drm_output =
+      BACKEND_DATA(output, struct drm_output_state_t);
+
+  if (!drm_output || drm_output->drm_backend != drm || !drm_output->crtc ||
+      !drm_output->crtc->plane_cursor || !drm_output->modeset_bootstrapped ||
+      drm_output->needs_modeset || drm_output->flip_inflight ||
+      drm_output->pending_valid)
+    return false;
+
+  if (!output->cursor_dirty)
+    return true;
+
+  struct drm_kms_commit_t commit = {
+      .output = drm_output,
+      .active = true,
+      .modeset = false,
+      .test_only = false,
+      .cursor_only = true,
+      .async = false,
+      .out_fence_fd = -1,
+  };
+
+  wl_array_init(&commit.layers);
+
+  /* populates the commit's cursor state with the desired state from
+   * drm_output->cursor */
+  if (!drm->impl->commit(drm, &commit)) {
+    wl_array_release(&commit.layers);
+    return false;
+  }
+
+  /* takes the desired state and promotes it to KMS pending state while
+   * replacing the old KMS pending state */
+  _drm_take_commited_cursor_image(drm_output, &commit);
+
+  drm_output->pending_valid = true;
+  drm_output->pending_out_fence_fd = commit.out_fence_fd;
+
+  if (commit.event_pending) {
+    drm_output->flip_inflight = true;
+  } else {
+    _drm_complete_pending(drm_output);
+  }
+
+  wl_array_release(&commit.layers);
+
   return true;
 }
 
@@ -2514,6 +2927,17 @@ bool backend_handle_frame_drm(struct vt_backend_t *backend,
   return _drm_handle_frame_for_device(drm_output->drm_backend, output);
 }
 
+bool backend_commit_cursor_only_drm(struct vt_backend_t *backend,
+                                    struct vt_output_t  *output) {
+  if (!backend || !backend->comp || !backend->user_data || !output ||
+      !output->user_data)
+    return false;
+
+  struct drm_output_state_t *drm_output =
+      BACKEND_DATA(output, struct drm_output_state_t);
+  return _drm_handle_cursor_commit_for_device(drm_output->drm_backend, output);
+}
+
 bool backend_terminate_drm(struct vt_backend_t *backend) {
   if (!backend || !backend->comp || !backend->user_data)
     return false;
@@ -2722,6 +3146,9 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
   for (size_t i = 0; i < layer_count; i++) {
     struct vt_output_layer_state_t  *layer = &layers[i];
     struct drm_liftoff_test_layer_t *test = &test_layers[i];
+
+    if (vt_surface_has_role(layer->surface, VT_SURFACE_ROLE_CURSOR))
+      continue;
 
     if (!layer->surface || !layer->surface->current_buf_use ||
         !layer->surface->current_buf_use->buf) {
@@ -3262,6 +3689,7 @@ bool backend_implement_drm(struct vt_compositor_t *comp) {
       .init = backend_init_drm,
       .is_dmabuf_importable = backend_is_dmabuf_importable_drm,
       .handle_frame = backend_handle_frame_drm,
+      .commit_cursor_only = backend_commit_cursor_only_drm,
       .terminate = backend_terminate_drm,
       .prepare_output_frame = backend_prepare_output_frame_drm,
       .test_output_layers = backend_test_output_layers_drm,

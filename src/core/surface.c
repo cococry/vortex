@@ -122,9 +122,6 @@ bool vt_surface_apply_buffer_use(struct vt_surface_t    *surf,
     vt_buffer_use_unref(&old);
   }
 
-  if (!vt_scene_node_damage_whole(surf->comp, surf->scene_node))
-    return false;
-
   return true;
 }
 

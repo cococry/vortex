@@ -35,6 +35,7 @@
 #include <wayland-server-core.h>
 #include <wayland-util.h>
 
+#include "../..//core/output.h"
 #include "../../core/compositor.h"
 #include "../../protocols/linux_dmabuf.h"
 #include "../../protocols/linux_explicit_sync.h"
@@ -140,6 +141,11 @@ static struct vt_output_mode_t *_wl_find_output_mode(struct wl_list *list,
                                                      int32_t         width,
                                                      int32_t         height,
                                                      uint32_t        refresh);
+
+struct vt_output_implementation_t wl_output_impl = {
+  .update_cursor_image = NULL,
+  .move_cursor = NULL
+};
 
 static bool _wl_set_fake_output_mode(struct vt_output_t *output, int32_t width,
                                      int32_t height, int32_t refresh) {
@@ -413,8 +419,7 @@ bool _wl_backend_init_active_outputs(struct vt_backend_t *backend) {
   }
 
   for (uint32_t i = 0; i < backend->comp->n_virtual_outputs; i++) {
-    struct vt_output_t *output =
-        VT_ALLOC(backend->comp, sizeof(struct vt_output_t));
+    struct vt_output_t *output = vt_output_init(backend, &wl_output_impl);
     if (!_wl_backend_create_output(backend, output, NULL)) {
       VT_ERROR(backend->comp->log, "Failed to setup internal WL output.");
       return false;
@@ -563,8 +568,9 @@ bool _wl_backend_create_output(struct vt_backend_t *backend,
   }
 
   output->needs_damage_rebuild = true;
+  output->cursor_mode = VT_CURSOR_MODE_SOFTWARE;
+
   pixman_region32_init(&output->damage);
-  output->backend = backend;
   wl_list_init(&output->physical.modes);
   wl_list_init(&output->presented_surfaces);
   wl_list_init(&output->proto.resources);

@@ -39,6 +39,9 @@ void vt_comp_frame_done_all(struct vt_compositor_t *c, uint32_t t);
 void vt_comp_schedule_repaint(struct vt_compositor_t *c,
                               struct vt_output_t     *output);
 
+void vt_comp_schedule_cursor_commit(struct vt_compositor_t *c,
+                                    struct vt_output_t     *output);
+
 void vt_comp_repaint_scene(struct vt_compositor_t *c,
                            struct vt_output_t     *output);
 

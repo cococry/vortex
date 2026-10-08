@@ -20,6 +20,7 @@
  * SOFTWARE.
  */
 
+#include "cursor.h"
 #include "drm_types.h"
 #include "fb.h"
 #include "libliftoff.h"
@@ -116,7 +117,7 @@ static uint32_t _atomic_commit_flags(const struct drm_kms_commit_t *commit,
   if (commit->modeset)
     flags |= DRM_MODE_ATOMIC_ALLOW_MODESET;
 
-  if (async && !commit->test_only && !commit->modeset)
+  if (async && !commit->test_only && !commit->modeset && !commit->cursor_only)
     flags |= DRM_MODE_PAGE_FLIP_ASYNC;
 
   return flags;
@@ -423,70 +424,82 @@ static void _atomic_trace_liftoff_allocation(struct drm_backend_state_t *drm,
   }
 }
 
-static bool
-_atomic_add_cursor(struct drm_backend_state_t *drm,
-                   drmModeAtomicReq           *req,
-                   struct drm_output_state_t  *output) {
-  if (!drm || !req || !output || !output->crtc)
-    return false;
+static bool _atomic_add_cursor(struct drm_backend_state_t *drm,
+                               struct drm_kms_commit_t    *commit,
+                               drmModeAtomicReq           *req) {
+  struct drm_output_state_t *output = commit->output;
+  struct drm_plane_t        *plane = output->crtc->plane_cursor;
 
-  struct drm_plane_t *plane = output->crtc->plane_cursor;
   if (!plane)
     return true;
 
-  struct drm_cursor_state_t *cursor = &output->cursor;
+  if (!commit->cursor_visible || !commit->cursor_image) {
+    if (!_atomic_add_prop(drm, req, plane->id, plane->props[VT_DRM_PLANE_FB_ID],
+                          0) ||
+        !_atomic_add_prop(drm, req, plane->id,
+                          plane->props[VT_DRM_PLANE_CRTC_ID], 0))
+      return false;
 
-  if (!cursor->visible || !cursor->has_fb || cursor->fb.id == 0) {
-    return
-        _atomic_add_prop(drm, req, plane->id,
-                         plane->props[VT_DRM_PLANE_FB_ID], 0) &&
-        _atomic_add_prop(drm, req, plane->id,
-                         plane->props[VT_DRM_PLANE_CRTC_ID], 0);
+    return true;
   }
 
-  return
-      _atomic_add_prop(drm, req, plane->id,
-                       plane->props[VT_DRM_PLANE_FB_ID],
-                       cursor->fb.id) &&
+  struct drm_cursor_image_t *image = commit->cursor_image;
 
-      _atomic_add_prop(drm, req, plane->id,
-                       plane->props[VT_DRM_PLANE_CRTC_ID],
-                       output->crtc->id) &&
+  if (!_atomic_add_prop(drm, req, plane->id, plane->props[VT_DRM_PLANE_FB_ID],
+                        image->fb.id) ||
+      !_atomic_add_prop(drm, req, plane->id, plane->props[VT_DRM_PLANE_CRTC_ID],
+                        output->crtc->id) ||
+      !_atomic_add_prop(drm, req, plane->id, plane->props[VT_DRM_PLANE_CRTC_X],
+                        (uint64_t)(int64_t)commit->cursor_x) ||
+      !_atomic_add_prop(drm, req, plane->id, plane->props[VT_DRM_PLANE_CRTC_Y],
+                        (uint64_t)(int64_t)commit->cursor_y) ||
+      !_atomic_add_prop(drm, req, plane->id, plane->props[VT_DRM_PLANE_CRTC_W],
+                        image->width) ||
+      !_atomic_add_prop(drm, req, plane->id, plane->props[VT_DRM_PLANE_CRTC_H],
+                        image->height) ||
+      !_atomic_add_prop(drm, req, plane->id, plane->props[VT_DRM_PLANE_SRC_X],
+                        0) ||
+      !_atomic_add_prop(drm, req, plane->id, plane->props[VT_DRM_PLANE_SRC_Y],
+                        0) ||
+      !_atomic_add_prop(drm, req, plane->id, plane->props[VT_DRM_PLANE_SRC_W],
+                        (uint64_t)image->width << 16) ||
+      !_atomic_add_prop(drm, req, plane->id, plane->props[VT_DRM_PLANE_SRC_H],
+                        (uint64_t)image->height << 16))
+    return false;
 
-      _atomic_add_prop(drm, req, plane->id,
-                       plane->props[VT_DRM_PLANE_CRTC_X],
-                       (uint64_t)(int64_t)cursor->x) &&
+  return true;
+}
+static void _atomic_snapshot_cursor(struct drm_kms_commit_t *commit) {
+  assert(commit && commit->output);
 
-      _atomic_add_prop(drm, req, plane->id,
-                       plane->props[VT_DRM_PLANE_CRTC_Y],
-                       (uint64_t)(int64_t)cursor->y) &&
+  if (commit->cursor_submitted)
+    return;
 
-      _atomic_add_prop(drm, req, plane->id,
-                       plane->props[VT_DRM_PLANE_CRTC_W],
-                       cursor->width) &&
+  struct drm_cursor_state_t *cursor = &commit->output->cursor;
 
-      _atomic_add_prop(drm, req, plane->id,
-                       plane->props[VT_DRM_PLANE_CRTC_H],
-                       cursor->height) &&
+  commit->cursor_submitted = true;
+  commit->cursor_x = cursor->x;
+  commit->cursor_y = cursor->y;
+  commit->cursor_visible = cursor->visible;
 
-      _atomic_add_prop(drm, req, plane->id,
-                       plane->props[VT_DRM_PLANE_SRC_X], 0) &&
+  if (cursor->visible && cursor->image)
+    commit->cursor_image = drm_cursor_image_ref(cursor->image);
+}
 
-      _atomic_add_prop(drm, req, plane->id,
-                       plane->props[VT_DRM_PLANE_SRC_Y], 0) &&
+static void _atomic_release_cursor_snapshot(struct drm_kms_commit_t *commit) {
+  if (!commit)
+    return;
 
-      _atomic_add_prop(drm, req, plane->id,
-                       plane->props[VT_DRM_PLANE_SRC_W],
-                       (uint64_t)cursor->width << 16) &&
+  if (commit->cursor_image)
+    drm_cursor_image_unref(&commit->cursor_image);
 
-      _atomic_add_prop(drm, req, plane->id,
-                       plane->props[VT_DRM_PLANE_SRC_H],
-                       (uint64_t)cursor->height << 16);
+  commit->cursor_submitted = false;
 }
 
 static drmModeAtomicReq *_atomic_build_req(struct drm_backend_state_t *drm,
                                            struct drm_kms_commit_t    *commit,
-                                           uint32_t flags, uint32_t *mode_blob,
+                                           uint32_t flags,
+                                           uint32_t *mode_blob,
                                            int *out_fence_fd) {
   if (!drm || !commit || !commit->output || !commit->output->crtc ||
       !mode_blob || !out_fence_fd) {
@@ -503,6 +516,17 @@ static drmModeAtomicReq *_atomic_build_req(struct drm_backend_state_t *drm,
   if (!req)
     return NULL;
 
+  if (commit->cursor_only) {
+    if (!_atomic_add_prop(drm, req, crtc->id,
+                          crtc->props[VT_DRM_CRTC_ACTIVE],
+                          commit->active ? 1 : 0) ||
+        !_atomic_add_cursor(drm, commit, req)) {
+      goto fail;
+    }
+
+    return req;
+  }
+
   /* Connector/CRTC properties still are set by vortex,
    * Liftoff only owns hardware plane assignment. */
   if (commit->modeset) {
@@ -516,9 +540,11 @@ static drmModeAtomicReq *_atomic_build_req(struct drm_backend_state_t *drm,
     if (!_atomic_add_prop(drm, req, output->conn_id,
                           output->conn_props[VT_DRM_CONNECTOR_CRTC_ID],
                           crtc->id) ||
-        !_atomic_add_prop(drm, req, crtc->id, crtc->props[VT_DRM_CRTC_MODE_ID],
+        !_atomic_add_prop(drm, req, crtc->id,
+                          crtc->props[VT_DRM_CRTC_MODE_ID],
                           *mode_blob) ||
-        !_atomic_add_prop(drm, req, crtc->id, crtc->props[VT_DRM_CRTC_ACTIVE],
+        !_atomic_add_prop(drm, req, crtc->id,
+                          crtc->props[VT_DRM_CRTC_ACTIVE],
                           commit->active ? 1 : 0)) {
       goto fail;
     }
@@ -537,14 +563,14 @@ static drmModeAtomicReq *_atomic_build_req(struct drm_backend_state_t *drm,
     goto fail;
   }
 
-  if (!_atomic_add_cursor(drm, req, output))
-    goto fail;
-
   _atomic_trace_liftoff_allocation(drm, commit);
 
   if (!_atomic_validate_liftoff_allocation(drm, commit)) {
     goto fail;
   }
+
+  if (!_atomic_add_cursor(drm, commit, req))
+    goto fail;
 
   if (!commit->test_only && crtc->props[VT_DRM_CRTC_OUT_FENCE_PTR] != 0) {
     if (!_atomic_add_prop(drm, req, crtc->id,
@@ -581,18 +607,27 @@ _atomic_destroy_frame_liftoff_layers(struct drm_kms_commit_t *commit) {
 
 static bool _atomic_commit(struct drm_backend_state_t *drm,
                            struct drm_kms_commit_t    *commit) {
-  if (!drm || !commit || !commit->output || !commit->output->crtc ||
-      !commit->output->liftoff_output || commit->layers.size == 0) {
+  if (!drm || !commit || !commit->output || !commit->output->crtc)
     return false;
-  }
 
   struct drm_output_state_t *output = commit->output;
 
-  bool want_async = commit->async && !commit->test_only && !commit->modeset;
+  if (commit->cursor_only) {
+    if (!output->crtc->plane_cursor || commit->modeset)
+      return false;
+  } else if (!output->liftoff_output || commit->layers.size == 0) {
+    return false;
+  }
 
-  const unsigned int max_attempts = want_async ? 2u : 1u;
+  /* snapshots desired cursor state onto the commit */
+  _atomic_snapshot_cursor(commit);
 
-  for (unsigned int attempt = 0; attempt < max_attempts; attempt++) {
+  bool want_async = commit->async && !commit->test_only && !commit->modeset &&
+                    !commit->cursor_only;
+
+  const uint32_t max_attempts = want_async ? 2u : 1u;
+
+  for (uint32_t attempt = 0; attempt < max_attempts; attempt++) {
     bool use_async = want_async && attempt == 0;
 
     uint32_t flags = _atomic_commit_flags(commit, use_async);
@@ -613,6 +648,7 @@ static bool _atomic_commit(struct drm_backend_state_t *drm,
         continue;
       }
 
+      _atomic_release_cursor_snapshot(commit);
       return false;
     }
 
@@ -627,20 +663,25 @@ static bool _atomic_commit(struct drm_backend_state_t *drm,
       drmModeDestroyPropertyBlob(drm->drm_fd, mode_blob);
 
     if (ret == 0) {
-      if (!commit->test_only) {
+      if (!commit->test_only && !commit->cursor_only) {
         /* Liftoff output-layer state must be synced by removing any liftoff
          * layers created in this frame */
         _atomic_destroy_frame_liftoff_layers(commit);
       }
+
       commit->event_pending = !commit->test_only && !commit->modeset;
 
       commit->out_fence_fd = out_fence_fd;
       out_fence_fd = -1;
 
       VT_TRACE(drm->comp->log,
-               "atomic Liftoff commit succeeded "
+               "atomic %s commit succeeded "
                "output=%p async=%d flags=0x%" PRIx32 ".",
+               commit->cursor_only ? "cursor-only" : "Liftoff",
                (void *)output->base, use_async, flags);
+
+      if (commit->test_only)
+        _atomic_release_cursor_snapshot(commit);
 
       return true;
     }
@@ -657,12 +698,15 @@ static bool _atomic_commit(struct drm_backend_state_t *drm,
     }
 
     VT_ERROR(drm->comp->log,
-             "Atomic DRM/Liftoff commit failed for output=%p: %s",
+             "Atomic DRM/%s commit failed for output=%p: %s",
+             commit->cursor_only ? "cursor" : "Liftoff",
              (void *)output->base, strerror(commit_errno));
 
+    _atomic_release_cursor_snapshot(commit);
     return false;
   }
 
+  _atomic_release_cursor_snapshot(commit);
   return false;
 }
 

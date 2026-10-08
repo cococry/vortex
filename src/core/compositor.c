@@ -59,7 +59,7 @@
 
 #define _SUBSYS_NAME "COMPOSITOR"
 
-static void _vt_comp_frame_handler(void *data);
+static void _vt_comp_commit_handler(void *data);
 
 static bool _vt_comp_render_output(struct vt_compositor_t *c,
                                    struct vt_output_t     *output);
@@ -92,6 +92,8 @@ static void _vt_comp_wl_region_subtract(struct wl_client   *client,
                                         struct wl_resource *resource, int32_t x,
                                         int32_t y, int32_t width,
                                         int32_t height);
+static void _vt_comp_schedule_output_commit(struct vt_compositor_t *comp,
+                                            struct vt_output_t     *output);
 
 static const struct wl_compositor_interface compositor_impl = {
     .create_surface = _vt_comp_wl_surface_create,
@@ -105,47 +107,45 @@ static const struct wl_region_interface region_impl = {
 
 static void *_vt_comp_dl_handle = NULL;
 
-void _vt_comp_frame_handler(void *data) {
+void _vt_comp_commit_handler(void *data) {
+
   struct vt_output_t *output = data;
-  if (!output)
-    return;
-  if (!output->backend) {
-    output->repaint_pending = false;
-    output->repaint_source = NULL;
-    return;
-  }
+  assert(output && output->backend);
+  output->commit_source = NULL;
+
   struct vt_compositor_t *c = output->backend->comp;
+  assert(c && c->backend);
 
-  if (!c || !c->backend || !c->backend->impl.prepare_output_frame) {
-    output->repaint_pending = false;
-    output->repaint_source = NULL;
-    return;
-  }
   if (output->backend->comp->suspended) {
-    // Avoid busy loop
-    output->repaint_pending = false;
-    output->repaint_source = NULL;
     return;
   }
 
-  if (!c->backend->impl.prepare_output_frame(c->backend, output)) {
-    // Avoid busy loop
-    output->repaint_pending = false;
-    output->repaint_source = NULL;
-    return;
+  if (output->needs_repaint) {
+    if (c->backend->impl.prepare_output_frame &&
+        !c->backend->impl.prepare_output_frame(c->backend, output)) {
+      return;
+    }
+
+    if (!_vt_comp_render_output(c, output)) {
+      return;
+    }
+
+    VT_TRACE(c->log, "Pending repaint on output %p got satisfied.", output);
+    output->needs_repaint = false;
+    output->cursor_dirty = false;
   }
-  if (!_vt_comp_render_output(c, output)) {
-    // Avoid busy loop
-    output->repaint_pending = false;
-    output->repaint_source = NULL;
-    return;
+
+  if (output->cursor_dirty) {
+    /* Backends that schedule a cursor commit must have a way to commit only the
+     * cursor */
+    struct vt_backend_t *backend = output->backend;
+
+    assert(backend->impl.commit_cursor_only);
+
+    if (backend->impl.commit_cursor_only(backend, output))
+      output->cursor_dirty = false;
   }
-  VT_TRACE(c->log, "Pending repaint on output %p got satisfied.", output);
-  if (output->repaint_source) {
-    wl_event_source_remove(output->repaint_source);
-    output->repaint_source = NULL;
-  }
-  output->repaint_pending = false;
+
 }
 
 /* Heed my words struggeler... */
@@ -185,7 +185,6 @@ bool _vt_comp_render_output(struct vt_compositor_t *c,
 
   vt_comp_repaint_scene(c, output);
   c->backend->impl.handle_frame(c->backend, output);
-  output->repaint_pending = false;
 
   return true;
 }
@@ -603,6 +602,17 @@ void _vt_comp_wl_region_subtract(struct wl_client   *client,
   pixman_region32_fini(&rect);
 }
 
+static void _vt_comp_schedule_output_commit(struct vt_compositor_t *comp,
+                                            struct vt_output_t     *output) {
+  assert(output && comp);
+
+  if (output->commit_source)
+    return;
+
+  output->commit_source =
+      wl_event_loop_add_idle(comp->wl.evloop, _vt_comp_commit_handler, output);
+}
+
 static void _wl_region_add(struct wl_client   *client,
                            struct wl_resource *resource, int32_t x, int32_t y,
                            int32_t width, int32_t height) {
@@ -844,7 +854,6 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
   uint32_t            root_w = 0, root_h = 0;
   struct vt_output_t *output;
   wl_list_for_each(output, &c->outputs, link_global) {
-    output->repaint_pending = false;
     vt_comp_schedule_repaint(c, output);
     root_w += output->width;
     root_h += output->height;
@@ -960,20 +969,27 @@ void vt_comp_schedule_repaint(struct vt_compositor_t *c,
     return;
   }
 
+  bool old = output->needs_repaint;
+
   output->needs_repaint = true;
+  _vt_comp_schedule_output_commit(c, output);
 
-  if (output->repaint_pending)
+  if (output->needs_repaint != old)
+    VT_TRACE(c->log, "Scheduling repaint on output %p.", output);
+}
+
+void vt_comp_schedule_cursor_commit(struct vt_compositor_t *c,
+                                    struct vt_output_t     *output) {
+  if (!c || !output || !c->backend || !c->wl.evloop)
     return;
 
-  output->repaint_pending = true;
-  output->repaint_source =
-      wl_event_loop_add_idle(c->wl.evloop, _vt_comp_frame_handler, output);
-  if (!output->repaint_source) {
-    output->repaint_pending = false;
-    return;
-  }
+  bool old = output->cursor_dirty; 
 
-  VT_TRACE(c->log, "Scheduling repaint on output %p.", output);
+  output->cursor_dirty = true; 
+  _vt_comp_schedule_output_commit(c, output);
+
+  if (output->cursor_dirty != old)
+    VT_TRACE(c->log, "Scheduling cursor commit on output %p.", output);
 }
 
 void vt_comp_repaint_scene(struct vt_compositor_t *c,

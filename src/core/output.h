@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "pixman.h"
+#include <pixman.h>
 #include "util.h"
 #include <stdbool.h>
 
@@ -31,8 +31,22 @@
 struct vt_buffer_use_t;
 struct vt_backend_t;
 struct vt_surface_t;
+struct vt_output_t;
+
+enum vt_cursor_mode_t {
+  VT_CURSOR_MODE_SOFTWARE,
+  VT_CURSOR_MODE_HARDWARE,
+};
+
+struct vt_output_implementation_t {
+  bool (*update_cursor_image)(struct vt_output_t     *output,
+                              struct vt_buffer_use_t *use);
+  void (*move_cursor)(struct vt_output_t *output, int32_t x, int32_t y);
+};
 
 struct vt_output_t {
+  struct vt_output_implementation_t *impl;
+
   struct wl_list       presented_surfaces;
   struct wl_list       link_local, link_global;
   struct vt_backend_t *backend;
@@ -44,11 +58,13 @@ struct vt_output_t {
   float    refresh_rate;
   uint32_t format, id;
 
-  bool needs_repaint, repaint_pending, resize_pending;
+  bool needs_repaint; 
+  bool cursor_dirty;
+  bool resize_pending;
 
   void *user_data, *user_data_render;
 
-  struct wl_event_source *repaint_source;
+  struct wl_event_source *commit_source;
 
   pixman_region32_t damage;
 
@@ -82,6 +98,8 @@ struct vt_output_t {
 
     struct wl_list modes;
   } physical;
+
+  enum vt_cursor_mode_t cursor_mode;
 };
 
 struct vt_output_layer_state_t {
@@ -92,6 +110,9 @@ struct vt_output_layer_state_t {
 
   bool accepted;
 };
+
+struct vt_output_t *vt_output_init(struct vt_backend_t               *backend,
+                                   struct vt_output_implementation_t *impl);
 
 bool vt_output_track_presented_surface(struct vt_output_t  *output,
                                        struct vt_surface_t *surface);

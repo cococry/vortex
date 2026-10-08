@@ -33,9 +33,6 @@
 
 #define _SUBSYS_NAME "SCENE"
 
-static bool _box_intersect_box(float x1, float y1, float w1, float h1, float x2,
-                               float y2, float w2, float h2);
-
 static void sceneprintindent(int indent);
 
 static struct vt_output_layer_state_t *
@@ -271,7 +268,9 @@ static void _composite_pass(struct vt_scene_t  *scene,
 
   _scene_render_layers(scene, output);
 
-  /*_scene_render_cursor(scene, output);*/
+  if (output->cursor_mode != VT_CURSOR_MODE_HARDWARE) {
+    _scene_render_cursor(scene, output);
+  }
 
   r->impl.end_scene(r, output);
 }
