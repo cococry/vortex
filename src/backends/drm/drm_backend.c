@@ -3082,6 +3082,16 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
 
   drm_output->needs_compositing = true;
 
+  if (!drm_output->crtc)
+    return false;
+
+  struct drm_backend_state_t *drm = drm_output->drm_backend;
+
+  /* No atomic/liftoff pipeline means we cannot prove if the scene
+   * needs composition or not -> fallback to compositing */
+  if (!drm->impl->atomic || !drm_output->liftoff_output)
+    return true;
+
   /* No scene layers, but we still need to composite the clear color of the
    * scene (TODO, probably have the scene insert a background layer)*/
 
@@ -3129,16 +3139,6 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
     drm_output->needs_compositing = true;
     return true;
   }
-
-  if (!drm_output->crtc)
-    return false;
-
-  struct drm_backend_state_t *drm = drm_output->drm_backend;
-
-  /* No atomic/liftoff pipeline means we cannot prove if the scene
-   * needs composition or not -> fallback to compositing */
-  if (!drm->impl->atomic || !drm_output->liftoff_output)
-    return true;
 
   struct drm_liftoff_test_layer_t *test_layers =
       VT_ALLOC_FRAME(drm->comp, layer_count * sizeof(*test_layers));
