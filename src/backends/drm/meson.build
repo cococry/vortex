@@ -31,7 +31,7 @@ vortex_inc = include_directories('../../', '/usr/include/pixman-1/')
 
 shared_module(
   'drm-backend',
-  ['drm_backend.c', 'session_drm.c', 'props.c', 'prime.c', 'fb.c', 'atomic.c', 'legacy.c', 'cursor.c'],
+  ['drm_backend.c', 'session_drm.c', 'props.c', 'prime.c', 'fb.c', 'atomic.c', 'legacy.c', 'cursor.c', 'kms.c'],
   dependencies: [dep_gbm, dep_drm, dep_wayland_server, dep_seat, dep_udev, dep_libinput,
     dep_runara_headers, dep_libliftoff],
   install: true,

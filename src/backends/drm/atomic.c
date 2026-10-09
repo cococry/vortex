@@ -23,6 +23,7 @@
 #include "cursor.h"
 #include "drm_types.h"
 #include "fb.h"
+#include "kms.h"
 #include "libliftoff.h"
 
 #include <errno.h>
@@ -469,32 +470,6 @@ static bool _atomic_add_cursor(struct drm_backend_state_t *drm,
 
   return true;
 }
-static void _atomic_snapshot_cursor(struct drm_kms_commit_t *commit) {
-  assert(commit && commit->output);
-
-  if (commit->cursor_submitted)
-    return;
-
-  struct drm_cursor_state_t *cursor = &commit->output->cursor;
-
-  commit->cursor_submitted = true;
-  commit->cursor_x = cursor->x;
-  commit->cursor_y = cursor->y;
-  commit->cursor_visible = cursor->visible;
-
-  if (cursor->visible && cursor->image)
-    commit->cursor_image = drm_cursor_image_ref(cursor->image);
-}
-
-static void _atomic_release_cursor_snapshot(struct drm_kms_commit_t *commit) {
-  if (!commit)
-    return;
-
-  if (commit->cursor_image)
-    drm_cursor_image_unref(&commit->cursor_image);
-
-  commit->cursor_submitted = false;
-}
 
 static drmModeAtomicReq *_atomic_build_req(struct drm_backend_state_t *drm,
                                            struct drm_kms_commit_t    *commit,
@@ -620,7 +595,7 @@ static bool _atomic_commit(struct drm_backend_state_t *drm,
   }
 
   /* snapshots desired cursor state onto the commit */
-  _atomic_snapshot_cursor(commit);
+  drm_kms_commit_snapshot_cursor(commit);
 
   bool want_async = commit->async && !commit->test_only && !commit->modeset &&
                     !commit->cursor_only;
@@ -648,8 +623,7 @@ static bool _atomic_commit(struct drm_backend_state_t *drm,
         continue;
       }
 
-      _atomic_release_cursor_snapshot(commit);
-      return false;
+      goto fail;
     }
 
     int ret = drmModeAtomicCommit(drm->drm_fd, req, flags,
@@ -681,7 +655,7 @@ static bool _atomic_commit(struct drm_backend_state_t *drm,
                (void *)output->base, use_async, flags);
 
       if (commit->test_only)
-        _atomic_release_cursor_snapshot(commit);
+        drm_kms_commit_release_cursor(commit);
 
       return true;
     }
@@ -702,11 +676,11 @@ static bool _atomic_commit(struct drm_backend_state_t *drm,
              commit->cursor_only ? "cursor" : "Liftoff",
              (void *)output->base, strerror(commit_errno));
 
-    _atomic_release_cursor_snapshot(commit);
-    return false;
+    goto fail;
   }
 
-  _atomic_release_cursor_snapshot(commit);
+fail:
+  drm_kms_commit_release_cursor(commit);
   return false;
 }
 

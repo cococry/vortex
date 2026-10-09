@@ -211,12 +211,15 @@ static void _drm_complete_pending(struct drm_output_state_t *drm_output) {
     drm_output->current_valid = drm_output->current_layers.size != 0;
   }
 
-  /* replace old scanned out KMS cursor image with newly scanned out image
-   * (pending_cursor_image was scanned out at this time)*/
-  if (drm_output->kms_cursor_image)
-    drm_cursor_image_unref(&drm_output->kms_cursor_image);
-  drm_output->kms_cursor_image = drm_output->pending_cursor_image;
-  drm_output->pending_cursor_image = NULL;
+  if (drm_output->have_pending_cursor_image) {
+    /* replace old scanned out KMS cursor image with newly scanned out image
+     * (pending_cursor_image was scanned out at this time)*/
+    if (drm_output->kms_cursor_image)
+      drm_cursor_image_unref(&drm_output->kms_cursor_image);
+    drm_output->kms_cursor_image = drm_output->pending_cursor_image;
+    drm_output->pending_cursor_image = NULL;
+    drm_output->have_pending_cursor_image = false;
+  }
 
   drm_output->pending_valid = false;
   drm_output->flip_inflight = false;
@@ -2125,6 +2128,8 @@ _drm_take_commited_cursor_image(struct drm_output_state_t *drm_output,
     drm_cursor_image_unref(&drm_output->pending_cursor_image);
 
   drm_output->pending_cursor_image = commit->cursor_image;
+  drm_output->have_pending_cursor_image = true;
+
   commit->cursor_image = NULL;
   commit->cursor_submitted = false;
 }
@@ -2566,7 +2571,10 @@ static bool _drm_handle_frame_for_device(struct drm_backend_state_t *drm,
     return false;
   }
 
-  _drm_take_commited_cursor_image(drm_output, &commit);
+  bool cursor_submitted = commit.cursor_submitted;
+
+  if (cursor_submitted)
+    _drm_take_commited_cursor_image(drm_output, &commit);
 
   struct drm_layer_state_t *layer;
 
@@ -2595,6 +2603,9 @@ static bool _drm_handle_frame_for_device(struct drm_backend_state_t *drm,
   drm_output->pending_valid = true;
   drm_output->needs_modeset = false;
   drm_output->pending_out_fence_fd = commit.out_fence_fd;
+
+  if (cursor_submitted)
+    output->cursor_dirty = false;
 
   if (commit.event_pending) {
     drm_output->flip_inflight = true;
@@ -2652,10 +2663,17 @@ _drm_handle_cursor_commit_for_device(struct drm_backend_state_t *drm,
 
   /* takes the desired state and promotes it to KMS pending state while
    * replacing the old KMS pending state */
-  _drm_take_commited_cursor_image(drm_output, &commit);
+
+  bool cursor_submitted = commit.cursor_submitted;
+
+  if (cursor_submitted)
+    _drm_take_commited_cursor_image(drm_output, &commit);
 
   drm_output->pending_valid = true;
   drm_output->pending_out_fence_fd = commit.out_fence_fd;
+
+  if (cursor_submitted)
+    output->cursor_dirty = false;
 
   if (commit.event_pending) {
     drm_output->flip_inflight = true;

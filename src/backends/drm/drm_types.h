@@ -250,4 +250,5 @@ struct drm_output_state_t {
   struct drm_cursor_state_t cursor;
   struct drm_cursor_image_t *kms_cursor_image;
   struct drm_cursor_image_t *pending_cursor_image;
+  bool                       have_pending_cursor_image;
 };

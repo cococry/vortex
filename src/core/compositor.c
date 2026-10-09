@@ -131,8 +131,6 @@ void _vt_comp_commit_handler(void *data) {
     }
 
     VT_TRACE(c->log, "Pending repaint on output %p got satisfied.", output);
-    output->needs_repaint = false;
-    output->cursor_dirty = false;
   }
 
   if (output->cursor_dirty) {
@@ -142,8 +140,7 @@ void _vt_comp_commit_handler(void *data) {
 
     assert(backend->impl.commit_cursor_only);
 
-    if (backend->impl.commit_cursor_only(backend, output))
-      output->cursor_dirty = false;
+    backend->impl.commit_cursor_only(backend, output);
   }
 
 }
@@ -184,9 +181,7 @@ bool _vt_comp_render_output(struct vt_compositor_t *c,
     return false;
 
   vt_comp_repaint_scene(c, output);
-  c->backend->impl.handle_frame(c->backend, output);
-
-  return true;
+  return c->backend->impl.handle_frame(c->backend, output);
 }
 
 static bool _flag_cmp(const char *flag, const char *lng, const char *shrt) {

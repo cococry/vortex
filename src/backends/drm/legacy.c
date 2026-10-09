@@ -29,6 +29,68 @@
 
 #define _SUBSYS_NAME "DRM"
 
+static bool _legacy_commit_cursor(struct drm_backend_state_t *drm,
+                                  struct drm_kms_commit_t    *commit) {
+  assert(drm && commit && commit->output && commit->output->crtc);
+
+  struct drm_output_state_t *output = commit->output;
+
+  drm_kms_commit_snapshot_cursor(commit);
+
+  if (!commit->cursor_visible || !commit->cursor_image) {
+    if (drmModeSetCursor2(drm->drm_fd, output->crtc->id,
+                          0, 0, 0, 0, 0) != 0) {
+      VT_ERROR(drm->comp->log,
+               "drmModeSetCursor2() failed while disabling cursor on "
+               "connector %" PRIu32 ": %s",
+               output->conn_id, strerror(errno));
+
+    goto fail;
+    }
+
+    return true;
+  }
+
+  if (drmModeMoveCursor(drm->drm_fd, output->crtc->id,
+                        commit->cursor_x, commit->cursor_y) != 0) {
+    VT_ERROR(drm->comp->log,
+             "drmModeMoveCursor() failed for connector %" PRIu32 ": %s",
+             output->conn_id, strerror(errno));
+
+    goto fail;
+  }
+
+  bool image_changed =
+      commit->modeset ||
+      output->kms_cursor_image != commit->cursor_image;
+
+  if (!image_changed)
+    return true;
+
+  uint32_t handle = gbm_bo_get_handle(commit->cursor_image->bo).u32;
+
+  if (handle == 0) {
+    goto fail;
+  }
+
+  if (drmModeSetCursor2(drm->drm_fd, output->crtc->id,
+                        handle,
+                        commit->cursor_image->width,
+                        commit->cursor_image->height,
+                        0, 0) != 0) {
+    VT_ERROR(drm->comp->log,
+             "drmModeSetCursor2() failed for connector %" PRIu32 ": %s",
+             output->conn_id, strerror(errno));
+
+    goto fail;
+  }
+
+  return true;
+fail:
+    drm_kms_commit_release_cursor(commit);
+    return false;
+}
+
 static bool _legacy_commit(struct drm_backend_state_t *drm,
                            struct drm_kms_commit_t    *commit) {
   if (!drm || !commit || !commit->output || !commit->output->crtc)
@@ -36,6 +98,21 @@ static bool _legacy_commit(struct drm_backend_state_t *drm,
 
   if (commit->test_only)
     return false;
+
+  struct drm_output_state_t *output = commit->output;
+
+  if (commit->cursor_only) {
+    if (commit->modeset)
+      return false;
+
+    if (!_legacy_commit_cursor(drm, commit))
+      return false;
+
+    commit->event_pending = false;
+    commit->out_fence_fd = -1;
+
+    return true;
+  }
 
   /*
    * The legacy pipeline expects exactly one logical layer: the
@@ -60,8 +137,7 @@ static bool _legacy_commit(struct drm_backend_state_t *drm,
 
   assert(!layer->liftoff_layer);
 
-  struct drm_output_state_t *output = commit->output;
-  uint32_t                   fb_id = layer->fb.id;
+  uint32_t fb_id = layer->fb.id;
 
   if (commit->modeset) {
     if (drmModeSetCrtc(drm->drm_fd, output->crtc->id, fb_id, 0, 0,
@@ -70,6 +146,13 @@ static bool _legacy_commit(struct drm_backend_state_t *drm,
                "drmModeSetCrtc() failed for connector %" PRIu32 ": %s",
                output->conn_id, strerror(errno));
       return false;
+    }
+
+    if (!_legacy_commit_cursor(drm, commit)) {
+      VT_WARN(drm->comp->log,
+              "Failed to update legacy cursor after modeset on connector "
+              "%" PRIu32 ".",
+              output->conn_id);
     }
 
     commit->event_pending = false;
@@ -102,8 +185,16 @@ static bool _legacy_commit(struct drm_backend_state_t *drm,
              output->conn_id);
   }
 
-  commit->event_pending = true;
+  if (output->base->cursor_dirty) {
+    if (!_legacy_commit_cursor(drm, commit)) {
+      VT_WARN(drm->comp->log,
+              "Failed to update legacy cursor while committing connector "
+              "%" PRIu32 ".",
+              output->conn_id);
+    }
+  }
 
+  commit->event_pending = true;
   commit->out_fence_fd = -1;
 
   return true;
