@@ -27,14 +27,11 @@ dep_wayland_server  = dependency('wayland-server',    required: true)
 dep_wayland_egl     = dependency('wayland-egl',       required: true)
 dep_wayland_protos  = dependency('wayland-protocols', required: true)
 dep_egl             = dependency('egl',               required: true)
-dep_input           = dependency('libinput',          required: true)
 dep_udev            = dependency('libudev',           required: true)
 dep_gl              = dependency('gl',                required: true)
-dep_xkbcommon       = dependency('xkbcommon',         required: false)
 dep_pixman          = dependency('pixman-1',          required: true)
-dep_seat            = dependency('libseat',           required: false)
-dep_udev            = dependency('libudev',           required: false)
-dep_libinput        = dependency('libinput',          required: false)
+dep_libinput        = dependency('libinput',          required: true)
+dep_xkbcommon       = dependency('xkbcommon',         required: false)
 
 wayland_scanner   = find_program('wayland-scanner', required: true)
 protocols_dir     = dep_wayland_protos.get_variable(pkgconfig: 'pkgdatadir')
@@ -146,9 +143,8 @@ vortex_inc = include_directories('include', '/usr/include/pixman-1/')
 
 deps = [
   dep_wayland_server, dep_wayland_egl,
-  dep_egl, dep_input, dep_udev, dep_gl,
-  runara_dep, dep_pixman, dep_seat, dep_udev,
-  dep_input 
+  dep_egl, dep_libinput, dep_udev, dep_gl,
+  runara_dep, dep_pixman,
 ]
 if dep_xkbcommon.found()
   deps += dep_xkbcommon
