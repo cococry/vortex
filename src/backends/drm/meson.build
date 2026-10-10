@@ -24,7 +24,6 @@ dep_wayland_server  = dependency('wayland-server', required: true)
 dep_seat            = dependency('libseat', required: true)
 dep_udev            = dependency('libudev', required: true)
 dep_libinput        = dependency('libinput', required: true)
-dep_liftoff         = dependency('libinput', required: true)
 dep_libliftoff = dependency('libliftoff',version: '>=0.5.0', fallback: 'libliftoff')
 
 vortex_inc = include_directories('../../', '/usr/include/pixman-1/')
