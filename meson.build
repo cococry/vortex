@@ -30,7 +30,6 @@ dep_egl             = dependency('egl',               required: true)
 dep_udev            = dependency('libudev',           required: true)
 dep_gl              = dependency('gl',                required: true)
 dep_pixman          = dependency('pixman-1',          required: true)
-dep_seat            = dependency('libseat',           required: true)
 dep_libinput        = dependency('libinput',          required: true)
 dep_xkbcommon       = dependency('xkbcommon',         required: false)
 
@@ -145,7 +144,7 @@ vortex_inc = include_directories('include', '/usr/include/pixman-1/')
 deps = [
   dep_wayland_server, dep_wayland_egl,
   dep_egl, dep_libinput, dep_udev, dep_gl,
-  runara_dep, dep_pixman, dep_seat,
+  runara_dep, dep_pixman,
 ]
 if dep_xkbcommon.found()
   deps += dep_xkbcommon

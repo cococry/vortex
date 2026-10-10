@@ -18,10 +18,18 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-dep_gbm             = dependency('gbm',           required: true)
-dep_drm             = dependency('libdrm',        required: true)
+drm_opt             = get_option('vt_backend_drm')
+dep_gbm             = dependency('gbm',           required: drm_opt)
+dep_drm             = dependency('libdrm',        required: drm_opt)
+dep_seat            = dependency('libseat',       required: drm_opt)
+
+# auto: skip the DRM backend when its deps are missing (e.g. no seatd)
+if not (dep_gbm.found() and dep_drm.found() and dep_seat.found())
+  subdir_done()
+endif
+vt_build_drm = true
+
 dep_wayland_server  = dependency('wayland-server', required: true)
-dep_seat            = dependency('libseat', required: true)
 dep_udev            = dependency('libudev', required: true)
 dep_libinput        = dependency('libinput', required: true)
 dep_libliftoff = dependency('libliftoff',version: '>=0.5.0', fallback: 'libliftoff')

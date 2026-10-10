@@ -1,7 +1,7 @@
 option('vt_backend_drm',
-  type: 'boolean',
-  value: true,
-  description: 'Enable DRM backend')
+  type: 'feature',
+  value: 'auto',
+  description: 'Enable DRM backend (auto: only if gbm, libdrm and libseat are found)')
 
 option('vt_backend_wl',
   type: 'boolean',
