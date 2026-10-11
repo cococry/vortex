@@ -244,6 +244,7 @@ struct drm_output_state_t {
 
   struct liftoff_output *liftoff_output;
   struct liftoff_layer  *liftoff_composition_layer;
+  struct wl_array        liftoff_layers;
 
   bool needs_compositing;
 

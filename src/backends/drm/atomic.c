@@ -563,19 +563,6 @@ fail:
   return NULL;
 }
 
-static void
-_atomic_destroy_frame_liftoff_layers(struct drm_kms_commit_t *commit) {
-  struct drm_layer_state_t *layer;
-
-  wl_array_for_each(layer, &commit->layers) {
-    if (!layer->liftoff_layer)
-      continue;
-
-    liftoff_layer_destroy(layer->liftoff_layer);
-    layer->liftoff_layer = NULL;
-  }
-}
-
 static bool _atomic_commit(struct drm_backend_state_t *drm,
                            struct drm_kms_commit_t    *commit) {
   if (!drm || !commit || !commit->output || !commit->output->crtc)
@@ -633,12 +620,6 @@ static bool _atomic_commit(struct drm_backend_state_t *drm,
       drmModeDestroyPropertyBlob(drm->drm_fd, mode_blob);
 
     if (ret == 0) {
-      if (!commit->test_only && !commit->cursor_only) {
-        /* Liftoff output-layer state must be synced by removing any liftoff
-         * layers created in this frame */
-        _atomic_destroy_frame_liftoff_layers(commit);
-      }
-
       commit->event_pending = !commit->test_only && !commit->modeset;
 
       commit->out_fence_fd = out_fence_fd;
@@ -763,10 +744,17 @@ bool drm_liftoff_set_layer_props(struct liftoff_layer *liftoff_layer,
           0 ||
       liftoff_layer_set_property(liftoff_layer, "CRTC_H", layer->dst.height) <
           0 ||
-      liftoff_layer_set_property(liftoff_layer, "zpos", zpos) < 0 ||
-      liftoff_layer_set_property(liftoff_layer, "IN_FENCE_FD",
-                                 (uint64_t)(int64_t)in_fence_fd) < 0) {
+      liftoff_layer_set_property(liftoff_layer, "zpos", zpos) < 0) {
     return false;
+  }
+
+  if (in_fence_fd >= 0) {
+    if (liftoff_layer_set_property(liftoff_layer, "IN_FENCE_FD",
+                                   (uint64_t)(int64_t)in_fence_fd) < 0) {
+      return false;
+    }
+  } else {
+    liftoff_layer_unset_property(liftoff_layer, "IN_FENCE_FD");
   }
 
   return true;
@@ -803,11 +791,6 @@ void drm_liftoff_testing_finish(struct drm_backend_state_t      *drm,
 
   for (size_t i = 0; i < layer_count; i++) {
     struct drm_liftoff_test_layer_t *test = &test_layers[i];
-    if (test->liftoff_layer) {
-      liftoff_layer_destroy(test->liftoff_layer);
-      test->liftoff_layer = NULL;
-    }
-
     if (test->has_fb)
       drm_fb_finish(drm, &test->fb);
 

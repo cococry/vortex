@@ -156,6 +156,66 @@ static struct vt_output_implementation_t drm_output_impl = {
     .move_cursor = _drm_output_move_cursor,
     .update_cursor_image = _drm_output_update_cursor_image};
 
+static struct liftoff_layer *
+_drm_output_get_liftoff_layer(struct drm_output_state_t *drm_output,
+                              size_t                     index) {
+  if (!drm_output || !drm_output->liftoff_output)
+    return NULL;
+
+  size_t count =
+      drm_output->liftoff_layers.size / sizeof(struct liftoff_layer *);
+
+  while (count <= index) {
+    struct liftoff_layer **slot =
+        wl_array_add(&drm_output->liftoff_layers, sizeof(*slot));
+
+    if (!slot)
+      return NULL;
+
+    *slot = liftoff_layer_create(drm_output->liftoff_output);
+
+    if (!*slot) {
+      drm_output->liftoff_layers.size -= sizeof(*slot);
+      return NULL;
+    }
+
+    count++;
+  }
+
+  return ((struct liftoff_layer **)drm_output->liftoff_layers.data)[index];
+}
+
+static void
+_drm_output_disable_unused_liftoff_layers(struct drm_output_state_t *drm_output,
+                                          size_t used_count) {
+  if (!drm_output)
+    return;
+
+  size_t count =
+      drm_output->liftoff_layers.size / sizeof(struct liftoff_layer *);
+  struct liftoff_layer **layers = drm_output->liftoff_layers.data;
+
+  for (size_t i = used_count; i < count; i++) {
+    liftoff_layer_set_property(layers[i], "FB_ID", 0);
+    liftoff_layer_unset_property(layers[i], "IN_FENCE_FD");
+  }
+}
+
+static void
+_drm_output_finish_liftoff_layers(struct drm_output_state_t *drm_output) {
+  if (!drm_output)
+    return;
+
+  struct liftoff_layer **layer;
+  wl_array_for_each(layer, &drm_output->liftoff_layers) {
+    if (*layer)
+      liftoff_layer_destroy(*layer);
+  }
+
+  wl_array_release(&drm_output->liftoff_layers);
+  wl_array_init(&drm_output->liftoff_layers);
+}
+
 static void _drm_layer_finish(struct drm_output_state_t *drm_output,
                               struct drm_layer_state_t  *layer,
                               int                        release_fence_fd) {
@@ -165,11 +225,6 @@ static void _drm_layer_finish(struct drm_output_state_t *drm_output,
   if (layer->use && release_fence_fd >= 0 && layer->use->release &&
       vt_buffer_release_needs_fence(layer->use->release)) {
     vt_buffer_use_set_release_fence_fd(layer->use, release_fence_fd);
-  }
-
-  if (layer->liftoff_layer) {
-    liftoff_layer_destroy(layer->liftoff_layer);
-    layer->liftoff_layer = NULL;
   }
 
   if (layer->has_fb) {
@@ -1476,6 +1531,7 @@ static bool _drm_create_output_for_device(struct drm_backend_state_t *drm,
   wl_array_init(&drm_output->current_layers);
   wl_array_init(&drm_output->pending_layers);
   wl_array_init(&drm_output->layer_plan);
+  wl_array_init(&drm_output->liftoff_layers);
   drm_output->pending_out_fence_fd = -1;
 
   wl_list_init(&output->physical.modes);
@@ -2176,6 +2232,8 @@ static bool _drm_destroy_output_for_device(struct drm_backend_state_t *drm,
   _drm_release_all_layers(output);
 
   if (drm->impl->atomic) {
+    _drm_output_finish_liftoff_layers(drm_output);
+
     if (drm_output->liftoff_composition_layer) {
       liftoff_layer_destroy(drm_output->liftoff_composition_layer);
       drm_output->liftoff_composition_layer = NULL;
@@ -3139,12 +3197,14 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
     planned->zpos = 0;
     planned->acquire_fence_fd = -1;
 
-    planned->liftoff_layer = liftoff_layer_create(drm_output->liftoff_output);
+    planned->liftoff_layer = _drm_output_get_liftoff_layer(drm_output, 0);
 
     if (!planned->liftoff_layer) {
       drm_output->layer_plan.size -= sizeof(*planned);
       return false;
     }
+
+    _drm_output_disable_unused_liftoff_layers(drm_output, 1);
 
     planned->has_fb = false;
     planned->use = NULL;
@@ -3180,8 +3240,22 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
     struct vt_output_layer_state_t  *layer = &layers[i];
     struct drm_liftoff_test_layer_t *test = &test_layers[i];
 
-    if (vt_surface_has_role(layer->surface, VT_SURFACE_ROLE_CURSOR))
+    struct liftoff_layer *liftoff_layer =
+        _drm_output_get_liftoff_layer(drm_output, i);
+
+    if (!liftoff_layer) {
+      VT_ERROR(backend->comp->log,
+               "Failed to get persistent libliftoff layer "
+               "for layer %zu surface=%p.",
+               i, (void *)layer->surface);
+      goto done;
+    }
+
+    if (vt_surface_has_role(layer->surface, VT_SURFACE_ROLE_CURSOR)) {
+      liftoff_layer_set_property(liftoff_layer, "FB_ID", 0);
+      liftoff_layer_unset_property(liftoff_layer, "IN_FENCE_FD");
       continue;
+    }
 
     if (!layer->surface || !layer->surface->current_buf_use ||
         !layer->surface->current_buf_use->buf) {
@@ -3189,10 +3263,14 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
                "layer %zu rejected from liftoff test: "
                "surface/buffer state unavailable.",
                i);
+      liftoff_layer_set_property(liftoff_layer, "FB_ID", 0);
+      liftoff_layer_unset_property(liftoff_layer, "IN_FENCE_FD");
       continue;
     }
 
     struct vt_buffer_use_t *use = layer->surface->current_buf_use;
+
+    test->liftoff_layer = liftoff_layer;
 
     struct vt_dmabuf_attr_t attr = {0};
 
@@ -3281,16 +3359,6 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
       goto done;
     }
 
-    test->liftoff_layer = liftoff_layer_create(drm_output->liftoff_output);
-
-    if (!test->liftoff_layer) {
-      VT_ERROR(backend->comp->log,
-               "Failed to create temporary libliftoff layer "
-               "for layer %zu surface=%p.",
-               i, (void *)layer->surface);
-      goto done;
-    }
-
     if (!drm_liftoff_set_layer_props(test->liftoff_layer, layer, test->fb.id,
                                      use->acquire_fence_fd, i)) {
       VT_TRACE(backend->comp->log,
@@ -3307,21 +3375,13 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
     continue;
 
   composited:
-    test->liftoff_layer = liftoff_layer_create(drm_output->liftoff_output);
-
-    if (!test->liftoff_layer) {
-      VT_ERROR(backend->comp->log,
-               "Failed to create temporary libliftoff layer "
-               "for layer %zu surface=%p.",
-               i, (void *)layer->surface);
-      goto done;
-    }
-
     if (!drm_liftoff_set_layer_props_composited(test->liftoff_layer, layer,
                                                 i)) {
       goto done;
     }
   }
+
+  _drm_output_disable_unused_liftoff_layers(drm_output, layer_count);
 
   if (have_scanout_candidate) {
     req = drm_atomic_create_test_req(drm, drm_output, &mode_blob, &flags);
@@ -3403,7 +3463,6 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
     planned->zpos = i;
 
     planned->liftoff_layer = test->liftoff_layer;
-    test->liftoff_layer = NULL;
 
     if (planned->role == VT_DRM_LAYER_DIRECT) {
       /* For direct-capable layers, move the test's fb ownership to the planned
@@ -3477,6 +3536,9 @@ done_req:
     drmModeAtomicFree(req);
 
 done:
+  if (!ok)
+    _drm_output_disable_unused_liftoff_layers(drm_output, 0);
+
   drm_liftoff_testing_finish(drm, test_layers, layer_count);
 
   return ok;

@@ -1,5 +1,5 @@
-#include "core/core_types.h"
 #include "liftoff_log.h"
+#include "core/core_types.h"
 
 static struct log_state_t *_liftoff_log_state = NULL;
 
