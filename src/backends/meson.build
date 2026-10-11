@@ -22,9 +22,15 @@
 dep_runara_headers = runara_dep.partial_dependency(
   compile_args: true, includes: true)
 
-if get_option('vt_backend_drm')
+vt_build_drm = false
+if not get_option('vt_backend_drm').disabled()
   subdir('drm')
 endif
 if get_option('vt_backend_wl')
   subdir('wayland')
 endif
+
+summary({
+  'DRM backend':     vt_build_drm,
+  'Wayland backend': get_option('vt_backend_wl'),
+}, section: 'Backends', bool_yn: true)
