@@ -70,6 +70,7 @@
 #include "drm_types.h"
 #include "fb.h"
 #include "kms.h"
+#include "liftoff_log.h"
 #include "prime.h"
 
 #include "props.h"
@@ -1841,7 +1842,8 @@ static void _drm_output_move_cursor(struct vt_output_t *output, int32_t x,
                                     int32_t y) {
   assert(output);
 
-  if(output->cursor_mode != VT_CURSOR_MODE_HARDWARE) return;
+  if (output->cursor_mode != VT_CURSOR_MODE_HARDWARE)
+    return;
 
   struct drm_output_state_t *drm_output =
       BACKEND_DATA(output, struct drm_output_state_t);
@@ -1884,8 +1886,9 @@ static void _drm_output_move_cursor(struct vt_output_t *output, int32_t x,
 static bool _drm_output_update_cursor_image(struct vt_output_t     *output,
                                             struct vt_buffer_use_t *use) {
   assert(output);
-  
-  if(output->cursor_mode != VT_CURSOR_MODE_HARDWARE) return true;
+
+  if (output->cursor_mode != VT_CURSOR_MODE_HARDWARE)
+    return true;
 
   struct drm_output_state_t *drm_output =
       BACKEND_DATA(output, struct drm_output_state_t);
@@ -2783,8 +2786,8 @@ bool backend_init_drm(struct vt_backend_t *backend) {
 
   drm_master->comp = backend->comp;
 
-  liftoff_log_set_priority(backend->comp->log.verbose ? LIFTOFF_DEBUG
-                                                        : LIFTOFF_ERROR);
+  if (!getenv("VT_DRM_NO_ATOMIC"))
+    drm_liftoff_log_init(backend);
 
   wl_list_init(&drm_master->backends);
   wl_list_init(&drm_master->session_terminate_listener.link);

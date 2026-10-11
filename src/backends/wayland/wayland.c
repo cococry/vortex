@@ -142,10 +142,8 @@ static struct vt_output_mode_t *_wl_find_output_mode(struct wl_list *list,
                                                      int32_t         height,
                                                      uint32_t        refresh);
 
-struct vt_output_implementation_t wl_output_impl = {
-  .update_cursor_image = NULL,
-  .move_cursor = NULL
-};
+struct vt_output_implementation_t wl_output_impl = {.update_cursor_image = NULL,
+                                                    .move_cursor = NULL};
 
 static bool _wl_set_fake_output_mode(struct vt_output_t *output, int32_t width,
                                      int32_t height, int32_t refresh) {

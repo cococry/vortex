@@ -245,7 +245,7 @@ enum wl_shm_format vt_util_convert_drm_format_to_wl_shm(uint32_t fmt) {
   }
 }
 bool vt_util_box_intersects_output(const struct vt_box_t    *box,
-                                          const struct vt_output_t *output) {
+                                   const struct vt_output_t *output) {
   return box->x + (int32_t)box->width > output->x &&
          box->x < output->x + (int32_t)output->width &&
          box->y + (int32_t)box->height > output->y &&

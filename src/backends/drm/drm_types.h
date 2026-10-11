@@ -123,11 +123,11 @@ struct drm_kms_commit_t {
 
   int out_fence_fd;
 
-  bool cursor_submitted;
+  bool                       cursor_submitted;
   struct drm_cursor_image_t *cursor_image;
-  int32_t cursor_x;
-  int32_t cursor_y;
-  bool cursor_visible;
+  int32_t                    cursor_x;
+  int32_t                    cursor_y;
+  bool                       cursor_visible;
 };
 
 struct drm_kms_impl_t {
@@ -207,12 +207,12 @@ struct drm_cursor_image_t {
 };
 
 struct drm_cursor_state_t {
-  struct drm_cursor_image_t* image;
+  struct drm_cursor_image_t *image;
 
   int32_t x;
   int32_t y;
 
-  bool visible; 
+  bool visible;
 };
 
 struct drm_output_state_t {
@@ -247,7 +247,7 @@ struct drm_output_state_t {
 
   bool needs_compositing;
 
-  struct drm_cursor_state_t cursor;
+  struct drm_cursor_state_t  cursor;
   struct drm_cursor_image_t *kms_cursor_image;
   struct drm_cursor_image_t *pending_cursor_image;
   bool                       have_pending_cursor_image;

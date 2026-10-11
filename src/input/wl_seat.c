@@ -86,9 +86,8 @@ static void _seat_update_cursor_image(struct vt_seat_t *seat);
 
 static void _seat_update_cursor_position(struct vt_seat_t *seat);
 
-static void
-_seat_damage_software_cursor_box(struct vt_seat_t       *seat,
-                                 const struct vt_box_t   *box);
+static void _seat_damage_software_cursor_box(struct vt_seat_t      *seat,
+                                             const struct vt_box_t *box);
 
 static struct vt_kb_modifier_states_t
 _wl_kb_get_mod_states(struct xkb_state *state);
@@ -600,9 +599,8 @@ static void _seat_update_cursor_position(struct vt_seat_t *seat) {
   }
 }
 
-static void
-_seat_damage_software_cursor_box(struct vt_seat_t       *seat,
-                                 const struct vt_box_t   *box) {
+static void _seat_damage_software_cursor_box(struct vt_seat_t      *seat,
+                                             const struct vt_box_t *box) {
   struct vt_output_t *output;
 
   wl_list_for_each(output, &seat->comp->outputs, link_global) {
@@ -615,10 +613,8 @@ _seat_damage_software_cursor_box(struct vt_seat_t       *seat,
     int32_t x = box->x - output->x;
     int32_t y = box->y - output->y;
 
-    pixman_region32_union_rect(&output->damage,
-                              &output->damage,
-                              x, y,
-                              box->width, box->height);
+    pixman_region32_union_rect(&output->damage, &output->damage, x, y,
+                               box->width, box->height);
 
     output->needs_repaint = true;
     vt_comp_schedule_repaint(seat->comp, output);
@@ -630,7 +626,7 @@ void vt_seat_handle_pointer_motion(struct vt_seat_t *seat, double x, double y,
   if (!seat)
     return;
 
-  int32_t old_pointer_x = seat->pointer_x; 
+  int32_t old_pointer_x = seat->pointer_x;
   int32_t old_pointer_y = seat->pointer_y;
 
   seat->pointer_x = x;
@@ -656,7 +652,7 @@ void vt_seat_handle_pointer_motion(struct vt_seat_t *seat, double x, double y,
     _seat_damage_software_cursor_box(seat, &old_box);
     _seat_damage_software_cursor_box(seat, &new_box);
   }
-  
+
   _seat_update_cursor_position(seat);
 
   struct vt_surface_t *surf = vt_comp_pick_surface(seat->comp, x, y);

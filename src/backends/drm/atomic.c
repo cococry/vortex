@@ -473,8 +473,7 @@ static bool _atomic_add_cursor(struct drm_backend_state_t *drm,
 
 static drmModeAtomicReq *_atomic_build_req(struct drm_backend_state_t *drm,
                                            struct drm_kms_commit_t    *commit,
-                                           uint32_t flags,
-                                           uint32_t *mode_blob,
+                                           uint32_t flags, uint32_t *mode_blob,
                                            int *out_fence_fd) {
   if (!drm || !commit || !commit->output || !commit->output->crtc ||
       !mode_blob || !out_fence_fd) {
@@ -492,8 +491,7 @@ static drmModeAtomicReq *_atomic_build_req(struct drm_backend_state_t *drm,
     return NULL;
 
   if (commit->cursor_only) {
-    if (!_atomic_add_prop(drm, req, crtc->id,
-                          crtc->props[VT_DRM_CRTC_ACTIVE],
+    if (!_atomic_add_prop(drm, req, crtc->id, crtc->props[VT_DRM_CRTC_ACTIVE],
                           commit->active ? 1 : 0) ||
         !_atomic_add_cursor(drm, commit, req)) {
       goto fail;
@@ -515,11 +513,9 @@ static drmModeAtomicReq *_atomic_build_req(struct drm_backend_state_t *drm,
     if (!_atomic_add_prop(drm, req, output->conn_id,
                           output->conn_props[VT_DRM_CONNECTOR_CRTC_ID],
                           crtc->id) ||
-        !_atomic_add_prop(drm, req, crtc->id,
-                          crtc->props[VT_DRM_CRTC_MODE_ID],
+        !_atomic_add_prop(drm, req, crtc->id, crtc->props[VT_DRM_CRTC_MODE_ID],
                           *mode_blob) ||
-        !_atomic_add_prop(drm, req, crtc->id,
-                          crtc->props[VT_DRM_CRTC_ACTIVE],
+        !_atomic_add_prop(drm, req, crtc->id, crtc->props[VT_DRM_CRTC_ACTIVE],
                           commit->active ? 1 : 0)) {
       goto fail;
     }
@@ -544,7 +540,6 @@ static drmModeAtomicReq *_atomic_build_req(struct drm_backend_state_t *drm,
     goto fail;
   }
 
-  
   if (!_atomic_add_cursor(drm, commit, req))
     goto fail;
 
@@ -672,10 +667,9 @@ static bool _atomic_commit(struct drm_backend_state_t *drm,
       continue;
     }
 
-    VT_ERROR(drm->comp->log,
-             "Atomic DRM/%s commit failed for output=%p: %s",
-             commit->cursor_only ? "cursor" : "Liftoff",
-             (void *)output->base, strerror(commit_errno));
+    VT_ERROR(drm->comp->log, "Atomic DRM/%s commit failed for output=%p: %s",
+             commit->cursor_only ? "cursor" : "Liftoff", (void *)output->base,
+             strerror(commit_errno));
 
     goto fail;
   }

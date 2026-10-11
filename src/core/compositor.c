@@ -142,7 +142,6 @@ void _vt_comp_commit_handler(void *data) {
 
     backend->impl.commit_cursor_only(backend, output);
   }
-
 }
 
 /* Heed my words struggeler... */
@@ -978,9 +977,9 @@ void vt_comp_schedule_cursor_commit(struct vt_compositor_t *c,
   if (!c || !output || !c->backend || !c->wl.evloop)
     return;
 
-  bool old = output->cursor_dirty; 
+  bool old = output->cursor_dirty;
 
-  output->cursor_dirty = true; 
+  output->cursor_dirty = true;
   _vt_comp_schedule_output_commit(c, output);
 
   if (output->cursor_dirty != old)

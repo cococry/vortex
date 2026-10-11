@@ -22,8 +22,8 @@
 
 #pragma once
 
-#include <pixman.h>
 #include "util.h"
+#include <pixman.h>
 #include <stdbool.h>
 
 #define VT_OUTPUT_MAX_DAMAGE_RECTS 64
@@ -58,7 +58,7 @@ struct vt_output_t {
   float    refresh_rate;
   uint32_t format, id;
 
-  bool needs_repaint; 
+  bool needs_repaint;
   bool cursor_dirty;
   bool resize_pending;
 

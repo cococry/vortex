@@ -38,21 +38,20 @@ static bool _legacy_commit_cursor(struct drm_backend_state_t *drm,
   drm_kms_commit_snapshot_cursor(commit);
 
   if (!commit->cursor_visible || !commit->cursor_image) {
-    if (drmModeSetCursor2(drm->drm_fd, output->crtc->id,
-                          0, 0, 0, 0, 0) != 0) {
+    if (drmModeSetCursor2(drm->drm_fd, output->crtc->id, 0, 0, 0, 0, 0) != 0) {
       VT_ERROR(drm->comp->log,
                "drmModeSetCursor2() failed while disabling cursor on "
                "connector %" PRIu32 ": %s",
                output->conn_id, strerror(errno));
 
-    goto fail;
+      goto fail;
     }
 
     return true;
   }
 
-  if (drmModeMoveCursor(drm->drm_fd, output->crtc->id,
-                        commit->cursor_x, commit->cursor_y) != 0) {
+  if (drmModeMoveCursor(drm->drm_fd, output->crtc->id, commit->cursor_x,
+                        commit->cursor_y) != 0) {
     VT_ERROR(drm->comp->log,
              "drmModeMoveCursor() failed for connector %" PRIu32 ": %s",
              output->conn_id, strerror(errno));
@@ -61,8 +60,7 @@ static bool _legacy_commit_cursor(struct drm_backend_state_t *drm,
   }
 
   bool image_changed =
-      commit->modeset ||
-      output->kms_cursor_image != commit->cursor_image;
+      commit->modeset || output->kms_cursor_image != commit->cursor_image;
 
   if (!image_changed)
     return true;
@@ -73,11 +71,9 @@ static bool _legacy_commit_cursor(struct drm_backend_state_t *drm,
     goto fail;
   }
 
-  if (drmModeSetCursor2(drm->drm_fd, output->crtc->id,
-                        handle,
+  if (drmModeSetCursor2(drm->drm_fd, output->crtc->id, handle,
                         commit->cursor_image->width,
-                        commit->cursor_image->height,
-                        0, 0) != 0) {
+                        commit->cursor_image->height, 0, 0) != 0) {
     VT_ERROR(drm->comp->log,
              "drmModeSetCursor2() failed for connector %" PRIu32 ": %s",
              output->conn_id, strerror(errno));
@@ -87,8 +83,8 @@ static bool _legacy_commit_cursor(struct drm_backend_state_t *drm,
 
   return true;
 fail:
-    drm_kms_commit_release_cursor(commit);
-    return false;
+  drm_kms_commit_release_cursor(commit);
+  return false;
 }
 
 static bool _legacy_commit(struct drm_backend_state_t *drm,
