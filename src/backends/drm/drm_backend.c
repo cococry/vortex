@@ -2783,7 +2783,8 @@ bool backend_init_drm(struct vt_backend_t *backend) {
 
   drm_master->comp = backend->comp;
 
-  liftoff_log_set_priority(LIFTOFF_DEBUG);
+  liftoff_log_set_priority(backend->comp->log.verbose ? LIFTOFF_DEBUG
+                                                        : LIFTOFF_ERROR);
 
   wl_list_init(&drm_master->backends);
   wl_list_init(&drm_master->session_terminate_listener.link);
@@ -3166,6 +3167,7 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
   const size_t layer_plan_start = drm_output->layer_plan.size;
 
   bool ok = false;
+  bool have_scanout_candidate = false;
 
   uint32_t          mode_blob = 0;
   uint32_t          flags = 0;
@@ -3298,18 +3300,10 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
       continue;
     }
 
+    have_scanout_candidate = true;
     continue;
 
   composited:
-    test->use = vt_buffer_use_ref(use);
-    if (!test->use) {
-      VT_ERROR(backend->comp->log,
-               "failed to reference buffer use for layer %zu "
-               "surface=%p.",
-               i, (void *)layer->surface);
-      goto done;
-    }
-
     test->liftoff_layer = liftoff_layer_create(drm_output->liftoff_output);
 
     if (!test->liftoff_layer) {
@@ -3326,34 +3320,30 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
     }
   }
 
-  req = drm_atomic_create_test_req(drm, drm_output, &mode_blob, &flags);
+  if (have_scanout_candidate) {
+    req = drm_atomic_create_test_req(drm, drm_output, &mode_blob, &flags);
 
-  if (!req)
-    goto done_req;
+    if (!req)
+      goto done_req;
 
-  if (liftoff_layer_set_property(drm_output->liftoff_composition_layer, "FB_ID",
-                                 0) < 0) {
-    goto done;
-  }
+    if (liftoff_layer_set_property(drm_output->liftoff_composition_layer,
+                                   "FB_ID", 0) < 0) {
+      goto done_req;
+    }
 
-  liftoff_layer_unset_property(drm_output->liftoff_composition_layer,
-                               "IN_FENCE_FD");
+    liftoff_layer_unset_property(drm_output->liftoff_composition_layer,
+                                 "IN_FENCE_FD");
 
-  int ret = liftoff_output_apply(drm_output->liftoff_output, req, flags, NULL);
+    int ret =
+        liftoff_output_apply(drm_output->liftoff_output, req, flags, NULL);
 
-  if (ret < 0) {
-    VT_TRACE(backend->comp->log,
-             "libliftoff test allocation failed for output %p: %s",
-             (void *)output, strerror(-ret));
+    if (ret < 0) {
+      VT_TRACE(backend->comp->log,
+               "libliftoff test allocation failed for output %p: %s",
+               (void *)output, strerror(-ret));
 
-    goto done_req;
-  }
-
-  if (drmModeAtomicCommit(drm->drm_fd, req, flags, NULL) != 0) {
-    VT_TRACE(backend->comp->log, "atomic TEST_ONLY failed for output %p: %s",
-             (void *)output, strerror(errno));
-
-    goto done_req;
+      goto done_req;
+    }
   }
 
   bool all_accepted = true;
@@ -3375,6 +3365,7 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
     }
 
     bool layer_needs_composition =
+        !have_scanout_candidate ||
         liftoff_layer_needs_composition(test->liftoff_layer);
 
     /* Each accepted layer must pass liftoff plane allocation to be accepted
