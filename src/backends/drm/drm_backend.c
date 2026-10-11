@@ -1549,6 +1549,12 @@ static bool _drm_create_output_for_device(struct drm_backend_state_t *drm,
             " does not have a cursor plane. Using software cursor on output %p",
             drm_output->crtc->id, output);
     output->cursor_mode = VT_CURSOR_MODE_SOFTWARE;
+  } else if (getenv("VT_DRM_NO_HARDWARE_CURSOR")) {
+    VT_TRACE(comp->log,
+             "Hardware cursor was disabled by the environment. Using software "
+             "cursor on output %p",
+             output);
+    output->cursor_mode = VT_CURSOR_MODE_SOFTWARE;
   } else {
     VT_TRACE(comp->log,
              "CRTC %" PRIu32
@@ -1835,6 +1841,8 @@ static void _drm_output_move_cursor(struct vt_output_t *output, int32_t x,
                                     int32_t y) {
   assert(output);
 
+  if(output->cursor_mode != VT_CURSOR_MODE_HARDWARE) return;
+
   struct drm_output_state_t *drm_output =
       BACKEND_DATA(output, struct drm_output_state_t);
 
@@ -1876,6 +1884,8 @@ static void _drm_output_move_cursor(struct vt_output_t *output, int32_t x,
 static bool _drm_output_update_cursor_image(struct vt_output_t     *output,
                                             struct vt_buffer_use_t *use) {
   assert(output);
+  
+  if(output->cursor_mode != VT_CURSOR_MODE_HARDWARE) return true;
 
   struct drm_output_state_t *drm_output =
       BACKEND_DATA(output, struct drm_output_state_t);
@@ -3192,11 +3202,18 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
 
     /* 2. Prove this output can scan out the layer's DMABUF */
     if (!_drm_output_can_scanout_dmabuf(drm, drm_output, &attr)) {
+      const char *format_name = drmGetFormatName(attr.format);
+      char        mod_str[256];
+
+      _modifier_to_str(attr.mod, mod_str, sizeof(mod_str));
+
       VT_TRACE(backend->comp->log,
                "layer %zu surface=%p rejected from liftoff test: "
-               "format=0x%08" PRIx32 " modifier=0x%016" PRIx64
-               " is not scanout-capable on this output.",
-               i, (void *)layer->surface, attr.format, attr.mod);
+               "format=%s (%4.4s) modifier=%s "
+               "is not scanout-capable on this output.",
+               i, (void *)layer->surface, format_name ? format_name : "UNKNOWN",
+               _fourcc_to_str(attr.format), mod_str);
+
       goto composited;
     }
 

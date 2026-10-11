@@ -544,6 +544,7 @@ static drmModeAtomicReq *_atomic_build_req(struct drm_backend_state_t *drm,
     goto fail;
   }
 
+  
   if (!_atomic_add_cursor(drm, commit, req))
     goto fail;
 
