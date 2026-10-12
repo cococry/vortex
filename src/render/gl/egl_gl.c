@@ -50,7 +50,7 @@
 
 #include <glad.h>
 
-#include "egl_gl46.h"
+#include "egl_gl.h"
 
 #define _SUBSYS_NAME "EGL"
 

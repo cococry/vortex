@@ -22,7 +22,7 @@
 
 #include "renderer.h"
 
-#include "gl/egl_gl46.h"
+#include "gl/egl_gl.h"
 
 void vt_renderer_implement(struct vt_renderer_t       *renderer,
                            enum vt_rendering_backend_t backend) {
