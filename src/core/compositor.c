@@ -738,9 +738,7 @@ static void _handle_output_changed_backend(struct vt_backend_t *backend,
 
   /* An output can shrink beneath the pointer while the mouse is stationary. */
   if (backend->comp->seat)
-    vt_seat_handle_pointer_motion(backend->comp->seat,
-                                  backend->comp->seat->pointer_x,
-                                  backend->comp->seat->pointer_y, 0);
+    vt_seat_refresh_cursor_outputs(backend->comp->seat);
 }
 
 bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
@@ -847,7 +845,10 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
     c->input_backend->impl.init(c->input_backend, c->session->native_handle);
   }
 
-  vt_seat_init(c->seat);
+  if (!vt_seat_init(c->seat)) {
+    VT_ERROR(c->log, "Failed to initialize Wayland seat and default cursor.");
+    return false;
+  }
 
   VT_TRACE(c->log, "Initialized wayland seat.");
 

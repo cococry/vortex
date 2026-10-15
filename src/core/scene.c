@@ -232,12 +232,13 @@ static void _scene_render_cursor(struct vt_scene_t  *scene,
   struct vt_renderer_t *r = scene->renderer;
 
   struct vt_seat_t    *seat = r->comp->seat;
-  struct vt_surface_t *cursor = seat->cursor.surf;
+  struct vt_seat_cursor_image_t image = vt_seat_get_cursor_image(seat);
+  struct vt_surface_t *cursor = image.surf;
 
   if (cursor && cursor->mapped) {
 
-    int32_t cursor_x = seat->pointer_x - seat->cursor.hotspot_x;
-    int32_t cursor_y = seat->pointer_y - seat->cursor.hotspot_y;
+    int32_t cursor_x = seat->pointer_x - image.hotspot_x;
+    int32_t cursor_y = seat->pointer_y - image.hotspot_y;
 
     int32_t cursor_right = cursor_x + cursor->applied.width;
     int32_t cursor_bottom = cursor_y + cursor->applied.height;

@@ -13,11 +13,18 @@ The project's goal is to create a self-contained platform dedicated entirely to 
 In other words, the compositor is responsible only for compositing and its related aspects (such as window animations and IPC),
 while components like the desktop shell are intentionally abstracted away from it.
 
+## Default cursor
+
+Vortex loads the standard `left_ptr` arrow from the Xcursor theme at startup,
+and shows it whenever no focused client has an active cursor surface.
+Set `XCURSOR_THEME` and `XCURSOR_SIZE` (24 pixels by default) to choose the
+system cursor theme and size. An installed Xcursor theme is required.
+
 ## Build & Run
 
 Make sure you have the required dependencies installed (debian packages shown):
 ```
-meson ninja-build libwayland-dev libdrm-dev libgbm-dev libegl1-mesa-dev libinput-dev libudev-dev libxkbcommon-dev libglfw3-dev libcglm-dev libfreetype-dev libharfbuzz-dev
+meson ninja-build libwayland-dev libdrm-dev libgbm-dev libegl1-mesa-dev libinput-dev libudev-dev libxcursor-dev xcursor-themes libxkbcommon-dev libglfw3-dev libcglm-dev libfreetype-dev libharfbuzz-dev
 ```
 
 Clone & build:

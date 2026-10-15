@@ -23,6 +23,7 @@
 #pragma once
 
 #include "../core/surface.h"
+#include "../core/util.h"
 
 #include <stdint.h>
 #include <wayland-util.h>
@@ -52,6 +53,8 @@ struct vt_seat_cursor_t {
 
   int32_t hotspot_x;
   int32_t hotspot_y;
+
+  int32_t root_hotspot_x, root_hotspot_y;
 };
 
 /* One wl_pointer.frame worth of scroll data (vertical and horizontal). */
@@ -68,6 +71,11 @@ struct vt_pointer_axis_event_t {
   struct vt_pointer_axis_t axes[2];
   uint32_t                 source;
   bool                     has_source;
+};
+
+struct vt_seat_cursor_image_t {
+  struct vt_surface_t *surf;
+  int32_t hotspot_x, hotspot_y;
 };
 
 struct vt_seat_t {
@@ -87,6 +95,8 @@ struct vt_seat_t {
   double pointer_x, pointer_y;
 
   struct vt_seat_cursor_t cursor;
+  struct vt_box_t cursor_box;
+  bool cursor_box_valid;
 };
 
 struct vt_keyboard_t {
@@ -107,6 +117,10 @@ struct vt_pointer_t {
 };
 
 bool vt_seat_init(struct vt_seat_t *seat);
+
+struct vt_seat_cursor_image_t vt_seat_get_cursor_image(struct vt_seat_t *seat);
+
+void vt_seat_refresh_cursor_outputs(struct vt_seat_t *seat);
 
 void vt_seat_handle_key(struct vt_seat_t *seat, uint32_t keycode,
                         uint32_t state, uint32_t time);

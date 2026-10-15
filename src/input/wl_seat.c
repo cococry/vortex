@@ -24,6 +24,7 @@
 #include <sys/mman.h>
 
 #include "input.h"
+#include "root_cursor.h"
 #include "wl_seat.h"
 
 #include <float.h>
@@ -83,9 +84,6 @@ static bool _surface_role_cursor_apply(struct vt_surface_t        *surf,
 static void _surface_role_cursor_mapping_changed(struct vt_surface_t *surf,
                                                  bool mapped);
 
-static void _surface_role_cursor_mapping_changed(struct vt_surface_t *surf,
-                                                 bool mapped);
-
 static void _send_pointer_enter(struct vt_pointer_t *ptr,
                                 struct vt_surface_t *surf, double sx,
                                 double sy);
@@ -99,6 +97,8 @@ static bool _seat_constrain_pointer(struct vt_seat_t *seat, double *x,
 
 static void _seat_damage_software_cursor_box(struct vt_seat_t      *seat,
                                              const struct vt_box_t *box);
+static void _seat_refresh_cursor(struct vt_seat_t *seat);
+static void _seat_damage_cursor_change(struct vt_seat_t *seat);
 
 static struct vt_kb_modifier_states_t
 _wl_kb_get_mod_states(struct xkb_state *state);
@@ -299,39 +299,12 @@ static void _wl_seat_pointer_set_cursor(struct wl_client   *client,
     }
   }
 
-  /* Remove the previous software cursor before switching surfaces or
-   * hotspots, otherwise its last image can remain onscreen. */
-  if (seat->cursor.surf && seat->cursor.surf->mapped) {
-    struct vt_box_t old_box = {
-        .x = (int32_t)seat->pointer_x - seat->cursor.hotspot_x,
-        .y = (int32_t)seat->pointer_y - seat->cursor.hotspot_y,
-        .width = seat->cursor.surf->applied.width,
-        .height = seat->cursor.surf->applied.height,
-    };
-    _seat_damage_software_cursor_box(seat, &old_box);
-  }
-
   seat->cursor.surf = surf;
-  seat->cursor.owner = ptr;
+  seat->cursor.owner = surf ? ptr : NULL;
   seat->cursor.hotspot_x = hotspot_x;
   seat->cursor.hotspot_y = hotspot_y;
 
-  /* The cursor's hotspot may not be its top left corner. Keep the image
-   * inside the visible scene when a client supplies a new cursor. */
-  vt_seat_handle_pointer_motion(seat, seat->pointer_x, seat->pointer_y, 0);
-
-  if (surf) {
-    struct vt_box_t box = {
-        .x = (int32_t)seat->pointer_x - seat->cursor.hotspot_x,
-        .y = (int32_t)seat->pointer_y - seat->cursor.hotspot_y,
-        .width = surf->applied.width,
-        .height = surf->applied.height,
-    };
-
-    _seat_damage_software_cursor_box(seat, &box);
-  }
-  _seat_update_cursor_image(seat);
-  _seat_update_cursor_position(seat);
+  _seat_refresh_cursor(seat);
 }
 
 void _wl_seat_get_keyboard(struct wl_client   *client,
@@ -405,29 +378,31 @@ void _wl_pointer_handle_resource_destroy(struct wl_resource *res) {
   if (!ptr || !ptr->seat)
     return;
 
+  struct vt_seat_t *seat = ptr->seat;
+  if (seat->cursor.owner == ptr) {
+    seat->cursor.surf = NULL;
+    seat->cursor.owner = NULL;
+    _seat_refresh_cursor(seat);
+  }
+
   wl_list_remove(&ptr->link);
   free(ptr);
-
   wl_resource_set_user_data(res, NULL);
 }
 
 static void _surface_role_cursor_mapping_changed(struct vt_surface_t *surf,
                                                  bool mapped) {
-  (void)mapped;
-  if (!surf || !surf->comp || !surf->comp->seat ||
-      surf->comp->seat->cursor.surf != surf)
+  if (!surf || !surf->comp || !surf->comp->seat)
     return;
 
   struct vt_seat_t *seat = surf->comp->seat;
-  struct vt_box_t box = {
-      .x = (int32_t)seat->pointer_x - seat->cursor.hotspot_x,
-      .y = (int32_t)seat->pointer_y - seat->cursor.hotspot_y,
-      .width = surf->applied.width,
-      .height = surf->applied.height,
-  };
-  _seat_damage_software_cursor_box(seat, &box);
-  _seat_update_cursor_image(seat);
-  _seat_update_cursor_position(seat);
+  if (seat->cursor.surf != surf || !seat->cursor.owner ||
+      !seat->cursor.owner->res || seat->ptr_focus.client !=
+          wl_resource_get_client(seat->cursor.owner->res))
+    return;
+
+  (void)mapped;
+  _seat_refresh_cursor(seat);
 }
 
 static bool _surface_role_cursor_apply(struct vt_surface_t        *surf,
@@ -448,15 +423,10 @@ static bool _surface_role_cursor_apply(struct vt_surface_t        *surf,
              "Cursor role commit of seat cursor, offsetting pointer by [x: %i, "
              "y: %i]",
              cu->state.offset_x, cu->state.offset_y);
-
-    vt_seat_handle_pointer_motion(seat, seat->pointer_x, seat->pointer_y, 0);
   }
 
-  if (cu->state.buffer_attached) {
-    vt_seat_handle_pointer_motion(seat, seat->pointer_x, seat->pointer_y, 0);
-    _seat_update_cursor_image(seat);
-    _seat_update_cursor_position(seat);
-  }
+  if (cu->state.offset_set || cu->state.buffer_attached)
+    _seat_refresh_cursor(seat);
 
   return true;
 }
@@ -504,9 +474,28 @@ bool vt_seat_init(struct vt_seat_t *seat) {
 
   seat->ptr_focus.surf = NULL;
 
+  if (!vt_seat_root_cursor_init(seat))
+    return false;
+
+  /* Place the initial arrow's upper-left at the scene edge: the pointer
+   * position itself refers to the hotspot, not the image's upper-left. */
+  if (first) {
+    seat->pointer_x += seat->cursor.root_hotspot_x < (int32_t)first->width
+                           ? seat->cursor.root_hotspot_x : first->width - 1;
+    seat->pointer_y += seat->cursor.root_hotspot_y < (int32_t)first->height
+                           ? seat->cursor.root_hotspot_y : first->height - 1;
+  }
+
+  /* Outputs already exist when the seat is initialized. */
+  _seat_refresh_cursor(seat);
+
   // advertise chair
   seat->global = wl_global_create(seat->comp->wl.dsp, &wl_seat_interface, 9,
                                   seat, _wl_seat_bind);
+  if (!seat->global) {
+    vt_seat_root_cursor_finish(seat);
+    return false;
+  }
 
   if (seat->comp->input_backend->platform == VT_INPUT_LIBINPUT) {
     vt_seat_bind_global_keybinds(seat);
@@ -617,11 +606,55 @@ static void _send_pointer_motion(struct vt_seat_t *seat, uint32_t time,
   }
 }
 
+struct vt_seat_cursor_image_t vt_seat_get_cursor_image(struct vt_seat_t *seat) {
+  struct vt_seat_cursor_image_t result = {0};
+  if (!seat)
+    return result;
+
+  result.surf = seat->comp->root_cursor;
+  result.hotspot_x = seat->cursor.root_hotspot_x;
+  result.hotspot_y = seat->cursor.root_hotspot_y;
+
+  if (seat->cursor.surf && seat->cursor.surf->mapped && seat->cursor.owner &&
+      seat->cursor.owner->res && seat->ptr_focus.client &&
+      wl_resource_get_client(seat->cursor.owner->res) == seat->ptr_focus.client) {
+    result.surf = seat->cursor.surf;
+    result.hotspot_x = seat->cursor.hotspot_x;
+    result.hotspot_y = seat->cursor.hotspot_y;
+  }
+  return result;
+}
+
+static void _seat_damage_cursor_change(struct vt_seat_t *seat) {
+  if (seat->cursor_box_valid)
+    _seat_damage_software_cursor_box(seat, &seat->cursor_box);
+
+  struct vt_seat_cursor_image_t image = vt_seat_get_cursor_image(seat);
+  seat->cursor_box_valid = image.surf && image.surf->mapped &&
+                           image.surf->applied.width > 0 &&
+                           image.surf->applied.height > 0;
+  if (seat->cursor_box_valid) {
+    seat->cursor_box = (struct vt_box_t){
+        .x = (int32_t)seat->pointer_x - image.hotspot_x,
+        .y = (int32_t)seat->pointer_y - image.hotspot_y,
+        .width = image.surf->applied.width,
+        .height = image.surf->applied.height,
+    };
+    _seat_damage_software_cursor_box(seat, &seat->cursor_box);
+  }
+}
+
+static void _seat_refresh_cursor(struct vt_seat_t *seat) {
+  _seat_damage_cursor_change(seat);
+  _seat_update_cursor_image(seat);
+  _seat_update_cursor_position(seat);
+}
+
 static void _seat_update_cursor_image(struct vt_seat_t *seat) {
   if (!seat)
     return;
 
-  struct vt_surface_t *surf = seat->cursor.surf;
+  struct vt_surface_t *surf = vt_seat_get_cursor_image(seat).surf;
   struct vt_buffer_use_t *use =
       surf && surf->mapped ? surf->current_buf_use : NULL;
 
@@ -637,6 +670,7 @@ static void _seat_update_cursor_image(struct vt_seat_t *seat) {
 
 static void _seat_update_cursor_position(struct vt_seat_t *seat) {
   struct vt_output_t *output;
+  struct vt_seat_cursor_image_t image = vt_seat_get_cursor_image(seat);
 
   /* TODO: do not fan out to all outputs */
   wl_list_for_each(output, &seat->comp->outputs, link_global) {
@@ -644,12 +678,19 @@ static void _seat_update_cursor_position(struct vt_seat_t *seat) {
       continue;
     }
 
-    int32_t x = seat->pointer_x - seat->cursor.hotspot_x - output->x;
+    int32_t x = seat->pointer_x - image.hotspot_x - output->x;
 
-    int32_t y = seat->pointer_y - seat->cursor.hotspot_y - output->y;
+    int32_t y = seat->pointer_y - image.hotspot_y - output->y;
 
     output->impl->move_cursor(output, x, y);
   }
+}
+
+void vt_seat_refresh_cursor_outputs(struct vt_seat_t *seat) {
+  if (!seat)
+    return;
+  _seat_update_cursor_image(seat);
+  vt_seat_handle_pointer_motion(seat, seat->pointer_x, seat->pointer_y, 0);
 }
 
 static void _seat_damage_software_cursor_box(struct vt_seat_t      *seat,
@@ -762,33 +803,10 @@ void vt_seat_handle_pointer_motion(struct vt_seat_t *seat, double x, double y,
   if (!seat || !_seat_constrain_pointer(seat, &x, &y))
     return;
 
-  int32_t old_pointer_x = seat->pointer_x;
-  int32_t old_pointer_y = seat->pointer_y;
-
   seat->pointer_x = x;
   seat->pointer_y = y;
 
-  struct vt_surface_t *cursor_surf = seat->cursor.surf;
-
-  if (cursor_surf && cursor_surf->mapped) {
-    struct vt_box_t old_box = {
-        .x = old_pointer_x - seat->cursor.hotspot_x,
-        .y = old_pointer_y - seat->cursor.hotspot_y,
-        .width = cursor_surf->applied.width,
-        .height = cursor_surf->applied.height,
-    };
-
-    struct vt_box_t new_box = {
-        .x = (int32_t)seat->pointer_x - seat->cursor.hotspot_x,
-        .y = (int32_t)seat->pointer_y - seat->cursor.hotspot_y,
-        .width = cursor_surf->applied.width,
-        .height = cursor_surf->applied.height,
-    };
-
-    _seat_damage_software_cursor_box(seat, &old_box);
-    _seat_damage_software_cursor_box(seat, &new_box);
-  }
-
+  _seat_damage_cursor_change(seat);
   _seat_update_cursor_position(seat);
 
   struct vt_surface_t *surf = vt_comp_pick_surface(seat->comp, x, y);
@@ -1143,6 +1161,12 @@ void vt_seat_set_pointer_focus(struct vt_seat_t    *seat,
   seat->ptr_focus.surf = surf;
   seat->ptr_focus.client = new_client;
 
+  if (old_client != new_client) {
+    seat->cursor.surf = NULL;
+    seat->cursor.owner = NULL;
+    _seat_refresh_cursor(seat);
+  }
+
   if (surf && surf->res && new_client) {
     uint32_t serial = wl_display_next_serial(seat->comp->wl.dsp);
 
@@ -1202,6 +1226,7 @@ bool vt_seat_terminate(struct vt_seat_t *seat) {
     return false;
   if (seat->global)
     wl_global_destroy(seat->global);
+  vt_seat_root_cursor_finish(seat);
 
   return true;
 }

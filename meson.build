@@ -31,6 +31,7 @@ dep_udev            = dependency('libudev',           required: true)
 dep_gl              = dependency('gl',                required: true)
 dep_pixman          = dependency('pixman-1',          required: true)
 dep_libinput        = dependency('libinput',          required: true)
+dep_xcursor         = dependency('xcursor',           required: true)
 dep_xkbcommon       = dependency('xkbcommon',         required: false)
 
 wayland_scanner   = find_program('wayland-scanner', required: true)
@@ -113,6 +114,8 @@ vortex_src = files('src/vortex.c',
 'src/input/input.h',
 'src/input/wl_seat.c',
 'src/input/wl_seat.h',
+'src/input/root_cursor.c',
+'src/input/root_cursor.h',
 'src/input/backends/libinput/libinput.c',
 'src/input/backends/libinput/libinput.h',
 'src/input/backends/wayland/wayland_input.c',
@@ -143,7 +146,7 @@ vortex_inc = include_directories('include', '/usr/include/pixman-1/')
 
 deps = [
   dep_wayland_server, dep_wayland_egl,
-  dep_egl, dep_libinput, dep_udev, dep_gl,
+  dep_egl, dep_libinput, dep_xcursor, dep_udev, dep_gl,
   runara_dep, dep_pixman,
 ]
 if dep_xkbcommon.found()
