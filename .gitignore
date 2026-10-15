@@ -4,3 +4,4 @@
 subprojects/cglm-*/
 subprojects/packagecache/
 subprojects/libliftoff/
+**/**.log

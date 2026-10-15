@@ -128,7 +128,7 @@ static void _wl_parent_frame_done(void *data, struct wl_callback *wl_callback,
 static bool _wl_backend_destroy_output(struct vt_backend_t *backend,
                                        struct vt_output_t  *output);
 
-static bool _wl_init_fake_dmabuf_feedback(struct vt_compositor_t      *comp,
+static bool _wl_init_dmabuf_feedback(struct vt_compositor_t      *comp,
                                           struct vt_dmabuf_feedback_t *fb);
 
 static bool _wl_backend_create_output(struct vt_backend_t *backend,
@@ -699,10 +699,36 @@ bool _wl_backend_destroy_output(struct vt_backend_t *backend,
 #define _VT_DRM_FORMAT_XRGB8888                                                \
   _vt_fourcc_code('X', 'R', '2', '4') /* [31:0] A:R:G:B 8:8:8:8 little endian  \
                                        */
-#define _VT_DRM_FORMAT_MOD_LINEAR  0x0000000000000000
-#define _VT_DRM_FORMAT_MOD_INVALID 0x00FFFFFFFFFFFFFF
+/* The renderer samples dmabufs through GL_TEXTURE_2D only, so external-only
+ * modifiers (e.g. LINEAR on NVIDIA) must not be offered to clients. */
+static bool _wl_push_sampleable_formats(struct wl_array       *dst,
+                                        const struct wl_array *src) {
+  struct vt_drm_format_t *it;
+  wl_array_for_each(it, src) {
+    struct vt_drm_format_t fmt = {0};
+    vt_drm_format_init(&fmt, it->format);
 
-bool _wl_init_fake_dmabuf_feedback(struct vt_compositor_t      *comp,
+    struct vt_drm_format_modifier_t *mod;
+    wl_array_for_each(mod, &it->mods) {
+      if (mod->_egl_ext_only)
+        continue;
+      if (!vt_drm_format_add_mod(&fmt, mod->mod)) {
+        vt_drm_format_fini(&fmt);
+        return false;
+      }
+    }
+
+    bool ok = vt_drm_format_mod_count(&fmt) == 0 ||
+              vt_drm_format_array_push(dst, &fmt);
+    vt_drm_format_fini(&fmt);
+    if (!ok)
+      return false;
+  }
+
+  return true;
+}
+
+bool _wl_init_dmabuf_feedback(struct vt_compositor_t      *comp,
                                    struct vt_dmabuf_feedback_t *fb) {
   fb->dev_main = calloc(1, sizeof(*fb->dev_main));
   dev_t       main_dev;
@@ -726,7 +752,7 @@ bool _wl_init_fake_dmabuf_feedback(struct vt_compositor_t      *comp,
   struct vt_dmabuf_tranche_t *tranche =
       vt_dmabuf_feedback_add_tranche(fb, fb->dev_main, 0);
   if (!tranche) {
-    VT_ERROR(comp->log, "Failed to create fake tranche");
+    VT_ERROR(comp->log, "Failed to create DMABUF tranche");
 
     return false;
   }
@@ -736,40 +762,20 @@ bool _wl_init_fake_dmabuf_feedback(struct vt_compositor_t      *comp,
   tranche->flags = 0;
   tranche->target_device = fb->dev_main;
 
-  // add DRM_FORMAT_XRGB8888 + modifiers
-  struct vt_drm_format_t fmt = {0};
-  vt_drm_format_init(&fmt, _VT_DRM_FORMAT_XRGB8888);
-
-  if (!vt_drm_format_add_mod(&fmt, _VT_DRM_FORMAT_MOD_LINEAR) ||
-      !vt_drm_format_add_mod(&fmt, _VT_DRM_FORMAT_MOD_INVALID)) {
-    vt_drm_format_fini(&fmt);
+  /* Advertise what the renderer can actually sample. This also fills the
+   * renderer's own table, which import needs to pick the texture target. */
+  struct vt_renderer_t *r = comp->renderer;
+  struct wl_array       renderer_formats;
+  if (!r || !r->impl.query_dmabuf_formats_with_renderer ||
+      !r->impl.query_dmabuf_formats_with_renderer(r, &renderer_formats)) {
+    VT_ERROR(comp->log, "Cannot query DMABUF formats from renderer.");
     return false;
   }
 
-  if (!vt_drm_format_array_push(&tranche->formats, &fmt)) {
-    vt_drm_format_fini(&fmt);
-    return false;
-  }
+  bool ok = _wl_push_sampleable_formats(&tranche->formats, &renderer_formats);
+  vt_drm_format_array_free(&renderer_formats);
 
-  vt_drm_format_fini(&fmt);
-
-  // also ARGB8888 (clients sometimes expect it)
-  vt_drm_format_init(&fmt, _VT_DRM_FORMAT_ARGB8888);
-
-  if (!vt_drm_format_add_mod(&fmt, _VT_DRM_FORMAT_MOD_LINEAR) ||
-      !vt_drm_format_add_mod(&fmt, _VT_DRM_FORMAT_MOD_INVALID)) {
-    vt_drm_format_fini(&fmt);
-    return false;
-  }
-
-  if (!vt_drm_format_array_push(&tranche->formats, &fmt)) {
-    vt_drm_format_fini(&fmt);
-    return false;
-  }
-
-  vt_drm_format_fini(&fmt);
-
-  return true;
+  return ok;
 }
 
 // ===================================================
@@ -841,7 +847,7 @@ bool backend_init_wl(struct vt_backend_t *backend) {
       return false;
     }
 
-    if (!(_wl_init_fake_dmabuf_feedback(backend->comp, default_feedback))) {
+    if (!(_wl_init_dmabuf_feedback(backend->comp, default_feedback))) {
       VT_ERROR(backend->comp->log, "Failed to build default DMABUF feedback.");
     } else {
       const uint32_t dmabuf_ver = 4;
