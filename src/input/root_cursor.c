@@ -24,7 +24,6 @@
 #include "wl_seat.h"
 
 #include "src/core/buffer.h"
-#include "src/core/compositor.h"
 #include "src/core/surface.h"
 #include "src/core/util.h"
 
@@ -44,7 +43,7 @@ static void _root_cursor_pixels_destroy(struct vt_buffer_t *buf, void *owner,
 static const struct vt_buffer_attachment_implementation_t root_pixels_impl = {
     .destroy = _root_cursor_pixels_destroy};
 
-static bool _root_cursor_get_shm(struct vt_buffer_t *buf,
+static bool _root_cursor_get_shm(struct vt_buffer_t   *buf,
                                  struct vt_shm_attr_t *attr) {
   struct vt_buffer_attachment_t *pixels =
       vt_buffer_find_attachment(buf, NULL, &root_pixels_impl);
@@ -70,16 +69,16 @@ bool vt_seat_root_cursor_init(struct vt_seat_t *seat) {
   if (!seat || !seat->comp)
     return false;
 
-  int size = 24;
+  int         size = 24;
   const char *size_env = getenv("XCURSOR_SIZE");
   if (size_env) {
     char *end;
-    long requested = strtol(size_env, &end, 10);
+    long  requested = strtol(size_env, &end, 10);
     if (end != size_env && *end == '\0' && requested >= 8 && requested <= 128)
       size = requested;
   }
 
-  const char *theme = getenv("XCURSOR_THEME");
+  const char   *theme = getenv("XCURSOR_THEME");
   XcursorImage *image = XcursorLibraryLoadImage("left_ptr", theme, size);
   if (!image)
     image = XcursorLibraryLoadImage("default", theme, size);
@@ -96,8 +95,8 @@ bool vt_seat_root_cursor_init(struct vt_seat_t *seat) {
   surf->comp = seat->comp;
   vt_surface_init(surf);
 
-  struct vt_buffer_t *buf =
-      vt_buffer_create(seat->comp, image->width, image->height, &root_buffer_impl);
+  struct vt_buffer_t *buf = vt_buffer_create(seat->comp, image->width,
+                                             image->height, &root_buffer_impl);
   if (!buf) {
     XcursorImageDestroy(image);
     goto fail;
@@ -108,8 +107,8 @@ bool vt_seat_root_cursor_init(struct vt_seat_t *seat) {
     goto fail;
   }
 
-  surf->current_buf_use = vt_buffer_use_create_take(seat->comp, surf, &buf,
-                                                     NULL, NULL);
+  surf->current_buf_use =
+      vt_buffer_use_create_take(seat->comp, surf, &buf, NULL, NULL);
   if (!surf->current_buf_use) {
     vt_buffer_unref(&buf);
     goto fail;
@@ -117,9 +116,10 @@ bool vt_seat_root_cursor_init(struct vt_seat_t *seat) {
 
   surf->applied.width = image->width;
   surf->applied.height = image->height;
-  pixman_region32_union_rect(&surf->applied.damage, &surf->applied.damage, 0,
-                             0, image->width, image->height);
-  surf->mapped = true; /* Internal surface: never participates in focus/picking. */
+  pixman_region32_union_rect(&surf->applied.damage, &surf->applied.damage, 0, 0,
+                             image->width, image->height);
+  surf->mapped =
+      true; /* Internal surface: never participates in focus/picking. */
 
   seat->comp->root_cursor = surf;
   seat->cursor.root_hotspot_x = image->xhot;

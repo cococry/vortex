@@ -93,22 +93,22 @@ static void        _log_dmabuf_tranche(struct vt_compositor_t           *comp,
                                        const char                       *device_path);
 static bool
 _drm_build_dmabuf_feedback(struct vt_drm_backend_master_state_t *master,
-                           struct vt_dmabuf_feedback_t       *feedback);
+                           struct vt_dmabuf_feedback_t          *feedback);
 static bool _drm_suspend(struct vt_drm_backend_state_t *backend);
 static bool _drm_resume(struct vt_drm_backend_state_t *backend);
 static int  _drm_dispatch(int fd, uint32_t mask, void *data);
-static bool _drm_init_for_device(struct vt_compositor_t     *comp,
+static bool _drm_init_for_device(struct vt_compositor_t        *comp,
                                  struct vt_drm_backend_state_t *drm,
-                                 struct vt_device_t         *dev);
+                                 struct vt_device_t            *dev);
 static struct vt_output_mode_t *
 _drm_create_output_mode(struct wl_list *list, drmModeModeInfo *mode_info);
 static uint32_t    _drm_subpixel_to_wl(drmModeSubPixel subpixel);
 static const char *_drm_connector_type_name(uint32_t type);
 static bool _drm_create_output_for_device(struct vt_drm_backend_state_t *drm,
-                                          struct vt_output_t         *output,
-                                          void                       *data);
+                                          struct vt_output_t            *output,
+                                          void                          *data);
 static bool _drm_destroy_output_for_device(struct vt_drm_backend_state_t *drm,
-                                           struct vt_output_t         *output);
+                                           struct vt_output_t *output);
 static bool _drm_terminate_for_device(struct vt_drm_backend_state_t *drm);
 static void _drm_on_session_terminate(struct wl_listener *listener, void *data);
 static void _drm_on_seat_disable(struct wl_listener *listener, void *data);
@@ -117,18 +117,18 @@ static void _drm_keybind_switch_vt(struct vt_compositor_t *comp,
                                    void                   *user_data);
 static void _drm_on_seat_enable(struct wl_listener *listener, void *data);
 static bool _drm_handle_frame_for_device(struct vt_drm_backend_state_t *drm,
-                                         struct vt_output_t         *output);
+                                         struct vt_output_t            *output);
 static bool
 _drm_handle_cursor_commit_for_device(struct vt_drm_backend_state_t *drm,
-                                     struct vt_output_t         *output);
+                                     struct vt_output_t            *output);
 
 static void _drm_update_tearing_cap(struct vt_drm_backend_state_t *drm);
 
-static bool               _drm_verify_caps(struct vt_drm_backend_state_t *drm);
-static bool               _drm_resources_init(struct vt_drm_backend_state_t *drm);
-static bool               _drm_scan_connectors(struct vt_drm_backend_state_t *drm);
+static bool _drm_verify_caps(struct vt_drm_backend_state_t *drm);
+static bool _drm_resources_init(struct vt_drm_backend_state_t *drm);
+static bool _drm_scan_connectors(struct vt_drm_backend_state_t *drm);
 static struct vt_drm_crtc_t *_drm_pick_crtc(struct vt_drm_backend_state_t *drm,
-                                         drmModeConnector           *conn);
+                                            drmModeConnector *conn);
 static void _drm_assign_crtc_planes(struct vt_drm_backend_state_t *drm);
 static bool _drm_output_sync_refresh(struct vt_drm_output_state_t *drm_output);
 static bool _drm_plane_has_format(struct vt_drm_plane_t *plane, uint32_t format,
@@ -140,14 +140,14 @@ static void _drm_output_move_cursor(struct vt_output_t *output, int32_t x,
 static bool _drm_output_update_cursor_image(struct vt_output_t     *output,
                                             struct vt_buffer_use_t *use);
 static bool _drm_import_cursor_image(struct vt_drm_output_state_t *drm_output,
-                                     struct vt_buffer_use_t    *use,
+                                     struct vt_buffer_use_t       *use,
                                      struct vt_drm_cursor_image_t *next);
 static void
 _drm_take_commited_cursor_image(struct vt_drm_output_state_t *drm_output,
                                 struct vt_drm_kms_commit_t   *commit);
 
 static void
-_drm_output_cursor_update_visibility(struct vt_output_t        *output,
+_drm_output_cursor_update_visibility(struct vt_output_t           *output,
                                      struct vt_drm_cursor_state_t *cursor);
 
 static bool _added_global_keybinds = false;
@@ -158,7 +158,7 @@ static struct vt_output_implementation_t drm_output_impl = {
 
 static struct liftoff_layer *
 _drm_output_get_liftoff_layer(struct vt_drm_output_state_t *drm_output,
-                              size_t                     index) {
+                              size_t                        index) {
   if (!drm_output || !drm_output->liftoff_output)
     return NULL;
 
@@ -185,9 +185,8 @@ _drm_output_get_liftoff_layer(struct vt_drm_output_state_t *drm_output,
   return ((struct liftoff_layer **)drm_output->liftoff_layers.data)[index];
 }
 
-static void
-_drm_output_disable_unused_liftoff_layers(struct vt_drm_output_state_t *drm_output,
-                                          size_t used_count) {
+static void _drm_output_disable_unused_liftoff_layers(
+    struct vt_drm_output_state_t *drm_output, size_t used_count) {
   if (!drm_output)
     return;
 
@@ -218,7 +217,7 @@ _drm_output_finish_liftoff_layers(struct vt_drm_output_state_t *drm_output) {
 
 static void _drm_layer_finish(struct vt_drm_output_state_t *drm_output,
                               struct vt_drm_layer_state_t  *layer,
-                              int                        release_fence_fd) {
+                              int                           release_fence_fd) {
   if (!drm_output || !drm_output->drm_backend || !layer)
     return;
 
@@ -531,7 +530,7 @@ static void _log_dmabuf_tranche(struct vt_compositor_t           *comp,
 }
 static bool
 _drm_build_dmabuf_feedback(struct vt_drm_backend_master_state_t *master,
-                           struct vt_dmabuf_feedback_t       *feedback) {
+                           struct vt_dmabuf_feedback_t          *feedback) {
   if (!feedback || !master || !master->comp || !master->comp->renderer ||
       !master->main_drm || !master->main_drm->dev)
     return false;
@@ -806,9 +805,9 @@ static int _drm_dispatch(int fd, uint32_t mask, void *data) {
   return 0;
 }
 
-static bool _drm_init_for_device(struct vt_compositor_t     *comp,
+static bool _drm_init_for_device(struct vt_compositor_t        *comp,
                                  struct vt_drm_backend_state_t *drm,
-                                 struct vt_device_t         *dev) {
+                                 struct vt_device_t            *dev) {
   if (!comp || !drm || !dev || dev->fd < 0 || !drm->backend)
     return false;
 
@@ -905,7 +904,7 @@ static bool _drm_init_for_device(struct vt_compositor_t     *comp,
 }
 
 static bool
-_drm_plane_init_cursor_sizes(struct vt_drm_plane_t               *plane,
+_drm_plane_init_cursor_sizes(struct vt_drm_plane_t            *plane,
                              const struct drm_plane_size_hint *hints,
                              size_t                            hints_len) {
   assert(plane && hints && hints_len > 0);
@@ -941,8 +940,9 @@ static const char *_drm_plane_type_name(uint64_t type) {
 }
 
 static bool _drm_plane_init(struct vt_drm_backend_state_t *drm,
-                            struct vt_drm_plane_t *plane, drmModePlane *drm_plane,
-                            struct wl_array *crtcs, uint32_t plane_id) {
+                            struct vt_drm_plane_t         *plane,
+                            drmModePlane *drm_plane, struct wl_array *crtcs,
+                            uint32_t plane_id) {
   assert(drm && drm->comp && drm->drm_fd >= 0);
   (void)crtcs;
 
@@ -1149,8 +1149,8 @@ static bool _drm_planes_init(struct vt_drm_backend_state_t *drm) {
 
   for (uint32_t i = 0; i < plane_res->count_planes; i++) {
     struct vt_drm_plane_t *plane = &planes[i];
-    uint32_t            plane_id = plane_res->planes[i];
-    drmModePlane       *drm_plane = drmModeGetPlane(drm->drm_fd, plane_id);
+    uint32_t               plane_id = plane_res->planes[i];
+    drmModePlane          *drm_plane = drmModeGetPlane(drm->drm_fd, plane_id);
 
     if (!drm_plane) {
       int err = errno;
@@ -1396,9 +1396,9 @@ static bool _drm_plane_is_assigned(struct vt_drm_backend_state_t *drm,
   return false;
 }
 
-static struct vt_drm_plane_t *_drm_pick_plane(struct vt_drm_backend_state_t *drm,
-                                           struct vt_drm_crtc_t          *crtc,
-                                           uint32_t                    type) {
+static struct vt_drm_plane_t *
+_drm_pick_plane(struct vt_drm_backend_state_t *drm, struct vt_drm_crtc_t *crtc,
+                uint32_t type) {
   struct vt_drm_plane_t *fallback = NULL;
   struct vt_drm_plane_t *plane;
   wl_array_for_each(plane, &drm->planes) {
@@ -1426,7 +1426,7 @@ static void _drm_assign_crtc_planes(struct vt_drm_backend_state_t *drm) {
 }
 
 static struct vt_drm_crtc_t *_drm_find_crtc(struct vt_drm_backend_state_t *drm,
-                                         uint32_t                    id) {
+                                            uint32_t                       id) {
   struct vt_drm_crtc_t *crtc;
   wl_array_for_each(crtc, &drm->crtcs) {
     if (crtc->id == id)
@@ -1437,7 +1437,7 @@ static struct vt_drm_crtc_t *_drm_find_crtc(struct vt_drm_backend_state_t *drm,
 }
 
 static struct vt_drm_crtc_t *_drm_pick_crtc(struct vt_drm_backend_state_t *drm,
-                                         drmModeConnector           *conn) {
+                                            drmModeConnector *conn) {
   if (!drm || !conn)
     return NULL;
 
@@ -1510,8 +1510,8 @@ static bool _drm_atomic_output_supported(struct vt_drm_output_state_t *output) {
 }
 
 static bool _drm_create_output_for_device(struct vt_drm_backend_state_t *drm,
-                                          struct vt_output_t         *output,
-                                          void                       *data) {
+                                          struct vt_output_t            *output,
+                                          void                          *data) {
   if (!drm || !drm->comp || !drm->res || !output || !data)
     return false;
 
@@ -2016,7 +2016,7 @@ static bool _drm_output_update_cursor_image(struct vt_output_t     *output,
 }
 
 static bool _drm_import_cursor_image(struct vt_drm_output_state_t *drm_output,
-                                     struct vt_buffer_use_t    *use,
+                                     struct vt_buffer_use_t       *use,
                                      struct vt_drm_cursor_image_t *next) {
   assert(drm_output && drm_output->drm_backend && drm_output->crtc);
 
@@ -2207,7 +2207,7 @@ _drm_take_commited_cursor_image(struct vt_drm_output_state_t *drm_output,
 }
 
 static void
-_drm_output_cursor_update_visibility(struct vt_output_t        *output,
+_drm_output_cursor_update_visibility(struct vt_output_t           *output,
                                      struct vt_drm_cursor_state_t *cursor) {
   const struct vt_drm_cursor_image_t *image = cursor->image;
 
@@ -2218,7 +2218,7 @@ _drm_output_cursor_update_visibility(struct vt_output_t        *output,
 }
 
 static bool _drm_destroy_output_for_device(struct vt_drm_backend_state_t *drm,
-                                           struct vt_output_t         *output) {
+                                           struct vt_output_t *output) {
   if (!drm || !drm->comp)
     return false;
   if (!output || !output->user_data)
@@ -2340,7 +2340,8 @@ static bool _drm_terminate_for_device(struct vt_drm_backend_state_t *drm) {
 
   struct vt_drm_backend_master_state_t *drm_master = NULL;
   if (drm->backend)
-    drm_master = BACKEND_DATA(drm->backend, struct vt_drm_backend_master_state_t);
+    drm_master =
+        BACKEND_DATA(drm->backend, struct vt_drm_backend_master_state_t);
 
   if (drm_master && drm_master->main_drm == drm && comp->renderer &&
       comp->renderer->impl.destroy) {
@@ -2399,8 +2400,8 @@ static void _drm_on_seat_disable(struct wl_listener *listener, void *data) {
   if (!session->comp || !session->comp->backend)
     return;
 
-  struct vt_drm_backend_master_state_t *drm_master =
-      BACKEND_DATA(session->comp->backend, struct vt_drm_backend_master_state_t);
+  struct vt_drm_backend_master_state_t *drm_master = BACKEND_DATA(
+      session->comp->backend, struct vt_drm_backend_master_state_t);
   if (!drm_master || session->comp->suspended)
     return;
 
@@ -2436,8 +2437,8 @@ static void _drm_on_seat_enable(struct wl_listener *listener, void *data) {
   struct vt_session_t *session = (struct vt_session_t *)data;
   if (!session->comp || !session->comp->backend)
     return;
-  struct vt_drm_backend_master_state_t *drm_master =
-      BACKEND_DATA(session->comp->backend, struct vt_drm_backend_master_state_t);
+  struct vt_drm_backend_master_state_t *drm_master = BACKEND_DATA(
+      session->comp->backend, struct vt_drm_backend_master_state_t);
   if (!drm_master || !session->comp->suspended)
     return;
 
@@ -2525,7 +2526,7 @@ static bool _drm_plane_has_format(struct vt_drm_plane_t *plane, uint32_t format,
 static bool
 _drm_output_add_composition_layer(struct vt_drm_backend_state_t *drm,
                                   struct vt_drm_output_state_t  *drm_output,
-                                  struct vt_output_t         *output) {
+                                  struct vt_output_t            *output) {
   if (!drm || !drm_output || !output || !drm_output->gbm_surf)
     return false;
 
@@ -2587,7 +2588,7 @@ _drm_output_add_composition_layer(struct vt_drm_backend_state_t *drm,
   return true;
 }
 static bool _drm_handle_frame_for_device(struct vt_drm_backend_state_t *drm,
-                                         struct vt_output_t         *output) {
+                                         struct vt_output_t *output) {
   if (!drm || !drm->comp || !output || !output->user_data || !drm->impl)
     return false;
 
@@ -2671,10 +2672,10 @@ static bool _drm_handle_frame_for_device(struct vt_drm_backend_state_t *drm,
              layer->surface, output);
   }
 
-  VT_TRACE(comp->log,
-           "real commit succeeded output=%p event_pending=%d layers=%zu",
-           output, commit.event_pending,
-           drm_output->pending_layers.size / sizeof(struct vt_drm_layer_state_t));
+  VT_TRACE(
+      comp->log, "real commit succeeded output=%p event_pending=%d layers=%zu",
+      output, commit.event_pending,
+      drm_output->pending_layers.size / sizeof(struct vt_drm_layer_state_t));
 
   drm_output->pending_valid = true;
   drm_output->needs_modeset = false;
@@ -2702,7 +2703,7 @@ static bool _drm_handle_frame_for_device(struct vt_drm_backend_state_t *drm,
 }
 static bool
 _drm_handle_cursor_commit_for_device(struct vt_drm_backend_state_t *drm,
-                                     struct vt_output_t         *output) {
+                                     struct vt_output_t            *output) {
   if (!drm || !output || !output->user_data || !drm->impl)
     return false;
 
@@ -3095,8 +3096,8 @@ bool backend_is_dmabuf_importable_drm(struct vt_backend_t     *backend,
   return drm_prime_test_import(master->main_drm->drm_fd, attr);
 }
 
-static struct vt_drm_plane_t *_drm_plane_from_id(struct vt_drm_backend_state_t *drm,
-                                              uint32_t plane_id) {
+static struct vt_drm_plane_t *
+_drm_plane_from_id(struct vt_drm_backend_state_t *drm, uint32_t plane_id) {
   struct vt_drm_plane_t *plane;
 
   wl_array_for_each(plane, &drm->planes) {
@@ -3108,8 +3109,8 @@ static struct vt_drm_plane_t *_drm_plane_from_id(struct vt_drm_backend_state_t *
 }
 
 static bool
-_drm_output_can_scanout_dmabuf(struct vt_drm_backend_state_t    *drm,
-                               struct vt_drm_output_state_t     *output,
+_drm_output_can_scanout_dmabuf(struct vt_drm_backend_state_t *drm,
+                               struct vt_drm_output_state_t  *output,
                                const struct vt_dmabuf_attr_t *attr) {
   assert(drm && output && output->crtc && attr);
 
@@ -3242,7 +3243,7 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
   drmModeAtomicReq *req = NULL;
 
   for (size_t i = 0; i < layer_count; i++) {
-    struct vt_output_layer_state_t  *layer = &layers[i];
+    struct vt_output_layer_state_t     *layer = &layers[i];
     struct vt_drm_liftoff_test_layer_t *test = &test_layers[i];
 
     struct liftoff_layer *liftoff_layer =
@@ -3417,7 +3418,7 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
   bool all_accepted = true;
 
   for (size_t i = 0; i < layer_count; i++) {
-    struct vt_output_layer_state_t  *layer = &layers[i];
+    struct vt_output_layer_state_t     *layer = &layers[i];
     struct vt_drm_liftoff_test_layer_t *test = &test_layers[i];
 
     if (!test->liftoff_layer) {
@@ -3626,9 +3627,10 @@ bool backend_build_surface_feedback(struct vt_backend_t         *backend,
   return true;
 }
 
-static bool _drm_output_scanout_formats(struct vt_drm_backend_state_t *drm,
-                                        struct vt_drm_output_state_t  *drm_output,
-                                        struct wl_array            *formats) {
+static bool
+_drm_output_scanout_formats(struct vt_drm_backend_state_t *drm,
+                            struct vt_drm_output_state_t  *drm_output,
+                            struct wl_array               *formats) {
   assert(drm && drm_output && drm_output->crtc && formats);
   assert(drm_output->crtc->index < 32);
 

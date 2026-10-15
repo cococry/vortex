@@ -231,9 +231,9 @@ static void _scene_render_cursor(struct vt_scene_t  *scene,
 
   struct vt_renderer_t *r = scene->renderer;
 
-  struct vt_seat_t    *seat = r->comp->seat;
+  struct vt_seat_t             *seat = r->comp->seat;
   struct vt_seat_cursor_image_t image = vt_seat_get_cursor_image(seat);
-  struct vt_surface_t *cursor = image.surf;
+  struct vt_surface_t          *cursor = image.surf;
 
   if (cursor && cursor->mapped) {
 

@@ -33,7 +33,7 @@ bool drm_fb_init_from_gbm(struct vt_drm_backend_state_t *drm,
 
 bool drm_fb_init_from_buffer(struct vt_drm_backend_state_t *drm,
                              struct vt_drm_framebuffer_t   *fb,
-                             struct vt_buffer_t         *buf);
+                             struct vt_buffer_t            *buf);
 
 void drm_fb_finish(struct vt_drm_backend_state_t *drm,
                    struct vt_drm_framebuffer_t   *fb);

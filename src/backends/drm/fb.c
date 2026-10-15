@@ -76,7 +76,7 @@ static bool _drm_fb_add(struct vt_drm_backend_state_t *drm,
 
 bool drm_fb_init_from_buffer(struct vt_drm_backend_state_t *drm,
                              struct vt_drm_framebuffer_t   *fb,
-                             struct vt_buffer_t         *buf) {
+                             struct vt_buffer_t            *buf) {
   if (!drm || !fb || !buf)
     return false;
 

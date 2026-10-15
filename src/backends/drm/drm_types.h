@@ -94,7 +94,7 @@ enum vt_drm_layer_role_t {
 
 struct vt_drm_layer_state_t {
   struct vt_drm_framebuffer_t fb;
-  bool                     has_fb;
+  bool                        has_fb;
 
   struct vt_box_t src;
   struct vt_box_t dst;
@@ -107,7 +107,7 @@ struct vt_drm_layer_state_t {
   struct vt_buffer_use_t *use;
 
   enum vt_drm_layer_role_t role;
-  struct liftoff_layer *liftoff_layer;
+  struct liftoff_layer    *liftoff_layer;
 };
 
 struct vt_drm_kms_commit_t {
@@ -123,11 +123,11 @@ struct vt_drm_kms_commit_t {
 
   int out_fence_fd;
 
-  bool                       cursor_submitted;
+  bool                          cursor_submitted;
   struct vt_drm_cursor_image_t *cursor_image;
-  int32_t                    cursor_x;
-  int32_t                    cursor_y;
-  bool                       cursor_visible;
+  int32_t                       cursor_x;
+  int32_t                       cursor_y;
+  bool                          cursor_visible;
 };
 
 struct vt_drm_kms_impl_t {
@@ -187,14 +187,14 @@ struct vt_drm_backend_master_state_t {
       seat_enable_listener, drm_change_listener;
 
   struct vt_drm_backend_state_t *main_drm;
-  uint32_t                    n_drm;
+  uint32_t                       n_drm;
 };
 
 struct vt_drm_cursor_image_t {
   struct vt_drm_backend_state_t *drm;
 
   struct vt_drm_framebuffer_t fb;
-  bool                     has_fb;
+  bool                        has_fb;
 
   struct gbm_bo *bo;
 
@@ -216,7 +216,7 @@ struct vt_drm_cursor_state_t {
 };
 
 struct vt_drm_output_state_t {
-  struct vt_output_t         *base;
+  struct vt_output_t            *base;
   struct vt_drm_backend_state_t *drm_backend;
   struct vt_drm_crtc_t          *crtc;
 
@@ -251,5 +251,5 @@ struct vt_drm_output_state_t {
   struct vt_drm_cursor_state_t  cursor;
   struct vt_drm_cursor_image_t *kms_cursor_image;
   struct vt_drm_cursor_image_t *pending_cursor_image;
-  bool                       have_pending_cursor_image;
+  bool                          have_pending_cursor_image;
 };

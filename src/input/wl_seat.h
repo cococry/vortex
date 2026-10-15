@@ -75,7 +75,7 @@ struct vt_pointer_axis_event_t {
 
 struct vt_seat_cursor_image_t {
   struct vt_surface_t *surf;
-  int32_t hotspot_x, hotspot_y;
+  int32_t              hotspot_x, hotspot_y;
 };
 
 struct vt_seat_t {
@@ -95,8 +95,8 @@ struct vt_seat_t {
   double pointer_x, pointer_y;
 
   struct vt_seat_cursor_t cursor;
-  struct vt_box_t cursor_box;
-  bool cursor_box_valid;
+  struct vt_box_t         cursor_box;
+  bool                    cursor_box_valid;
 };
 
 struct vt_keyboard_t {
@@ -131,7 +131,7 @@ void vt_seat_handle_pointer_motion(struct vt_seat_t *seat, double x, double y,
 void vt_seat_handle_pointer_button(struct vt_seat_t *seat, uint32_t button,
                                    bool pressed, uint32_t time);
 
-void vt_seat_handle_pointer_axis(struct vt_seat_t *seat,
+void vt_seat_handle_pointer_axis(struct vt_seat_t                     *seat,
                                  const struct vt_pointer_axis_event_t *event);
 
 struct vt_keybind_t *vt_seat_add_global_keybind(

@@ -170,7 +170,7 @@ bool _vt_li_input_handle_pointer_motion_event(
   enum libinput_event_type type =
       libinput_event_get_type(libinput_event_pointer_get_base_event(ptrev));
   if (type == LIBINPUT_EVENT_POINTER_MOTION_ABSOLUTE) {
-    struct vt_output_t *target = NULL;
+    struct vt_output_t  *target = NULL;
     struct vt_surface_t *ptr_focus = li->comp->seat->ptr_focus.surf;
     if (ptr_focus)
       target = vt_scene_node_primary_output(li->comp, ptr_focus->scene_node);
@@ -193,12 +193,10 @@ bool _vt_li_input_handle_pointer_motion_event(
       VT_WARN(li->comp->log, "Cannot retrieve output dimensions.");
       return false;
     }
-    posx = target->x +
-           libinput_event_pointer_get_absolute_x_transformed(ptrev,
-                                                             target->width);
-    posy = target->y +
-           libinput_event_pointer_get_absolute_y_transformed(ptrev,
-                                                             target->height);
+    posx = target->x + libinput_event_pointer_get_absolute_x_transformed(
+                           ptrev, target->width);
+    posy = target->y + libinput_event_pointer_get_absolute_y_transformed(
+                           ptrev, target->height);
   } else { // relative motion
     double dx = libinput_event_pointer_get_dx(ptrev);
     double dy = libinput_event_pointer_get_dy(ptrev);
@@ -243,11 +241,11 @@ bool _vt_li_input_handle_pointer_scroll_event(
   event.has_source = true;
   event.source = type == LIBINPUT_EVENT_POINTER_SCROLL_WHEEL
                      ? WL_POINTER_AXIS_SOURCE_WHEEL
-                     : type == LIBINPUT_EVENT_POINTER_SCROLL_FINGER
-                           ? WL_POINTER_AXIS_SOURCE_FINGER
-                           : WL_POINTER_AXIS_SOURCE_CONTINUOUS;
+                 : type == LIBINPUT_EVENT_POINTER_SCROLL_FINGER
+                     ? WL_POINTER_AXIS_SOURCE_FINGER
+                     : WL_POINTER_AXIS_SOURCE_CONTINUOUS;
 
-  uint32_t time = libinput_event_pointer_get_time(ptrev);
+  uint32_t                time = libinput_event_pointer_get_time(ptrev);
   struct libinput_device *device =
       libinput_event_get_device(libinput_event_pointer_get_base_event(ptrev));
   uint32_t direction =
@@ -277,8 +275,8 @@ bool _vt_li_input_handle_pointer_scroll_event(
     }
 
     if (type == LIBINPUT_EVENT_POINTER_SCROLL_WHEEL) {
-      a->value120 = (int32_t)libinput_event_pointer_get_scroll_value_v120(
-          ptrev, li_axis);
+      a->value120 =
+          (int32_t)libinput_event_pointer_get_scroll_value_v120(ptrev, li_axis);
       a->has_value120 = a->value120 != 0;
     }
   }

@@ -82,7 +82,7 @@ static bool _surface_role_cursor_apply(struct vt_surface_t        *surf,
                                        struct vt_content_update_t *cu);
 
 static void _surface_role_cursor_mapping_changed(struct vt_surface_t *surf,
-                                                 bool mapped);
+                                                 bool                 mapped);
 
 static void _send_pointer_enter(struct vt_pointer_t *ptr,
                                 struct vt_surface_t *surf, double sx,
@@ -391,14 +391,14 @@ void _wl_pointer_handle_resource_destroy(struct wl_resource *res) {
 }
 
 static void _surface_role_cursor_mapping_changed(struct vt_surface_t *surf,
-                                                 bool mapped) {
+                                                 bool                 mapped) {
   if (!surf || !surf->comp || !surf->comp->seat)
     return;
 
   struct vt_seat_t *seat = surf->comp->seat;
   if (seat->cursor.surf != surf || !seat->cursor.owner ||
-      !seat->cursor.owner->res || seat->ptr_focus.client !=
-          wl_resource_get_client(seat->cursor.owner->res))
+      !seat->cursor.owner->res ||
+      seat->ptr_focus.client != wl_resource_get_client(seat->cursor.owner->res))
     return;
 
   (void)mapped;
@@ -481,9 +481,11 @@ bool vt_seat_init(struct vt_seat_t *seat) {
    * position itself refers to the hotspot, not the image's upper-left. */
   if (first) {
     seat->pointer_x += seat->cursor.root_hotspot_x < (int32_t)first->width
-                           ? seat->cursor.root_hotspot_x : first->width - 1;
+                           ? seat->cursor.root_hotspot_x
+                           : first->width - 1;
     seat->pointer_y += seat->cursor.root_hotspot_y < (int32_t)first->height
-                           ? seat->cursor.root_hotspot_y : first->height - 1;
+                           ? seat->cursor.root_hotspot_y
+                           : first->height - 1;
   }
 
   /* Outputs already exist when the seat is initialized. */
@@ -617,7 +619,8 @@ struct vt_seat_cursor_image_t vt_seat_get_cursor_image(struct vt_seat_t *seat) {
 
   if (seat->cursor.surf && seat->cursor.surf->mapped && seat->cursor.owner &&
       seat->cursor.owner->res && seat->ptr_focus.client &&
-      wl_resource_get_client(seat->cursor.owner->res) == seat->ptr_focus.client) {
+      wl_resource_get_client(seat->cursor.owner->res) ==
+          seat->ptr_focus.client) {
     result.surf = seat->cursor.surf;
     result.hotspot_x = seat->cursor.hotspot_x;
     result.hotspot_y = seat->cursor.hotspot_y;
@@ -654,7 +657,7 @@ static void _seat_update_cursor_image(struct vt_seat_t *seat) {
   if (!seat)
     return;
 
-  struct vt_surface_t *surf = vt_seat_get_cursor_image(seat).surf;
+  struct vt_surface_t    *surf = vt_seat_get_cursor_image(seat).surf;
   struct vt_buffer_use_t *use =
       surf && surf->mapped ? surf->current_buf_use : NULL;
 
@@ -669,7 +672,7 @@ static void _seat_update_cursor_image(struct vt_seat_t *seat) {
 }
 
 static void _seat_update_cursor_position(struct vt_seat_t *seat) {
-  struct vt_output_t *output;
+  struct vt_output_t           *output;
   struct vt_seat_cursor_image_t image = vt_seat_get_cursor_image(seat);
 
   /* TODO: do not fan out to all outputs */
@@ -720,8 +723,8 @@ static bool _seat_constrain_pointer(struct vt_seat_t *seat, double *x,
   if (!isfinite(*x) || !isfinite(*y))
     return false;
 
-  bool   have_output = false;
-  double left = 0, top = 0, right = 0, bottom = 0;
+  bool                have_output = false;
+  double              left = 0, top = 0, right = 0, bottom = 0;
   struct vt_output_t *output;
   wl_list_for_each(output, &seat->comp->outputs, link_global) {
     if (!output->width || !output->height)
@@ -921,8 +924,8 @@ void vt_seat_handle_pointer_button(struct vt_seat_t *seat, uint32_t button,
   }
 }
 
-void vt_seat_handle_pointer_axis(
-    struct vt_seat_t *seat, const struct vt_pointer_axis_event_t *event) {
+void vt_seat_handle_pointer_axis(struct vt_seat_t                     *seat,
+                                 const struct vt_pointer_axis_event_t *event) {
   if (!seat || !event || !seat->ptr_focus.client || !seat->ptr_focus.surf ||
       !seat->ptr_focus.surf->res)
     return;
@@ -930,20 +933,19 @@ void vt_seat_handle_pointer_axis(
   bool has_axis = false;
   for (uint32_t axis = 0; axis < 2; axis++) {
     const struct vt_pointer_axis_t *a = &event->axes[axis];
-    has_axis |= a->has_value || a->has_discrete || a->has_value120 ||
-                a->stopped;
+    has_axis |=
+        a->has_value || a->has_discrete || a->has_value120 || a->stopped;
   }
   if (!has_axis)
     return;
 
   struct vt_pointer_t *ptr;
   wl_list_for_each(ptr, &seat->pointers, link) {
-    if (!ptr->res ||
-        wl_resource_get_client(ptr->res) != seat->ptr_focus.client)
+    if (!ptr->res || wl_resource_get_client(ptr->res) != seat->ptr_focus.client)
       continue;
 
     uint32_t version = wl_resource_get_version(ptr->res);
-    bool sent = false;
+    bool     sent = false;
 
     if (event->has_source && version >= WL_POINTER_AXIS_SOURCE_SINCE_VERSION) {
       wl_pointer_send_axis_source(ptr->res, event->source);

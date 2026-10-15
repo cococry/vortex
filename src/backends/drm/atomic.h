@@ -8,15 +8,15 @@ struct vt_drm_liftoff_test_layer_t {
   struct liftoff_layer *liftoff_layer;
 
   struct vt_drm_framebuffer_t fb;
-  bool                     has_fb;
+  bool                        has_fb;
 
   struct vt_buffer_use_t *use;
 };
 
-drmModeAtomicReq *drm_atomic_create_test_req(struct vt_drm_backend_state_t *drm,
-                                             struct vt_drm_output_state_t  *output,
-                                             uint32_t *mode_blob,
-                                             uint32_t *flags);
+drmModeAtomicReq *
+drm_atomic_create_test_req(struct vt_drm_backend_state_t *drm,
+                           struct vt_drm_output_state_t  *output,
+                           uint32_t *mode_blob, uint32_t *flags);
 
 bool drm_liftoff_set_layer_props(struct liftoff_layer *liftoff_layer,
                                  const struct vt_output_layer_state_t *layer,
@@ -29,4 +29,4 @@ bool drm_liftoff_set_layer_props_composited(
 
 void drm_liftoff_testing_finish(struct vt_drm_backend_state_t      *drm,
                                 struct vt_drm_liftoff_test_layer_t *test_layers,
-                                size_t                           layer_count);
+                                size_t layer_count);
