@@ -1711,6 +1711,9 @@ static bool _drm_create_output_for_device(struct vt_drm_backend_state_t *drm,
   /* TODO: Monitor position system */
   drm_master->x_ptr += output->width;
 
+  if (output->backend->on_output_change)
+    output->backend->on_output_change(output->backend, output);
+
   return true;
 }
 
@@ -2279,6 +2282,8 @@ static bool _drm_destroy_output_for_device(struct vt_drm_backend_state_t *drm,
 
   wl_list_remove(&output->link_local);
   wl_list_remove(&output->link_global);
+  if (output->backend->on_output_change)
+    output->backend->on_output_change(output->backend, output);
 
   vt_proto_linux_dmabuf_v1_forget_output_feedback(output);
 

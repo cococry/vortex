@@ -683,6 +683,8 @@ bool _wl_backend_destroy_output(struct vt_backend_t *backend,
   free(output->physical.serial_number);
 
   wl_list_remove(&output->link_global);
+  if (backend->on_output_change)
+    backend->on_output_change(backend, output);
   output = NULL;
 
   return true;
