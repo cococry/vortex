@@ -1,8 +1,8 @@
 #include "cursor.h"
 #include "fb.h"
 
-static void _drm_cursor_image_finish(struct drm_backend_state_t *drm,
-                                     struct drm_cursor_image_t  *image) {
+static void _drm_cursor_image_finish(struct vt_drm_backend_state_t *drm,
+                                     struct vt_drm_cursor_image_t  *image) {
   if (!drm || !image)
     return;
 
@@ -25,8 +25,8 @@ static void _drm_cursor_image_finish(struct drm_backend_state_t *drm,
   free(image);
 }
 
-struct drm_cursor_image_t *
-drm_cursor_image_ref(struct drm_cursor_image_t *img) {
+struct vt_drm_cursor_image_t *
+drm_cursor_image_ref(struct vt_drm_cursor_image_t *img) {
   assert(img);
 
   img->refcount++;
@@ -34,11 +34,11 @@ drm_cursor_image_ref(struct drm_cursor_image_t *img) {
   return img;
 }
 
-void drm_cursor_image_unref(struct drm_cursor_image_t **img_ptr) {
+void drm_cursor_image_unref(struct vt_drm_cursor_image_t **img_ptr) {
 
   assert(img_ptr && *img_ptr);
 
-  struct drm_cursor_image_t *img = *img_ptr;
+  struct vt_drm_cursor_image_t *img = *img_ptr;
   assert(img->drm);
 
   *img_ptr = NULL;

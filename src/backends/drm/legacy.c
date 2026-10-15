@@ -29,11 +29,11 @@
 
 #define _SUBSYS_NAME "DRM"
 
-static bool _legacy_commit_cursor(struct drm_backend_state_t *drm,
-                                  struct drm_kms_commit_t    *commit) {
+static bool _legacy_commit_cursor(struct vt_drm_backend_state_t *drm,
+                                  struct vt_drm_kms_commit_t    *commit) {
   assert(drm && commit && commit->output && commit->output->crtc);
 
-  struct drm_output_state_t *output = commit->output;
+  struct vt_drm_output_state_t *output = commit->output;
 
   drm_kms_commit_snapshot_cursor(commit);
 
@@ -87,15 +87,15 @@ fail:
   return false;
 }
 
-static bool _legacy_commit(struct drm_backend_state_t *drm,
-                           struct drm_kms_commit_t    *commit) {
+static bool _legacy_commit(struct vt_drm_backend_state_t *drm,
+                           struct vt_drm_kms_commit_t    *commit) {
   if (!drm || !commit || !commit->output || !commit->output->crtc)
     return false;
 
   if (commit->test_only)
     return false;
 
-  struct drm_output_state_t *output = commit->output;
+  struct vt_drm_output_state_t *output = commit->output;
 
   if (commit->cursor_only) {
     if (commit->modeset)
@@ -114,15 +114,15 @@ static bool _legacy_commit(struct drm_backend_state_t *drm,
    * The legacy pipeline expects exactly one logical layer: the
    * Vulkan/GL produced framebuffer covering the output.
    */
-  if (commit->layers.size != sizeof(struct drm_layer_state_t)) {
+  if (commit->layers.size != sizeof(struct vt_drm_layer_state_t)) {
     VT_ERROR(drm->comp->log,
              "Legacy DRM commit requires exactly one composition layer, "
              "got %zu.",
-             commit->layers.size / sizeof(struct drm_layer_state_t));
+             commit->layers.size / sizeof(struct vt_drm_layer_state_t));
     return false;
   }
 
-  struct drm_layer_state_t *layer = commit->layers.data;
+  struct vt_drm_layer_state_t *layer = commit->layers.data;
 
   if (!layer || layer->role != VT_DRM_LAYER_COMPOSITED_SCENE ||
       !layer->has_fb || layer->fb.id == 0) {
@@ -196,8 +196,8 @@ static bool _legacy_commit(struct drm_backend_state_t *drm,
   return true;
 }
 
-static bool _legacy_disable(struct drm_backend_state_t *drm,
-                            struct drm_output_state_t  *output) {
+static bool _legacy_disable(struct vt_drm_backend_state_t *drm,
+                            struct vt_drm_output_state_t  *output) {
   if (!drm || !output || !output->crtc)
     return false;
 
@@ -211,7 +211,7 @@ static bool _legacy_disable(struct drm_backend_state_t *drm,
   return true;
 }
 
-const struct drm_kms_impl_t drm_kms_legacy_impl = {
+const struct vt_drm_kms_impl_t drm_kms_legacy_impl = {
     .name = "legacy",
     .atomic = false,
     .commit = _legacy_commit,

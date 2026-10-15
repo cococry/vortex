@@ -24,8 +24,8 @@
 
 #include "drm_types.h"
 
-extern const struct drm_kms_impl_t drm_kms_atomic_impl;
-extern const struct drm_kms_impl_t drm_kms_legacy_impl;
+extern const struct vt_drm_kms_impl_t drm_kms_atomic_impl;
+extern const struct vt_drm_kms_impl_t drm_kms_legacy_impl;
 
-void drm_kms_commit_snapshot_cursor(struct drm_kms_commit_t *commit);
-void drm_kms_commit_release_cursor(struct drm_kms_commit_t *commit);
+void drm_kms_commit_snapshot_cursor(struct vt_drm_kms_commit_t *commit);
+void drm_kms_commit_release_cursor(struct vt_drm_kms_commit_t *commit);

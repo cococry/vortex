@@ -34,11 +34,11 @@
 #include <xf86drm.h>
 #include <xf86drmMode.h>
 
-struct drm_backend_master_state_t;
-struct drm_backend_state_t;
-struct drm_output_state_t;
+struct vt_drm_backend_master_state_t;
+struct vt_drm_backend_state_t;
+struct vt_drm_output_state_t;
 
-struct drm_framebuffer_t {
+struct vt_drm_framebuffer_t {
   uint32_t id;
 
   struct vt_buffer_t *buf;
@@ -50,7 +50,7 @@ struct drm_framebuffer_t {
   struct gbm_surface *_gbm_surface;
 };
 
-struct drm_plane_t {
+struct vt_drm_plane_t {
   uint32_t id, type;
   uint32_t id_crtc_init;
   uint32_t possible_crtcs;
@@ -65,14 +65,14 @@ struct drm_plane_t {
   struct liftoff_plane *liftoff_plane;
 };
 
-struct drm_crtc_t {
+struct vt_drm_crtc_t {
   uint32_t id;
   uint32_t index;
 
   uint32_t props[VT_DRM_CRTC__COUNT];
 
-  struct drm_plane_t *plane_cursor;
-  struct drm_plane_t *plane_primary;
+  struct vt_drm_plane_t *plane_cursor;
+  struct vt_drm_plane_t *plane_primary;
 
   bool in_use;
 };
@@ -84,7 +84,7 @@ enum {
   VT_DRM_CAP__COUNT,
 };
 
-enum drm_layer_role_t {
+enum vt_drm_layer_role_t {
   VT_DRM_LAYER_DIRECT,
 
   VT_DRM_LAYER_COMPOSITED,
@@ -92,8 +92,8 @@ enum drm_layer_role_t {
   VT_DRM_LAYER_COMPOSITED_SCENE,
 };
 
-struct drm_layer_state_t {
-  struct drm_framebuffer_t fb;
+struct vt_drm_layer_state_t {
+  struct vt_drm_framebuffer_t fb;
   bool                     has_fb;
 
   struct vt_box_t src;
@@ -106,12 +106,12 @@ struct drm_layer_state_t {
   struct vt_surface_t    *surface;
   struct vt_buffer_use_t *use;
 
-  enum drm_layer_role_t role;
+  enum vt_drm_layer_role_t role;
   struct liftoff_layer *liftoff_layer;
 };
 
-struct drm_kms_commit_t {
-  struct drm_output_state_t *output;
+struct vt_drm_kms_commit_t {
+  struct vt_drm_output_state_t *output;
 
   struct wl_array layers;
 
@@ -124,24 +124,24 @@ struct drm_kms_commit_t {
   int out_fence_fd;
 
   bool                       cursor_submitted;
-  struct drm_cursor_image_t *cursor_image;
+  struct vt_drm_cursor_image_t *cursor_image;
   int32_t                    cursor_x;
   int32_t                    cursor_y;
   bool                       cursor_visible;
 };
 
-struct drm_kms_impl_t {
+struct vt_drm_kms_impl_t {
   const char *name;
   bool        atomic;
 
-  bool (*commit)(struct drm_backend_state_t *drm,
-                 struct drm_kms_commit_t    *commit);
+  bool (*commit)(struct vt_drm_backend_state_t *drm,
+                 struct vt_drm_kms_commit_t    *commit);
 
-  bool (*disable)(struct drm_backend_state_t *drm,
-                  struct drm_output_state_t  *output);
+  bool (*disable)(struct vt_drm_backend_state_t *drm,
+                  struct vt_drm_output_state_t  *output);
 };
 
-struct drm_backend_state_t {
+struct vt_drm_backend_state_t {
   int                drm_fd;
   drmEventContext    evctx;
   struct gbm_device *gbm_dev;
@@ -155,13 +155,13 @@ struct drm_backend_state_t {
 
   struct vt_backend_t *backend;
 
-  struct drm_backend_state_t *main_drm;
+  struct vt_drm_backend_state_t *main_drm;
 
   struct vt_device_t *dev;
 
   struct wl_event_source *event_source;
 
-  const struct drm_kms_impl_t *impl;
+  const struct vt_drm_kms_impl_t *impl;
 
   uint64_t cursor_w, cursor_h;
 
@@ -177,7 +177,7 @@ struct drm_backend_state_t {
   struct liftoff_device *liftoff_dev;
 };
 
-struct drm_backend_master_state_t {
+struct vt_drm_backend_master_state_t {
   struct wl_list          backends;
   uint32_t                x_ptr;
   int32_t                 vt_fd;
@@ -186,14 +186,14 @@ struct drm_backend_master_state_t {
   struct wl_listener session_terminate_listener, seat_disable_listener,
       seat_enable_listener, drm_change_listener;
 
-  struct drm_backend_state_t *main_drm;
+  struct vt_drm_backend_state_t *main_drm;
   uint32_t                    n_drm;
 };
 
-struct drm_cursor_image_t {
-  struct drm_backend_state_t *drm;
+struct vt_drm_cursor_image_t {
+  struct vt_drm_backend_state_t *drm;
 
-  struct drm_framebuffer_t fb;
+  struct vt_drm_framebuffer_t fb;
   bool                     has_fb;
 
   struct gbm_bo *bo;
@@ -206,8 +206,8 @@ struct drm_cursor_image_t {
   uint32_t refcount;
 };
 
-struct drm_cursor_state_t {
-  struct drm_cursor_image_t *image;
+struct vt_drm_cursor_state_t {
+  struct vt_drm_cursor_image_t *image;
 
   int32_t x;
   int32_t y;
@@ -215,10 +215,10 @@ struct drm_cursor_state_t {
   bool visible;
 };
 
-struct drm_output_state_t {
+struct vt_drm_output_state_t {
   struct vt_output_t         *base;
-  struct drm_backend_state_t *drm_backend;
-  struct drm_crtc_t          *crtc;
+  struct vt_drm_backend_state_t *drm_backend;
+  struct vt_drm_crtc_t          *crtc;
 
   struct wl_array current_layers;
   struct wl_array pending_layers;
@@ -248,8 +248,8 @@ struct drm_output_state_t {
 
   bool needs_compositing;
 
-  struct drm_cursor_state_t  cursor;
-  struct drm_cursor_image_t *kms_cursor_image;
-  struct drm_cursor_image_t *pending_cursor_image;
+  struct vt_drm_cursor_state_t  cursor;
+  struct vt_drm_cursor_image_t *kms_cursor_image;
+  struct vt_drm_cursor_image_t *pending_cursor_image;
   bool                       have_pending_cursor_image;
 };

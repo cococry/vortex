@@ -27,13 +27,13 @@
 
 #include "drm_types.h"
 
-bool drm_fb_init_from_gbm(struct drm_backend_state_t *drm,
-                          struct drm_framebuffer_t *fb, struct gbm_bo *bo,
+bool drm_fb_init_from_gbm(struct vt_drm_backend_state_t *drm,
+                          struct vt_drm_framebuffer_t *fb, struct gbm_bo *bo,
                           struct gbm_surface *surf);
 
-bool drm_fb_init_from_buffer(struct drm_backend_state_t *drm,
-                             struct drm_framebuffer_t   *fb,
+bool drm_fb_init_from_buffer(struct vt_drm_backend_state_t *drm,
+                             struct vt_drm_framebuffer_t   *fb,
                              struct vt_buffer_t         *buf);
 
-void drm_fb_finish(struct drm_backend_state_t *drm,
-                   struct drm_framebuffer_t   *fb);
+void drm_fb_finish(struct vt_drm_backend_state_t *drm,
+                   struct vt_drm_framebuffer_t   *fb);

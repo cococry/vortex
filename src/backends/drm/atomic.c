@@ -37,7 +37,7 @@
 
 #define _SUBSYS_NAME "DRM"
 
-static bool _atomic_add_prop(struct drm_backend_state_t *drm,
+static bool _atomic_add_prop(struct vt_drm_backend_state_t *drm,
                              drmModeAtomicReq *req, uint32_t obj, uint32_t prop,
                              uint64_t value) {
   if (!drm || !req || prop == 0)
@@ -53,8 +53,8 @@ static bool _atomic_add_prop(struct drm_backend_state_t *drm,
   return true;
 }
 
-static bool _atomic_disable(struct drm_backend_state_t *drm,
-                            struct drm_output_state_t  *output) {
+static bool _atomic_disable(struct vt_drm_backend_state_t *drm,
+                            struct vt_drm_output_state_t  *output) {
   if (!drm || !output || !output->crtc)
     return false;
 
@@ -62,10 +62,10 @@ static bool _atomic_disable(struct drm_backend_state_t *drm,
   if (!req)
     return false;
 
-  struct drm_crtc_t *crtc = output->crtc;
+  struct vt_drm_crtc_t *crtc = output->crtc;
   bool               ok = true;
 
-  struct drm_plane_t *plane;
+  struct vt_drm_plane_t *plane;
   wl_array_for_each(plane, &drm->planes) {
     drmModePlane *drm_plane = drmModeGetPlane(drm->drm_fd, plane->id);
     if (!drm_plane)
@@ -105,7 +105,7 @@ static bool _atomic_disable(struct drm_backend_state_t *drm,
   return ok;
 }
 
-static uint32_t _atomic_commit_flags(const struct drm_kms_commit_t *commit,
+static uint32_t _atomic_commit_flags(const struct vt_drm_kms_commit_t *commit,
                                      bool                           async) {
   uint32_t flags = 0;
 
@@ -124,9 +124,9 @@ static uint32_t _atomic_commit_flags(const struct drm_kms_commit_t *commit,
   return flags;
 }
 
-static bool _liftoff_set_drm_layer_props(struct drm_backend_state_t *drm,
+static bool _liftoff_set_drm_layer_props(struct vt_drm_backend_state_t *drm,
                                          struct liftoff_layer *liftoff_layer,
-                                         const struct drm_layer_state_t *layer,
+                                         const struct vt_drm_layer_state_t *layer,
                                          bool composited) {
   if (!drm || !liftoff_layer || !layer)
     return false;
@@ -182,12 +182,12 @@ static bool _liftoff_set_drm_layer_props(struct drm_backend_state_t *drm,
   return true;
 }
 
-static bool _atomic_prepare_liftoff(struct drm_backend_state_t *drm,
-                                    struct drm_kms_commit_t    *commit) {
+static bool _atomic_prepare_liftoff(struct vt_drm_backend_state_t *drm,
+                                    struct vt_drm_kms_commit_t    *commit) {
   if (!drm || !commit || !commit->output)
     return false;
 
-  struct drm_output_state_t *output = commit->output;
+  struct vt_drm_output_state_t *output = commit->output;
 
   if (!output->liftoff_output || !output->liftoff_composition_layer) {
     return false;
@@ -208,7 +208,7 @@ static bool _atomic_prepare_liftoff(struct drm_backend_state_t *drm,
 
   bool have_composition = false;
 
-  struct drm_layer_state_t *layer;
+  struct vt_drm_layer_state_t *layer;
   wl_array_for_each(layer, &commit->layers) {
     struct liftoff_layer *liftoff_layer = NULL;
 
@@ -256,11 +256,11 @@ static bool _atomic_prepare_liftoff(struct drm_backend_state_t *drm,
 }
 
 static bool
-_atomic_validate_liftoff_allocation(struct drm_backend_state_t *drm,
-                                    struct drm_kms_commit_t    *commit) {
-  struct drm_output_state_t *output = commit->output;
+_atomic_validate_liftoff_allocation(struct vt_drm_backend_state_t *drm,
+                                    struct vt_drm_kms_commit_t    *commit) {
+  struct vt_drm_output_state_t *output = commit->output;
 
-  struct drm_layer_state_t *layer;
+  struct vt_drm_layer_state_t *layer;
   wl_array_for_each(layer, &commit->layers) {
     struct liftoff_layer *liftoff_layer = NULL;
 
@@ -323,7 +323,7 @@ _atomic_validate_liftoff_allocation(struct drm_backend_state_t *drm,
   return true;
 }
 
-static const char *_atomic_layer_role_name(enum drm_layer_role_t role) {
+static const char *_atomic_layer_role_name(enum vt_drm_layer_role_t role) {
   switch (role) {
   case VT_DRM_LAYER_DIRECT:
     return "DIRECT";
@@ -349,9 +349,9 @@ static const char *_atomic_plane_type_name(uint64_t type) {
   }
 }
 
-static struct drm_plane_t *_atomic_find_plane(struct drm_backend_state_t *drm,
+static struct vt_drm_plane_t *_atomic_find_plane(struct vt_drm_backend_state_t *drm,
                                               uint32_t plane_id) {
-  struct drm_plane_t *plane;
+  struct vt_drm_plane_t *plane;
 
   wl_array_for_each(plane, &drm->planes) {
     if (plane->id == plane_id)
@@ -361,20 +361,20 @@ static struct drm_plane_t *_atomic_find_plane(struct drm_backend_state_t *drm,
   return NULL;
 }
 
-static void _atomic_trace_liftoff_allocation(struct drm_backend_state_t *drm,
-                                             struct drm_kms_commit_t *commit) {
+static void _atomic_trace_liftoff_allocation(struct vt_drm_backend_state_t *drm,
+                                             struct vt_drm_kms_commit_t *commit) {
   if (!drm || !drm->comp || !commit || !commit->output)
     return;
 
-  struct drm_output_state_t *output = commit->output;
+  struct vt_drm_output_state_t *output = commit->output;
 
   VT_TRACE(drm->comp->log,
            "Liftoff allocation output=%p layers=%zu:", (void *)output->base,
-           commit->layers.size / sizeof(struct drm_layer_state_t));
+           commit->layers.size / sizeof(struct vt_drm_layer_state_t));
 
   size_t index = 0;
 
-  struct drm_layer_state_t *layer;
+  struct vt_drm_layer_state_t *layer;
   wl_array_for_each(layer, &commit->layers) {
     const char *role = _atomic_layer_role_name(layer->role);
 
@@ -410,7 +410,7 @@ static void _atomic_trace_liftoff_allocation(struct drm_backend_state_t *drm,
 
     uint32_t plane_id = liftoff_plane_get_id(liftoff_plane);
 
-    struct drm_plane_t *plane = _atomic_find_plane(drm, plane_id);
+    struct vt_drm_plane_t *plane = _atomic_find_plane(drm, plane_id);
 
     const char *plane_type =
         plane ? _atomic_plane_type_name(plane->type) : "UNKNOWN";
@@ -425,11 +425,11 @@ static void _atomic_trace_liftoff_allocation(struct drm_backend_state_t *drm,
   }
 }
 
-static bool _atomic_add_cursor(struct drm_backend_state_t *drm,
-                               struct drm_kms_commit_t    *commit,
+static bool _atomic_add_cursor(struct vt_drm_backend_state_t *drm,
+                               struct vt_drm_kms_commit_t    *commit,
                                drmModeAtomicReq           *req) {
-  struct drm_output_state_t *output = commit->output;
-  struct drm_plane_t        *plane = output->crtc->plane_cursor;
+  struct vt_drm_output_state_t *output = commit->output;
+  struct vt_drm_plane_t        *plane = output->crtc->plane_cursor;
 
   if (!plane)
     return true;
@@ -444,7 +444,7 @@ static bool _atomic_add_cursor(struct drm_backend_state_t *drm,
     return true;
   }
 
-  struct drm_cursor_image_t *image = commit->cursor_image;
+  struct vt_drm_cursor_image_t *image = commit->cursor_image;
 
   if (!_atomic_add_prop(drm, req, plane->id, plane->props[VT_DRM_PLANE_FB_ID],
                         image->fb.id) ||
@@ -471,8 +471,8 @@ static bool _atomic_add_cursor(struct drm_backend_state_t *drm,
   return true;
 }
 
-static drmModeAtomicReq *_atomic_build_req(struct drm_backend_state_t *drm,
-                                           struct drm_kms_commit_t    *commit,
+static drmModeAtomicReq *_atomic_build_req(struct vt_drm_backend_state_t *drm,
+                                           struct vt_drm_kms_commit_t    *commit,
                                            uint32_t flags, uint32_t *mode_blob,
                                            int *out_fence_fd) {
   if (!drm || !commit || !commit->output || !commit->output->crtc ||
@@ -480,8 +480,8 @@ static drmModeAtomicReq *_atomic_build_req(struct drm_backend_state_t *drm,
     return NULL;
   }
 
-  struct drm_output_state_t *output = commit->output;
-  struct drm_crtc_t         *crtc = output->crtc;
+  struct vt_drm_output_state_t *output = commit->output;
+  struct vt_drm_crtc_t         *crtc = output->crtc;
 
   *mode_blob = 0;
   *out_fence_fd = -1;
@@ -563,12 +563,12 @@ fail:
   return NULL;
 }
 
-static bool _atomic_commit(struct drm_backend_state_t *drm,
-                           struct drm_kms_commit_t    *commit) {
+static bool _atomic_commit(struct vt_drm_backend_state_t *drm,
+                           struct vt_drm_kms_commit_t    *commit) {
   if (!drm || !commit || !commit->output || !commit->output->crtc)
     return false;
 
-  struct drm_output_state_t *output = commit->output;
+  struct vt_drm_output_state_t *output = commit->output;
 
   if (commit->cursor_only) {
     if (!output->crtc->plane_cursor || commit->modeset)
@@ -660,14 +660,14 @@ fail:
   return false;
 }
 
-drmModeAtomicReq *drm_atomic_create_test_req(struct drm_backend_state_t *drm,
-                                             struct drm_output_state_t  *output,
+drmModeAtomicReq *drm_atomic_create_test_req(struct vt_drm_backend_state_t *drm,
+                                             struct vt_drm_output_state_t  *output,
                                              uint32_t *mode_blob,
                                              uint32_t *flags) {
   assert(drm && output && output->crtc);
   assert(mode_blob && flags);
 
-  struct drm_crtc_t *crtc = output->crtc;
+  struct vt_drm_crtc_t *crtc = output->crtc;
 
   *mode_blob = 0;
   *flags = DRM_MODE_ATOMIC_TEST_ONLY;
@@ -783,14 +783,14 @@ bool drm_liftoff_set_layer_props_composited(
   return true;
 }
 
-void drm_liftoff_testing_finish(struct drm_backend_state_t      *drm,
-                                struct drm_liftoff_test_layer_t *test_layers,
+void drm_liftoff_testing_finish(struct vt_drm_backend_state_t      *drm,
+                                struct vt_drm_liftoff_test_layer_t *test_layers,
                                 size_t                           layer_count) {
   if (!drm || !test_layers)
     return;
 
   for (size_t i = 0; i < layer_count; i++) {
-    struct drm_liftoff_test_layer_t *test = &test_layers[i];
+    struct vt_drm_liftoff_test_layer_t *test = &test_layers[i];
     if (test->has_fb)
       drm_fb_finish(drm, &test->fb);
 
@@ -801,7 +801,7 @@ void drm_liftoff_testing_finish(struct drm_backend_state_t      *drm,
   /* no free(test_layers); (arena allocated)*/
 }
 
-const struct drm_kms_impl_t drm_kms_atomic_impl = {
+const struct vt_drm_kms_impl_t drm_kms_atomic_impl = {
     .name = "atomic",
     .atomic = true,
     .commit = _atomic_commit,

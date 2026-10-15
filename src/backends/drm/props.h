@@ -26,13 +26,13 @@
 #include <stdint.h>
 
 /* Needs to be sorted according to strcmp() for bsearch() */
-enum drm_connector_property_t {
+enum vt_drm_connector_property_t {
   VT_DRM_CONNECTOR_CRTC_ID = 0,
   VT_DRM_CONNECTOR__COUNT
 };
 
 /* Needs to be sorted according to strcmp() for bsearch() */
-enum drm_crtc_property_t {
+enum vt_drm_crtc_property_t {
   VT_DRM_CRTC_ACTIVE = 0,
   VT_DRM_CRTC_BACKGROUND_COLOR,
   VT_DRM_CRTC_CTM,
@@ -47,7 +47,7 @@ enum drm_crtc_property_t {
 };
 
 /* Needs to be sorted according to strcmp() for bsearch() */
-enum drm_plane_property_t {
+enum vt_drm_plane_property_t {
   VT_DRM_PLANE_CRTC_H = 0,
   VT_DRM_PLANE_CRTC_ID,
   VT_DRM_PLANE_CRTC_W,
