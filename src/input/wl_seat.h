@@ -54,6 +54,22 @@ struct vt_seat_cursor_t {
   int32_t hotspot_y;
 };
 
+/* One wl_pointer.frame worth of scroll data (vertical and horizontal). */
+struct vt_pointer_axis_t {
+  uint32_t time;
+  double   value;
+  int32_t  discrete;
+  int32_t  value120;
+  uint32_t direction;
+  bool     has_value, has_discrete, has_value120, has_direction, stopped;
+};
+
+struct vt_pointer_axis_event_t {
+  struct vt_pointer_axis_t axes[2];
+  uint32_t                 source;
+  bool                     has_source;
+};
+
 struct vt_seat_t {
   struct wl_global *global;
   struct wl_list    keyboards;
@@ -87,6 +103,7 @@ struct vt_pointer_t {
   struct wl_list      link;
 
   uint32_t enter_serial;
+  int32_t  scroll_v120_remainder[2];
 };
 
 bool vt_seat_init(struct vt_seat_t *seat);
@@ -99,6 +116,9 @@ void vt_seat_handle_pointer_motion(struct vt_seat_t *seat, double x, double y,
 
 void vt_seat_handle_pointer_button(struct vt_seat_t *seat, uint32_t button,
                                    bool pressed, uint32_t time);
+
+void vt_seat_handle_pointer_axis(struct vt_seat_t *seat,
+                                 const struct vt_pointer_axis_event_t *event);
 
 struct vt_keybind_t *vt_seat_add_global_keybind(
     struct vt_seat_t *seat, xkb_keysym_t sym, uint32_t mods,

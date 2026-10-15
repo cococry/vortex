@@ -448,7 +448,7 @@ bool vt_seat_init(struct vt_seat_t *seat) {
   seat->ptr_focus.surf = NULL;
 
   // advertise chair
-  seat->global = wl_global_create(seat->comp->wl.dsp, &wl_seat_interface, 7,
+  seat->global = wl_global_create(seat->comp->wl.dsp, &wl_seat_interface, 9,
                                   seat, _wl_seat_bind);
 
   if (seat->comp->input_backend->platform == VT_INPUT_LIBINPUT) {
@@ -767,6 +767,82 @@ void vt_seat_handle_pointer_button(struct vt_seat_t *seat, uint32_t button,
   }
 }
 
+void vt_seat_handle_pointer_axis(
+    struct vt_seat_t *seat, const struct vt_pointer_axis_event_t *event) {
+  if (!seat || !event || !seat->ptr_focus.client || !seat->ptr_focus.surf ||
+      !seat->ptr_focus.surf->res)
+    return;
+
+  bool has_axis = false;
+  for (uint32_t axis = 0; axis < 2; axis++) {
+    const struct vt_pointer_axis_t *a = &event->axes[axis];
+    has_axis |= a->has_value || a->has_discrete || a->has_value120 ||
+                a->stopped;
+  }
+  if (!has_axis)
+    return;
+
+  struct vt_pointer_t *ptr;
+  wl_list_for_each(ptr, &seat->pointers, link) {
+    if (!ptr->res ||
+        wl_resource_get_client(ptr->res) != seat->ptr_focus.client)
+      continue;
+
+    uint32_t version = wl_resource_get_version(ptr->res);
+    bool sent = false;
+
+    if (event->has_source && version >= WL_POINTER_AXIS_SOURCE_SINCE_VERSION) {
+      wl_pointer_send_axis_source(ptr->res, event->source);
+      sent = true;
+    }
+
+    for (uint32_t axis = WL_POINTER_AXIS_VERTICAL_SCROLL;
+         axis <= WL_POINTER_AXIS_HORIZONTAL_SCROLL; axis++) {
+      const struct vt_pointer_axis_t *a = &event->axes[axis];
+
+      if (a->has_direction && a->has_value && a->value != 0.0 &&
+          version >= WL_POINTER_AXIS_RELATIVE_DIRECTION_SINCE_VERSION) {
+        wl_pointer_send_axis_relative_direction(ptr->res, axis, a->direction);
+        sent = true;
+      }
+
+      if (version >= WL_POINTER_AXIS_VALUE120_SINCE_VERSION) {
+        int32_t v120 = a->has_value120 ? a->value120 : a->discrete * 120;
+        if ((a->has_value120 || a->has_discrete) && v120) {
+          wl_pointer_send_axis_value120(ptr->res, axis, v120);
+          sent = true;
+        }
+      } else if (version >= WL_POINTER_AXIS_DISCRETE_SINCE_VERSION) {
+        int32_t discrete = 0;
+        if (a->has_discrete) {
+          discrete = a->discrete;
+        } else if (a->has_value120) {
+          ptr->scroll_v120_remainder[axis] += a->value120;
+          discrete = ptr->scroll_v120_remainder[axis] / 120;
+          ptr->scroll_v120_remainder[axis] %= 120;
+        }
+        if (discrete) {
+          wl_pointer_send_axis_discrete(ptr->res, axis, discrete);
+          sent = true;
+        }
+      }
+
+      if (a->has_value && a->value != 0.0) {
+        wl_pointer_send_axis(ptr->res, a->time, axis,
+                             wl_fixed_from_double(a->value));
+        sent = true;
+      }
+      if (a->stopped && version >= WL_POINTER_AXIS_STOP_SINCE_VERSION) {
+        wl_pointer_send_axis_stop(ptr->res, a->time, axis);
+        sent = true;
+      }
+    }
+
+    if (sent && version >= WL_POINTER_FRAME_SINCE_VERSION)
+      wl_pointer_send_frame(ptr->res);
+  }
+}
+
 struct vt_keybind_t *vt_seat_add_global_keybind(
     struct vt_seat_t *seat, xkb_keysym_t sym, uint32_t mods,
     void (*callback)(struct vt_compositor_t *comp, void *user_data),
@@ -919,6 +995,8 @@ void vt_seat_set_pointer_focus(struct vt_seat_t    *seat,
       if (wl_resource_get_client(ptr->res) != old_client)
         continue;
 
+      ptr->scroll_v120_remainder[0] = 0;
+      ptr->scroll_v120_remainder[1] = 0;
       wl_pointer_send_leave(ptr->res, serial, old->res);
 
       if (wl_resource_get_version(ptr->res) >= WL_POINTER_FRAME_SINCE_VERSION)

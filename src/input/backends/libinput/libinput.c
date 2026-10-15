@@ -61,6 +61,9 @@ _vt_li_input_handle_pointer_motion_event(struct vt_input_backend_li_t  *li,
 static bool
 _vt_li_input_handle_pointer_button_event(struct vt_input_backend_li_t  *li,
                                          struct libinput_event_pointer *ptrev);
+static bool
+_vt_li_input_handle_pointer_scroll_event(struct vt_input_backend_li_t  *li,
+                                         struct libinput_event_pointer *ptrev);
 static bool _vt_li_init_xkb(struct vt_input_backend_li_t *li);
 static enum vt_input_key_state_t
 _vt_li_key_state_to_vt_key_state(enum libinput_key_state state);
@@ -119,9 +122,22 @@ int32_t _vt_li_input_dispatch(int fd, uint32_t mask, void *data) {
               li, libinput_event_get_pointer_event(event))) {
         VT_ERROR(li->comp->log, "Failed to handle pointer button.\n");
       }
+    } else if (type == LIBINPUT_EVENT_POINTER_MOTION_ABSOLUTE) {
+      if (!_vt_li_input_handle_pointer_motion_event(
+              li, libinput_event_get_pointer_event(event))) {
+        VT_ERROR(li->comp->log, "Failed to handle absolute pointer motion.\n");
+      }
+    } else if (type == LIBINPUT_EVENT_POINTER_SCROLL_WHEEL ||
+               type == LIBINPUT_EVENT_POINTER_SCROLL_FINGER ||
+               type == LIBINPUT_EVENT_POINTER_SCROLL_CONTINUOUS) {
+      if (!_vt_li_input_handle_pointer_scroll_event(
+              li, libinput_event_get_pointer_event(event))) {
+        VT_ERROR(li->comp->log, "Failed to handle pointer scroll.\n");
+      }
     }
     libinput_event_destroy(event);
   }
+  return 0;
 }
 
 bool _vt_li_input_handle_key_event(struct vt_input_backend_li_t   *li,
@@ -154,38 +170,35 @@ bool _vt_li_input_handle_pointer_motion_event(
   enum libinput_event_type type =
       libinput_event_get_type(libinput_event_pointer_get_base_event(ptrev));
   if (type == LIBINPUT_EVENT_POINTER_MOTION_ABSOLUTE) {
-
-    uint32_t             output_width = 0, output_height = 0;
+    struct vt_output_t *target = NULL;
     struct vt_surface_t *ptr_focus = li->comp->seat->ptr_focus.surf;
-    if (ptr_focus) {
-      struct vt_output_t *output =
-          vt_scene_node_primary_output(li->comp, ptr_focus->scene_node);
+    if (ptr_focus)
+      target = vt_scene_node_primary_output(li->comp, ptr_focus->scene_node);
 
-      if (output) {
-        output_width = output->width;
-        output_height = output->height;
-      }
-    } else {
+    if (!target) {
       struct vt_output_t *output;
       wl_list_for_each(output, &li->comp->outputs, link_global) {
+        if (!target)
+          target = output;
         if (li->comp->seat->pointer_x >= output->x &&
             li->comp->seat->pointer_x < output->x + output->width &&
             li->comp->seat->pointer_y >= output->y &&
             li->comp->seat->pointer_y < output->y + output->height) {
-          output_width = output->width;
-          output_height = output->height;
+          target = output;
           break;
         }
       }
     }
-    if (!output_width || !output_height) {
+    if (!target || !target->width || !target->height) {
       VT_WARN(li->comp->log, "Cannot retrieve output dimensions.");
       return false;
     }
-    posx =
-        libinput_event_pointer_get_absolute_x_transformed(ptrev, output_width);
-    posy =
-        libinput_event_pointer_get_absolute_y_transformed(ptrev, output_height);
+    posx = target->x +
+           libinput_event_pointer_get_absolute_x_transformed(ptrev,
+                                                             target->width);
+    posy = target->y +
+           libinput_event_pointer_get_absolute_y_transformed(ptrev,
+                                                             target->height);
   } else { // relative motion
     double dx = libinput_event_pointer_get_dx(ptrev);
     double dy = libinput_event_pointer_get_dy(ptrev);
@@ -214,6 +227,63 @@ bool _vt_li_input_handle_pointer_button_event(
   vt_seat_handle_pointer_button(li->comp->seat, button,
                                 state == LIBINPUT_BUTTON_STATE_PRESSED, time);
 
+  return true;
+}
+
+bool _vt_li_input_handle_pointer_scroll_event(
+    struct vt_input_backend_li_t *li, struct libinput_event_pointer *ptrev) {
+  if (!li || !li->comp || !ptrev) {
+    VT_PARAM_CHECK_FAIL_HEADLESS();
+    return false;
+  }
+
+  enum libinput_event_type type =
+      libinput_event_get_type(libinput_event_pointer_get_base_event(ptrev));
+  struct vt_pointer_axis_event_t event = {0};
+  event.has_source = true;
+  event.source = type == LIBINPUT_EVENT_POINTER_SCROLL_WHEEL
+                     ? WL_POINTER_AXIS_SOURCE_WHEEL
+                     : type == LIBINPUT_EVENT_POINTER_SCROLL_FINGER
+                           ? WL_POINTER_AXIS_SOURCE_FINGER
+                           : WL_POINTER_AXIS_SOURCE_CONTINUOUS;
+
+  uint32_t time = libinput_event_pointer_get_time(ptrev);
+  struct libinput_device *device =
+      libinput_event_get_device(libinput_event_pointer_get_base_event(ptrev));
+  uint32_t direction =
+      libinput_device_config_scroll_get_natural_scroll_enabled(device)
+          ? WL_POINTER_AXIS_RELATIVE_DIRECTION_INVERTED
+          : WL_POINTER_AXIS_RELATIVE_DIRECTION_IDENTICAL;
+
+  for (uint32_t axis = WL_POINTER_AXIS_VERTICAL_SCROLL;
+       axis <= WL_POINTER_AXIS_HORIZONTAL_SCROLL; axis++) {
+    enum libinput_pointer_axis li_axis =
+        axis == WL_POINTER_AXIS_VERTICAL_SCROLL
+            ? LIBINPUT_POINTER_AXIS_SCROLL_VERTICAL
+            : LIBINPUT_POINTER_AXIS_SCROLL_HORIZONTAL;
+    if (!libinput_event_pointer_has_axis(ptrev, li_axis))
+      continue;
+
+    struct vt_pointer_axis_t *a = &event.axes[axis];
+    a->time = time;
+    a->value = libinput_event_pointer_get_scroll_value(ptrev, li_axis);
+    if (a->value == 0.0 && type != LIBINPUT_EVENT_POINTER_SCROLL_WHEEL) {
+      /* Finger and continuous sources end their sequence with a zero delta. */
+      a->stopped = true;
+    } else {
+      a->has_value = true;
+      a->direction = direction;
+      a->has_direction = true;
+    }
+
+    if (type == LIBINPUT_EVENT_POINTER_SCROLL_WHEEL) {
+      a->value120 = (int32_t)libinput_event_pointer_get_scroll_value_v120(
+          ptrev, li_axis);
+      a->has_value120 = a->value120 != 0;
+    }
+  }
+
+  vt_seat_handle_pointer_axis(li->comp->seat, &event);
   return true;
 }
 

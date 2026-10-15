@@ -248,7 +248,8 @@ void _wl_parent_registry_add(void *data, struct wl_registry *reg, uint32_t id,
   } else if (strcmp(iface, wl_output_interface.name) == 0) {
     _wl_register_output(reg, wl, id);
   } else if (strcmp(iface, wl_seat_interface.name) == 0) {
-    wl->parent_seat = wl_registry_bind(reg, id, &wl_seat_interface, 7);
+    wl->parent_seat =
+        wl_registry_bind(reg, id, &wl_seat_interface, ver < 9 ? ver : 9);
     wl->comp->session->native_handle = wl->parent_seat;
   }
 }

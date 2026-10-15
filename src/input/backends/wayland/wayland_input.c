@@ -21,7 +21,10 @@
  */
 
 #pragma once
+#include "src/core/output.h"
 #include "src/input/input.h"
+#include "src/input/wl_seat.h"
+#include <string.h>
 #include <sys/mman.h>
 #include <unistd.h>
 #include <wayland-client-protocol.h>
@@ -44,6 +47,10 @@ struct vt_input_backend_wl_t {
   struct wl_touch        *wl_touch;
   struct xkb_context     *kb_context;
   struct vt_compositor_t *comp;
+
+  struct vt_pointer_axis_event_t pending_axis;
+  bool                           axis_pending;
+  int32_t                        pointer_offset_x, pointer_offset_y;
 };
 
 static void _wl_keyboard_keymap(void *data, struct wl_keyboard *wl_keyboard,
@@ -204,106 +211,140 @@ void _wl_pointer_motion(void *data, struct wl_pointer *wl_pointer,
                         uint32_t time, wl_fixed_t surface_x,
                         wl_fixed_t surface_y) {
   struct vt_input_backend_wl_t *wl = data;
+  (void)wl_pointer;
 
-  vt_seat_handle_pointer_motion(wl->comp->seat, wl_fixed_to_double(surface_x),
-                                wl_fixed_to_double(surface_y), time);
-  // Hide parent cursor when entering the compositor’s surface
-  wl_pointer_set_cursor(wl_pointer, wl_display_next_serial(wl->comp->wl.dsp),
-                        NULL, 0, 0);
+  vt_seat_handle_pointer_motion(
+      wl->comp->seat, wl->pointer_offset_x + wl_fixed_to_double(surface_x),
+      wl->pointer_offset_y + wl_fixed_to_double(surface_y), time);
 }
 
 void _wl_pointer_button(void *data, struct wl_pointer *wl_pointer,
                         uint32_t serial, uint32_t time, uint32_t button,
                         uint32_t state) {
   struct vt_input_backend_wl_t *wl = data;
+  (void)wl_pointer;
+  (void)serial;
 
   vt_seat_handle_pointer_button(
       wl->comp->seat, button, (state == WL_POINTER_BUTTON_STATE_PRESSED), time);
-  // Hide parent cursor when entering the compositor’s surface
-  wl_pointer_set_cursor(wl_pointer, serial, NULL, 0, 0);
 }
 
 void _wl_pointer_enter(void *data, struct wl_pointer *wl_pointer,
                        uint32_t serial, struct wl_surface *surface,
                        wl_fixed_t surface_x, wl_fixed_t surface_y) {
-  (void)data;
-  (void)wl_pointer;
-  (void)serial;
-  (void)surface;
-  (void)surface_x;
-  (void)surface_y;
-  // Hide parent cursor when entering the compositor’s surface
+  struct vt_input_backend_wl_t *wl = data;
+  wl->pointer_offset_x = 0;
+  wl->pointer_offset_y = 0;
+  struct vt_output_t *output;
+  wl_list_for_each(output, &wl->comp->outputs, link_global) {
+    if (output->native_window == surface) {
+      wl->pointer_offset_x = output->x;
+      wl->pointer_offset_y = output->y;
+      break;
+    }
+  }
+
+  vt_seat_handle_pointer_motion(
+      wl->comp->seat, wl->pointer_offset_x + wl_fixed_to_double(surface_x),
+      wl->pointer_offset_y + wl_fixed_to_double(surface_y), 0);
+  // The parent compositor's enter serial is required for set_cursor.
   wl_pointer_set_cursor(wl_pointer, serial, NULL, 0, 0);
+}
+
+static void _wl_pointer_flush_axis(struct vt_input_backend_wl_t *wl) {
+  if (!wl->axis_pending)
+    return;
+  vt_seat_handle_pointer_axis(wl->comp->seat, &wl->pending_axis);
+  memset(&wl->pending_axis, 0, sizeof(wl->pending_axis));
+  wl->axis_pending = false;
 }
 
 void _wl_pointer_leave(void *data, struct wl_pointer *wl_pointer,
                        uint32_t serial, struct wl_surface *surface) {
-  (void)data;
+  struct vt_input_backend_wl_t *wl = data;
   (void)wl_pointer;
   (void)serial;
   (void)surface;
-  // unimplemented
+
+  _wl_pointer_flush_axis(wl);
+  vt_seat_set_pointer_focus(wl->comp->seat, NULL, 0, 0);
 }
 
 void _wl_pointer_axis(void *data, struct wl_pointer *wl_pointer, uint32_t time,
                       uint32_t axis, wl_fixed_t value) {
-  (void)data;
-  (void)wl_pointer;
-  (void)time;
-  (void)axis;
-  (void)value;
-  // unimplemented
+  struct vt_input_backend_wl_t *wl = data;
+  if (axis > WL_POINTER_AXIS_HORIZONTAL_SCROLL)
+    return;
+
+  struct vt_pointer_axis_t *a = &wl->pending_axis.axes[axis];
+  a->time = time;
+  a->value = wl_fixed_to_double(value);
+  a->has_value = true;
+  wl->axis_pending = true;
+
+  // wl_pointer versions before 5 have no frame event.
+  if (wl_pointer_get_version(wl_pointer) < WL_POINTER_FRAME_SINCE_VERSION)
+    _wl_pointer_flush_axis(wl);
 }
 
 void _wl_pointer_frame(void *data, struct wl_pointer *wl_pointer) {
-  (void)data;
+  struct vt_input_backend_wl_t *wl = data;
   (void)wl_pointer;
-  // unimplemented
+  _wl_pointer_flush_axis(wl);
 }
 
 void _wl_pointer_axis_source(void *data, struct wl_pointer *wl_pointer,
                              uint32_t axis_source) {
-  (void)data;
+  struct vt_input_backend_wl_t *wl = data;
   (void)wl_pointer;
-  (void)axis_source;
-  // unimplemented
+  wl->pending_axis.has_source = true;
+  wl->pending_axis.source = axis_source;
+  wl->axis_pending = true;
 }
 
 void _wl_pointer_axis_stop(void *data, struct wl_pointer *wl_pointer,
                            uint32_t time, uint32_t axis) {
-  (void)data;
+  struct vt_input_backend_wl_t *wl = data;
   (void)wl_pointer;
-  (void)time;
-  (void)axis;
-  // unimplemented
+  if (axis > WL_POINTER_AXIS_HORIZONTAL_SCROLL)
+    return;
+  wl->pending_axis.axes[axis].time = time;
+  wl->pending_axis.axes[axis].stopped = true;
+  wl->axis_pending = true;
 }
 
 void _wl_pointer_axis_discrete(void *data, struct wl_pointer *wl_pointer,
                                uint32_t axis, int32_t discrete) {
-  (void)data;
+  struct vt_input_backend_wl_t *wl = data;
   (void)wl_pointer;
-  (void)axis;
-  (void)discrete;
-  // unimplemented
+  if (axis > WL_POINTER_AXIS_HORIZONTAL_SCROLL)
+    return;
+  wl->pending_axis.axes[axis].discrete = discrete;
+  wl->pending_axis.axes[axis].has_discrete = true;
+  wl->axis_pending = true;
 }
 
 void _wl_pointer_axis_value120(void *data, struct wl_pointer *wl_pointer,
                                uint32_t axis, int32_t value120) {
-  (void)data;
+  struct vt_input_backend_wl_t *wl = data;
   (void)wl_pointer;
-  (void)axis;
-  (void)value120;
-  // unimplemented
+  if (axis > WL_POINTER_AXIS_HORIZONTAL_SCROLL)
+    return;
+  wl->pending_axis.axes[axis].value120 = value120;
+  wl->pending_axis.axes[axis].has_value120 = true;
+  wl->axis_pending = true;
 }
 
 void _wl_pointer_axis_relative_direction(void              *data,
                                          struct wl_pointer *wl_pointer,
                                          uint32_t axis, uint32_t direction) {
-  (void)data;
+  struct vt_input_backend_wl_t *wl = data;
   (void)wl_pointer;
-  (void)axis;
-  (void)direction;
-  // unimplemented
+  if (axis > WL_POINTER_AXIS_HORIZONTAL_SCROLL)
+    return;
+  wl->pending_axis.axes[axis].direction = direction;
+  wl->pending_axis.axes[axis].has_direction = true;
+  wl->axis_pending = true;
 }
 
 static const struct wl_keyboard_listener keyboard_listener = {
