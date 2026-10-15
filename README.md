@@ -100,6 +100,7 @@ Vortex handles the following environment variables:
 | Env | Description | 
 |--------|--------------|
 | `VT_DRM_NO_ATOMIC` | Force legacy DRM/KMS implementation |
+| `VT_DRM_NO_HARDWARE_CURSOR` | Force cursor compositing |
 
 ## Notes
 - [`runara`](https://github.com/cococry/runara) is currently vendored into `subprojects/` but might not be in the future.
