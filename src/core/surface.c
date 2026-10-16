@@ -415,6 +415,10 @@ bool vt_surface_emit_content_update(struct vt_surface_t *surf) {
   if (cu->type == VT_CU_SYNC)
     return true;
 
+  // stays queued, resolving the constraint applies it in order
+  if (vt_content_update_waits(cu))
+    return true;
+
   if (!vt_content_update_apply_dag(cu))
     goto fail;
 

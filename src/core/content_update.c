@@ -113,19 +113,14 @@ static bool _content_update_is_candidate(const struct vt_content_update_t *cu) {
   if (!cu)
     return false;
 
-  if (cu->type != VT_CU_DESYNC)
+  if (cu->type != VT_CU_DESYNC || wl_list_empty(&cu->surf->content_updates))
     return false;
 
-  const struct vt_content_update_t *it;
-  wl_list_for_each(it, &cu->surf->content_updates, queue_link) {
-    if (it == cu)
-      return true;
-
-    if (it->type == VT_CU_SYNC)
-      return false;
-  }
-
-  return false;
+  // anything queued ahead is unapplied (sync, or held by a constraint), and
+  // applying past it would show frames out of order
+  const struct vt_content_update_t *head =
+      wl_container_of(cu->surf->content_updates.next, head, queue_link);
+  return head == cu;
 }
 
 static bool
@@ -381,6 +376,13 @@ void vt_content_update_destroy(struct vt_content_update_t *cu) {
     _content_update_dependency_destroy(it);
   }
 
+  struct vt_content_update_constraint_t *c, *c_tmp;
+  wl_list_for_each_safe(c, c_tmp, &cu->constraints, link) {
+    wl_list_remove(&c->link);
+    wl_list_init(&c->link);
+    c->destroy(c);
+  }
+
   vt_surface_pending_state_fini(&cu->state);
 
   if (cu->queued) {
@@ -466,6 +468,68 @@ bool vt_content_update_apply_dag(struct vt_content_update_t *root) {
   _content_update_retire_applied_dag(root);
 
   return true;
+}
+
+bool vt_content_update_waits(const struct vt_content_update_t *cu) {
+  assert(cu && cu->surf);
+
+  const struct vt_content_update_t *it;
+  wl_list_for_each(it, &cu->surf->content_updates, queue_link) {
+    if (!_content_update_is_ready(it))
+      return true;
+    if (it == cu)
+      break;
+  }
+  return false;
+}
+
+void vt_content_update_add_constraint(
+    struct vt_content_update_t *cu, struct vt_content_update_constraint_t *c) {
+  assert(cu && c && c->destroy);
+  wl_list_insert(&cu->constraints, &c->link);
+}
+
+static void _content_update_collect_dependant_surfaces(
+    struct vt_content_update_t *cu, struct wl_array *surfs) {
+  struct vt_content_update_dependency_t *edge;
+  wl_list_for_each(edge, &cu->dependants, dependant_link) {
+    struct vt_surface_t **slot = wl_array_add(surfs, sizeof(*slot));
+    if (slot)
+      *slot = edge->cu->surf;
+    _content_update_collect_dependant_surfaces(edge->cu, surfs);
+  }
+}
+
+// applies queue heads in order until one is not ready yet
+static void _content_update_flush_surface(struct vt_surface_t *surf) {
+  while (!wl_list_empty(&surf->content_updates)) {
+    struct vt_content_update_t *head =
+        wl_container_of(surf->content_updates.next, head, queue_link);
+    if (!vt_content_update_apply_dag(head))
+      return;
+  }
+}
+
+void vt_content_update_resolve_constraint(
+    struct vt_content_update_t *cu, struct vt_content_update_constraint_t *c) {
+  assert(cu && c);
+
+  wl_list_remove(&c->link);
+  wl_list_init(&c->link);
+
+  // applying retires updates, so gather the affected surfaces up front
+  struct wl_array surfs;
+  wl_array_init(&surfs);
+  struct vt_surface_t **slot = wl_array_add(&surfs, sizeof(*slot));
+  if (slot)
+    *slot = cu->surf;
+  _content_update_collect_dependant_surfaces(cu, &surfs);
+
+  wl_array_for_each(slot, &surfs) {
+    _content_update_flush_surface(*slot);
+  }
+
+  wl_array_release(&surfs);
 }
 
 bool vt_content_update_reaches(struct vt_content_update_t *from,
