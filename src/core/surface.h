@@ -140,6 +140,9 @@ struct vt_surface_t {
 
   struct vt_buffer_use_t *current_buf_use;
 
+  // frames to stay composited after a late acquire fence
+  uint32_t scanout_backoff;
+
   struct wl_list content_updates;
 
   struct vt_scene_node_t *scene_node;

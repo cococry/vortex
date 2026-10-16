@@ -734,6 +734,26 @@ fail:
   return false;
 }
 
+#define VT_DRM_SCANOUT_BACKOFF_FRAMES 60
+
+static bool _drm_scanout_fence_ready(struct vt_surface_t    *surface,
+                                     struct vt_buffer_use_t *use) {
+  int fd = vt_buffer_use_acquire_fence(use);
+  if (fd >= 0) {
+    struct pollfd pfd = {.fd = fd, .events = POLLIN};
+    if (poll(&pfd, 1, 0) <= 0) {
+      surface->scanout_backoff = VT_DRM_SCANOUT_BACKOFF_FRAMES;
+      return false;
+    }
+  }
+
+  if (surface->scanout_backoff > 0) {
+    surface->scanout_backoff--;
+    return false;
+  }
+  return true;
+}
+
 static bool _drm_any_flip_inflight(struct vt_drm_backend_state_t *drm) {
   struct vt_output_t *output;
   wl_list_for_each(output, &drm->outputs, link_local) {
@@ -3365,6 +3385,13 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
     struct vt_dmabuf_attr_t attr = {0};
 
     if (drm->no_direct_scanout)
+      goto composited;
+
+    /* A KMS flip holds on IN_FENCE_FD, so an unfinished client frame would
+     * stall the whole output. Compositing waits on the GPU instead. Back off
+     * for a while so a client that is late half the time does not flap
+     * between plane and composition every frame. */
+    if (!_drm_scanout_fence_ready(layer->surface, use))
       goto composited;
 
     /* 1. Prove layer has a DMABUF */
