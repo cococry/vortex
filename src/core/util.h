@@ -140,8 +140,8 @@
     wl_client_post_no_memory((client));                                        \
   } while (0)
 
-#define VT_MAX(a, b) a > b ? a : b
-#define VT_MIN(a, b) a < b ? a : b
+#define VT_MAX(a, b) ((a) > (b) ? (a) : (b))
+#define VT_MIN(a, b) ((a) < (b) ? (a) : (b))
 
 typedef enum {
   VT_LL_TRACE = 0,
