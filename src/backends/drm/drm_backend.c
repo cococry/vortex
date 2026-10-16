@@ -767,6 +767,8 @@ static bool _drm_suspend(struct vt_drm_backend_state_t *backend) {
   if (!backend || !backend->comp || backend->drm_fd < 0 || !backend->impl)
     return false;
 
+  vt_proto_linux_drm_syncobj_v1_log_stats();
+
   VT_TRACE(backend->comp->log, "Suspending seat session (VT switch away)...");
 
   struct vt_output_t *output;
@@ -783,6 +785,9 @@ static bool _drm_suspend(struct vt_drm_backend_state_t *backend) {
 
     struct vt_drm_output_state_t *drm_output =
         BACKEND_DATA(output, struct vt_drm_output_state_t);
+
+    // a VT switch often ends a run, report what was measured so far
+    _drm_frame_stats_log(drm_output);
 
     if (!backend->impl->disable(backend, drm_output)) {
       VT_WARN(backend->comp->log,

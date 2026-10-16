@@ -77,7 +77,8 @@ static struct {
 
   // per-run counters, reported at teardown
   struct {
-    uint64_t commits, waited, exported, release_imported, release_signaled;
+    uint64_t commits, waited, exported, exported_pending;
+    uint64_t release_imported, release_signaled;
   } stats;
 } _proto = {.drm_fd = -1};
 
@@ -109,6 +110,15 @@ static bool _timeline_point_available(struct vt_drm_syncobj_timeline_t *tl,
                                 NULL) == 0;
 }
 
+// absolute timeout of 0 makes this a non-blocking check
+static bool _timeline_point_signaled(struct vt_drm_syncobj_timeline_t *tl,
+                                     uint64_t                          point) {
+  uint32_t handle = tl->handle;
+  return drmSyncobjTimelineWait(tl->drm_fd, &handle, &point, 1, 0,
+                                DRM_SYNCOBJ_WAIT_FLAGS_WAIT_FOR_SUBMIT,
+                                NULL) == 0;
+}
+
 // sync_files are what the EGL and KMS fence paths consume
 static int _timeline_export_sync_file(struct vt_drm_syncobj_timeline_t *tl,
                                       uint64_t                          point) {
@@ -116,7 +126,10 @@ static int _timeline_export_sync_file(struct vt_drm_syncobj_timeline_t *tl,
   if (drmSyncobjCreate(tl->drm_fd, 0, &tmp) != 0)
     return -1;
 
+  // exports happen at draw time: a pending point stalls the composite
   _proto.stats.exported++;
+  if (!_timeline_point_signaled(tl, point))
+    _proto.stats.exported_pending++;
   int fd = -1;
   if (drmSyncobjTransfer(tl->drm_fd, tmp, 0, tl->handle, point, 0) != 0 ||
       drmSyncobjExportSyncFile(tl->drm_fd, tmp, &fd) != 0)
@@ -620,9 +633,10 @@ void vt_proto_linux_drm_syncobj_v1_log_stats(void) {
     return;
 
   VT_INFO(_proto.comp->log,
-          "syncobj: %" PRIu64 " commits, %" PRIu64 " waited for submit, %" PRIu64
-          " acquire exports, %" PRIu64 " release imports, %" PRIu64
-          " release signals.",
+          "syncobj: %" PRIu64 " commits, %" PRIu64 " held, %" PRIu64
+          " acquire exports (%" PRIu64 " still pending), %" PRIu64
+          " release imports, %" PRIu64 " release signals.",
           _proto.stats.commits, _proto.stats.waited, _proto.stats.exported,
-          _proto.stats.release_imported, _proto.stats.release_signaled);
+          _proto.stats.exported_pending, _proto.stats.release_imported,
+          _proto.stats.release_signaled);
 }
