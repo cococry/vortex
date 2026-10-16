@@ -152,8 +152,6 @@ void _wl_keyboard_keymap(void *data, struct wl_keyboard *wl_keyboard,
       _VT_XKB_GET_MOD_MASK(ibackend->keymap, XKB_MOD_NAME_LOGO);
   ibackend->mods.caps =
       _VT_XKB_GET_MOD_MASK(ibackend->keymap, XKB_MOD_NAME_CAPS);
-
-  vt_seat_bind_global_keybinds(wl->comp->seat);
 }
 
 void _wl_keyboard_enter(void *data, struct wl_keyboard *wl_keyboard,
@@ -387,6 +385,15 @@ bool input_backend_init_wl(struct vt_input_backend_t *backend,
   wl->wl_pointer = wl_seat_get_pointer(wl->wl_seat);
   wl_keyboard_add_listener(wl->wl_keyboard, &keyboard_listener, wl);
   wl_pointer_add_listener(wl->wl_pointer, &pointer_listener, wl);
+
+  // keymap arrives async from the parent, clients binding wl_keyboard
+  // before it lands would get a NULL keymap
+  struct wl_display *parent =
+      wl_proxy_get_display((struct wl_proxy *)wl->wl_seat);
+  if (wl_display_roundtrip(parent) < 0 || !backend->keymap) {
+    VT_ERROR(backend->comp->log, "No keymap received from parent seat.");
+    return false;
+  }
 
   VT_TRACE(backend->comp->log, "Initialized Wayland nested keyboard backend.");
   return true;

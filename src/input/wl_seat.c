@@ -499,9 +499,8 @@ bool vt_seat_init(struct vt_seat_t *seat) {
     return false;
   }
 
-  if (seat->comp->input_backend->platform == VT_INPUT_LIBINPUT) {
-    vt_seat_bind_global_keybinds(seat);
-  }
+  // every input backend has its keymap (and mod masks) by now
+  vt_seat_bind_global_keybinds(seat);
 
   return true;
 }
