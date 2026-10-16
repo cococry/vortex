@@ -149,6 +149,7 @@ struct vt_surface_t {
   struct {
     struct vt_linux_dmabuf_v1_surface_state_t        *linux_dmabuf_v1;
     struct vt_linux_explicit_sync_v1_surface_state_t *linux_explicit_sync_v1;
+    struct vt_linux_drm_syncobj_v1_surface_state_t   *linux_drm_syncobj_v1;
   } proto_state;
 
   struct wl_list link, link_focus;

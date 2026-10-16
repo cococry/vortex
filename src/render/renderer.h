@@ -51,6 +51,8 @@ struct vt_renderer_interface_t {
   bool (*import_buffer)(struct vt_renderer_t *r, struct vt_buffer_t *buf,
                         const pixman_region32_t *damage);
   bool (*drop_context)(struct vt_renderer_t *r);
+  // true when acquire fences are waited on and release fences produced
+  bool (*supports_explicit_sync)(struct vt_renderer_t *r);
   void (*set_vsync)(struct vt_renderer_t *r, bool vsync);
   void (*set_clear_color)(struct vt_renderer_t *r, struct vt_output_t *output,
                           uint32_t col);

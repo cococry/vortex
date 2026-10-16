@@ -59,6 +59,7 @@
 #include "core/util.h"
 #include "input/wl_seat.h"
 #include "protocols/linux_dmabuf.h"
+#include "protocols/linux_drm_syncobj.h"
 #include "protocols/linux_explicit_sync.h"
 #include "protocols/wl_output.h"
 #include "protocols/wl_shm.h"
@@ -2994,6 +2995,14 @@ bool backend_init_drm(struct vt_backend_t *backend) {
     }
 
     vt_dmabuf_feedback_fini(default_feedback);
+  }
+
+  // timelines import into the main device, the one the renderer waits on
+  struct vt_renderer_t *r = backend->comp->renderer;
+  if (drm_master->main_drm && r && r->impl.supports_explicit_sync &&
+      r->impl.supports_explicit_sync(r)) {
+    vt_proto_linux_drm_syncobj_v1_init(backend->comp,
+                                       drm_master->main_drm->drm_fd);
   }
 
   if (backend->comp->have_proto_dmabuf_explicit_sync) {

@@ -64,6 +64,8 @@ bool renderer_import_buffer_egl(struct vt_renderer_t    *r,
 
 bool renderer_drop_context_egl(struct vt_renderer_t *r);
 
+bool renderer_supports_explicit_sync_egl(struct vt_renderer_t *r);
+
 void renderer_set_vsync_egl(struct vt_renderer_t *r, bool vsync);
 
 void renderer_set_clear_color_egl(struct vt_renderer_t *r,

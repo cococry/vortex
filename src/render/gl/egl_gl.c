@@ -1321,6 +1321,14 @@ bool renderer_import_buffer_egl(struct vt_renderer_t    *r,
                                             egl->has_dmabuf_support);
 }
 
+bool renderer_supports_explicit_sync_egl(struct vt_renderer_t *r) {
+  if (!r || !r->user_data)
+    return false;
+  struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
+  return r->comp->have_proto_dmabuf_explicit_sync &&
+         egl->has_explicit_sync_support;
+}
+
 bool renderer_drop_context_egl(struct vt_renderer_t *r) {
   if (!r || !r->impl.drop_context || !r->user_data) {
     VT_ERROR(r->comp->log,
