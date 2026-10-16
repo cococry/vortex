@@ -26,7 +26,6 @@ dep_wayland_egl     = dependency('wayland-egl',       required: true)
 dep_wayland_protos  = dependency('wayland-protocols', required: true)
 dep_egl             = dependency('egl',               required: true)
 dep_udev            = dependency('libudev',           required: true)
-# syncobj timelines are imported in core protocol code
 dep_libdrm          = dependency('libdrm',            required: true)
 dep_gl              = dependency('gl',                required: true)
 dep_pixman          = dependency('pixman-1',          required: true)
