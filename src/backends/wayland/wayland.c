@@ -344,8 +344,11 @@ void _wl_parent_xdg_surface_configure(void *data, struct xdg_surface *surf,
 }
 
 void _wl_parent_xdg_toplevel_close(void *data, struct xdg_toplevel *toplevel) {
+  (void)toplevel;
   struct vt_output_t *output = data;
-  (output->backend, output);
+  // destroying the output here leaves its pending frame callbacks dangling,
+  // closing any nested window ends the session instead
+  output->backend->comp->running = false;
 }
 
 int _wl_parent_dispatch(int fd, uint32_t mask, void *data) {
