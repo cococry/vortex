@@ -57,11 +57,16 @@ struct vt_drm_syncobj_release_t {
   bool                              signaled;
 };
 
+struct vt_drm_syncobj_acquire_t {
+  struct vt_buffer_acquire_source_t base;
+  struct vt_drm_syncobj_timeline_t *timeline;
+  uint64_t                          point;
+};
+
+// holds a content update until its acquire point has been submitted
 struct vt_drm_syncobj_acquire_waiter_t {
   struct vt_content_update_constraint_t constraint;
   struct vt_content_update_t           *cu;
-  struct vt_drm_syncobj_timeline_t     *timeline;
-  uint64_t                              point;
   int                                   event_fd;
   struct wl_event_source               *source;
 };
@@ -199,12 +204,28 @@ static const struct vt_buffer_release_implementation_t _release_impl = {
  * ===================== ACQUIRE =====================
  * =================================================== */
 
+static int _acquire_export(struct vt_buffer_acquire_source_t *base) {
+  struct vt_drm_syncobj_acquire_t *acq = wl_container_of(base, acq, base);
+
+  int fd = _timeline_export_sync_file(acq->timeline, acq->point);
+  if (fd < 0)
+    VT_ERROR(_proto.comp->log,
+             "Failed to export acquire point %" PRIu64 " as sync_file.",
+             acq->point);
+  return fd;
+}
+
+static void _acquire_destroy(struct vt_buffer_acquire_source_t *base) {
+  struct vt_drm_syncobj_acquire_t *acq = wl_container_of(base, acq, base);
+  _timeline_unref(&acq->timeline);
+  free(acq);
+}
+
 static void _waiter_finish(struct vt_drm_syncobj_acquire_waiter_t *w) {
   if (w->source)
     wl_event_source_remove(w->source);
   if (w->event_fd >= 0)
     close(w->event_fd);
-  _timeline_unref(&w->timeline);
   free(w);
 }
 
@@ -218,42 +239,34 @@ static int _waiter_handle_ready(int fd, uint32_t mask, void *data) {
   (void)fd;
   (void)mask;
   struct vt_drm_syncobj_acquire_waiter_t *w = data;
-  struct vt_content_update_t             *cu = w->cu;
-
-  int fence_fd = _timeline_export_sync_file(w->timeline, w->point);
-  if (fence_fd < 0) {
-    VT_ERROR(_proto.comp->log,
-             "Failed to export acquire point %" PRIu64 " as sync_file.",
-             w->point);
-  } else if (cu->buffer_use) {
-    if (cu->buffer_use->acquire_fence_fd >= 0)
-      close(cu->buffer_use->acquire_fence_fd);
-    cu->buffer_use->acquire_fence_fd = fence_fd;
-  } else {
-    close(fence_fd);
-  }
 
   // detached before resolving, so cu teardown no longer frees the waiter
-  vt_content_update_resolve_constraint(cu, &w->constraint);
+  vt_content_update_resolve_constraint(w->cu, &w->constraint);
   _waiter_finish(w);
   return 0;
 }
 
-/* The point may not have a fence yet when the client commits before
- * submitting its GPU work. Hold the update until it does, then let the
- * GPU-side fence wait cover the actual rendering. */
+/* The fence is only exported if the buffer is drawn or scanned out. The
+ * point may not exist yet when the client commits before submitting its GPU
+ * work: hold the update until it does. */
 static bool _acquire_attach(struct vt_content_update_t       *cu,
                             struct vt_drm_syncobj_timeline_t *tl,
                             uint64_t                          point) {
-  if (_timeline_point_available(tl, point)) {
-    int fence_fd = _timeline_export_sync_file(tl, point);
-    if (fence_fd < 0)
-      return false;
-    if (cu->acquire_fence_fd >= 0)
-      close(cu->acquire_fence_fd);
-    cu->acquire_fence_fd = fence_fd;
+  struct vt_drm_syncobj_acquire_t *acq = calloc(1, sizeof(*acq));
+  if (!acq)
+    return false;
+
+  acq->base.export_fence = _acquire_export;
+  acq->base.destroy = _acquire_destroy;
+  acq->timeline = _timeline_ref(tl);
+  acq->point = point;
+
+  if (cu->acquire_source)
+    cu->acquire_source->destroy(cu->acquire_source);
+  cu->acquire_source = &acq->base;
+
+  if (_timeline_point_available(tl, point))
     return true;
-  }
 
   struct vt_drm_syncobj_acquire_waiter_t *w = calloc(1, sizeof(*w));
   if (!w)
@@ -261,8 +274,6 @@ static bool _acquire_attach(struct vt_content_update_t       *cu,
 
   _proto.stats.waited++;
   w->cu = cu;
-  w->point = point;
-  w->timeline = _timeline_ref(tl);
   w->constraint.destroy = _waiter_constraint_destroy;
   w->event_fd = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
 
