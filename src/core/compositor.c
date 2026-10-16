@@ -965,9 +965,9 @@ void vt_comp_schedule_repaint(struct vt_compositor_t *c,
   if (!c || !output || !c->backend || !c->wl.evloop)
     return;
 
+  // clients keep committing while switched away, resume repaints everything
   if (c->suspended) {
-    VT_WARN(c->log,
-            "Trying to schedule repaint while compositor is suspended.");
+    VT_TRACE(c->log, "Dropping repaint request while suspended.");
     return;
   }
 
