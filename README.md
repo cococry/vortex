@@ -101,6 +101,7 @@ Vortex handles the following environment variables:
 |--------|--------------|
 | `VT_DRM_NO_ATOMIC` | Force legacy DRM/KMS implementation |
 | `VT_DRM_NO_HARDWARE_CURSOR` | Force cursor compositing |
+| `VT_DRM_NO_DIRECT_SCANOUT` | Composite every surface, never put client buffers on hardware planes. Surfaces whose frame is not finished are already composited automatically, this forces it always |
 
 ## Notes
 - [`runara`](https://github.com/cococry/runara) is currently vendored into `subprojects/` but might not be in the future.
