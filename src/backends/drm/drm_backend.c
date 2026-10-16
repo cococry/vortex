@@ -2114,7 +2114,7 @@ static bool _drm_import_cursor_image(struct vt_drm_output_state_t *drm_output,
     return false;
   }
 
-  if (!shm.data || shm.width == 0 || shm.height == 0 || shm.stride == 0)
+  if (!shm.data || shm.width <= 0 || shm.height <= 0 || shm.stride <= 0)
     return false;
 
   /* Pick viable supported hardware cursor size */
