@@ -1137,7 +1137,8 @@ bool _linux_dmabuf_pack_feedback(
   close(rw_fd);
   rw_fd = -1;
 
-  VT_TRACE(feedback->comp->log, "Building packed feedback for %i tranche(s)...",
+  VT_TRACE(feedback->comp->log,
+           "Building packed feedback for %zu tranche(s)...",
            feedback->tranches.size / sizeof(struct vt_dmabuf_tranche_t));
 
   size_t n_tranches =
@@ -1164,7 +1165,7 @@ bool _linux_dmabuf_pack_feedback(
   packed->entries_fd = ro_fd;
 
   VT_TRACE(feedback->comp->log,
-           "Building packed feedback tranches (Total Tranches: %i)...",
+           "Building packed feedback tranches (Total Tranches: %zu)...",
            packed->n_tranches);
 
   size_t                      n = 0;
@@ -1421,7 +1422,7 @@ void _linux_dmabuf_send_feedback(
     return;
 
   VT_TRACE(_proto->comp->log,
-           "linux_dmabuf.send_feedback: sending feedback (%i tranches).",
+           "linux_dmabuf.send_feedback: sending feedback (%zu tranches).",
            feedback->n_tranches);
 
   /* 2. Prepare main device descriptor */
@@ -1443,8 +1444,8 @@ void _linux_dmabuf_send_feedback(
   zwp_linux_dmabuf_feedback_v1_send_main_device(res, &device);
 
   VT_TRACE(_proto->comp->log,
-           "linux_dmabuf.send_feedback: sent main device %i.",
-           feedback->dev_main);
+           "linux_dmabuf.send_feedback: sent main device %ju.",
+           (uintmax_t)feedback->dev_main);
 
   /* 4. Send tranche data */
   for (size_t i = 0; i < feedback->n_tranches; i++) {
@@ -1453,8 +1454,8 @@ void _linux_dmabuf_send_feedback(
 
     VT_TRACE(
         _proto->comp->log,
-        "linux_dmabuf.send_feedback: sending tranche %zu (dev=%u, flags=%u).",
-        i, tranche->dev_target, tranche->flags);
+        "linux_dmabuf.send_feedback: sending tranche %zu (dev=%ju, flags=%u).",
+        i, (uintmax_t)tranche->dev_target, tranche->flags);
 
     *dev = tranche->dev_target;
     zwp_linux_dmabuf_feedback_v1_send_tranche_target_device(res, &device);

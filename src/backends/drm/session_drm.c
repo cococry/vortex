@@ -441,8 +441,8 @@ bool vt_session_open_device_drm(struct vt_session_t *session,
   dev->device_id = device_id;
   dev->dev = st.st_rdev;
 
-  VT_TRACE(session->comp->log, "Opening device %s, device ID: %i", path,
-           dev->dev);
+  VT_TRACE(session->comp->log, "Opening device %s, device ID: %ju", path,
+           (uintmax_t)dev->dev);
 
   return true;
 }
