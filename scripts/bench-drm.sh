@@ -24,9 +24,16 @@ trap 'chvt "$ORIG_VT"' EXIT
 echo "switching to VT $VT, back to VT $ORIG_VT when done"
 chvt "$VT"
 
+# hybrid CPUs: P/E core placement moves scores, CPUS=0-3 pins a run.
+# the unit is spawned by PID 1, so taskset on this script would not carry
+AFFINITY=()
+if [[ -n "${CPUS:-}" ]]; then
+	AFFINITY=(-p CPUAffinity="$CPUS")
+fi
+
 # RuntimeMaxSec backs up the vortex watchdog: the unit dying frees the VT
 status=0
-systemd-run --unit="$UNIT" --wait --collect \
+systemd-run --unit="$UNIT" --wait --collect "${AFFINITY[@]}" \
 	-p PAMName=login -p User="$SUDO_USER" \
 	-p TTYPath="/dev/tty$VT" -p StandardInput=tty-force \
 	-p StandardOutput=journal -p StandardError=journal \
