@@ -752,8 +752,8 @@ void _linux_dmabuf_params_create(struct wl_resource *resource, uint32_t buf_id,
   buf->res = wl_resource_create(client, &wl_buffer_interface, 1, buf_id);
   if (!buf->res) {
     free(buf);
-    free(params);
     _linux_dmabuf_close_params(params);
+    free(params);
     VT_WL_OUT_OF_MEMORY(_proto->comp, client);
     return;
   }
