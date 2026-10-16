@@ -1387,7 +1387,7 @@ void renderer_composite_pass_egl(struct vt_renderer_t *r,
 void renderer_begin_scene_egl(struct vt_renderer_t *r,
                               struct vt_output_t   *output) {
   if (!output)
-    ;
+    return;
   if (!r || !r->impl.begin_scene || !r->user_data) {
     VT_ERROR(r->comp->log,
              "Renderer backend not initialized before beginning frame.");
