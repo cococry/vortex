@@ -129,7 +129,7 @@ static bool _wl_backend_destroy_output(struct vt_backend_t *backend,
                                        struct vt_output_t  *output);
 
 static bool _wl_init_dmabuf_feedback(struct vt_compositor_t      *comp,
-                                          struct vt_dmabuf_feedback_t *fb);
+                                     struct vt_dmabuf_feedback_t *fb);
 
 static bool _wl_backend_create_output(struct vt_backend_t *backend,
                                       struct vt_output_t *output, void *data);
@@ -729,7 +729,7 @@ static bool _wl_push_sampleable_formats(struct wl_array       *dst,
 }
 
 bool _wl_init_dmabuf_feedback(struct vt_compositor_t      *comp,
-                                   struct vt_dmabuf_feedback_t *fb) {
+                              struct vt_dmabuf_feedback_t *fb) {
   fb->dev_main = calloc(1, sizeof(*fb->dev_main));
   dev_t       main_dev;
   struct stat st;

@@ -5,10 +5,8 @@ project(
   default_options: [
     'c_std=c11',
     'warning_level=3',
-    'optimization=3',
     'default_library=static',
     'werror=false',
-    'c_args=-w -g -O1 -fno-omit-frame-pointer'
   ],
   meson_version: '>=1.1'
 )
