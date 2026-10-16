@@ -613,9 +613,12 @@ struct vt_output_t *vt_scene_node_primary_output(struct vt_compositor_t *comp,
     int32_t x1 = VT_MAX(rect->x, output->x);
     int32_t y1 = VT_MAX(rect->y, output->y);
 
-    int32_t x2 = VT_MIN(rect->x + rect->width, output->x + output->width);
+    // signed math: rects may start left/above an output
+    int32_t x2 =
+        VT_MIN(rect->x + rect->width, output->x + (int32_t)output->width);
 
-    int32_t y2 = VT_MIN(rect->y + rect->height, output->y + output->height);
+    int32_t y2 =
+        VT_MIN(rect->y + rect->height, output->y + (int32_t)output->height);
 
     if (x2 <= x1 || y2 <= y1)
       continue;
