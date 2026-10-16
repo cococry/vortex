@@ -46,7 +46,8 @@ vt_drm_format_add_mod(struct vt_drm_format_t *fmt, uint64_t mod);
 
 void vt_drm_format_fini(struct vt_drm_format_t *fmt);
 
-bool vt_drm_format_add_mods(struct vt_drm_format_t *fmt, struct wl_array *mods);
+bool vt_drm_format_add_mods(struct vt_drm_format_t *fmt,
+                            const struct wl_array  *mods);
 
 size_t vt_drm_format_mod_count(const struct vt_drm_format_t *fmt);
 

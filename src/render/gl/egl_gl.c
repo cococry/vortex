@@ -133,8 +133,8 @@ static bool _egl_create_renderer(struct vt_renderer_t      *renderer,
                                  enum vt_backend_platform_t platform,
                                  void *native_handle, bool log_error);
 
-static void _egl_buffer_attachment_destroy(struct vt_buffer_t *buf, void *owner,
-                                           void *data);
+static void _egl_buffer_attachment_destroy(struct vt_buffer_t *buf,
+                                           const void *owner, void *data);
 
 static bool _egl_track_rendered_buffer_use(struct vt_output_t     *output,
                                            struct vt_buffer_use_t *use);
@@ -718,8 +718,8 @@ bool _egl_create_renderer(struct vt_renderer_t      *renderer,
   return true;
 }
 
-static void _egl_buffer_attachment_destroy(struct vt_buffer_t *buf, void *owner,
-                                           void *data) {
+static void _egl_buffer_attachment_destroy(struct vt_buffer_t *buf,
+                                           const void *owner, void *data) {
   (void)owner;
   (void)buf;
 

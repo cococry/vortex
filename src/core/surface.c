@@ -536,7 +536,7 @@ bool vt_surface_has_role(struct vt_surface_t        *surf,
   return surf->role.impl && surf->role.impl->type == type;
 }
 
-struct vt_buffer_t *vt_surface_get_buffer(struct vt_surface_t *surf) {
+struct vt_buffer_t *vt_surface_get_buffer(const struct vt_surface_t *surf) {
   if (!surf)
     return NULL;
   return surf->current_buf_use ? surf->current_buf_use->buf : NULL;

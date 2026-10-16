@@ -71,7 +71,7 @@ void vt_drm_format_fini(struct vt_drm_format_t *fmt) {
 }
 
 bool vt_drm_format_add_mods(struct vt_drm_format_t *fmt,
-                            struct wl_array        *mods) {
+                            const struct wl_array  *mods) {
   assert(fmt && mods);
 
   struct vt_drm_format_modifier_t *it;

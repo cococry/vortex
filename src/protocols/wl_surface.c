@@ -88,9 +88,9 @@ _wayland_buffer_attachment_get_or_create(struct vt_buffer_t *buf,
                                          struct wl_resource *res);
 
 static void _wayland_buffer_attachment_destroy(struct vt_buffer_t *buf,
-                                               void *owner, void *data);
+                                               const void *owner, void *data);
 static void _wayland_buffer_attachment_end_use(struct vt_buffer_t *buf,
-                                               void *owner, void *data);
+                                               const void *owner, void *data);
 static void _wayland_buffer_handle_res_destroy(struct wl_listener *listener,
                                                void               *data);
 
@@ -557,7 +557,7 @@ _wayland_buffer_attachment_get_or_create(struct vt_buffer_t *buf,
 }
 
 static void _wayland_buffer_attachment_destroy(struct vt_buffer_t *buf,
-                                               void *owner, void *data) {
+                                               const void *owner, void *data) {
   (void)buf;
   (void)owner;
 
@@ -569,7 +569,7 @@ static void _wayland_buffer_attachment_destroy(struct vt_buffer_t *buf,
 }
 
 static void _wayland_buffer_attachment_end_use(struct vt_buffer_t *buf,
-                                               void *owner, void *data) {
+                                               const void *owner, void *data) {
   (void)buf;
   (void)owner;
 

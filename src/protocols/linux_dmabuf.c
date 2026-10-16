@@ -208,7 +208,7 @@ static bool _dmabuf_buffer_get_dmabuf(struct vt_buffer_t      *buf,
                                       struct vt_dmabuf_attr_t *o_attr);
 
 static void _dmabuf_buffer_attachment_destroy(struct vt_buffer_t *buf,
-                                              void *owner, void *data);
+                                              const void *owner, void *data);
 
 static struct vt_proto_linux_dmabuf_v1_t *_proto;
 
@@ -1557,7 +1557,7 @@ static bool _dmabuf_buffer_get_dmabuf(struct vt_buffer_t      *buf,
 }
 
 static void _dmabuf_buffer_attachment_destroy(struct vt_buffer_t *buf,
-                                              void *owner, void *data) {
+                                              const void *owner, void *data) {
   (void)buf;
   (void)owner;
   if (!data) {

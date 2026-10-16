@@ -240,7 +240,7 @@ struct vt_buffer_attachment_t *vt_buffer_find_attachment(
 
 void vt_buffer_release_init_and_ref(
     struct vt_buffer_release_t *release, struct vt_compositor_t *comp,
-    struct vt_buffer_release_implementation_t *impl) {
+    const struct vt_buffer_release_implementation_t *impl) {
   if (!release)
     return;
 

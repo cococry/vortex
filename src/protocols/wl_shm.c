@@ -107,8 +107,8 @@ static void _wl_shm_handle_display_destroy(struct wl_listener *listener,
 static void _wl_shm_buffer_destroy(struct wl_client   *client,
                                    struct wl_resource *resource);
 
-static void _shm_buffer_attachment_destroy(struct vt_buffer_t *buf, void *owner,
-                                           void *data);
+static void _shm_buffer_attachment_destroy(struct vt_buffer_t *buf,
+                                           const void *owner, void *data);
 
 bool _wl_shm_buffer_get_attr(struct vt_buffer_t   *buf,
                              struct vt_shm_attr_t *o_attr);
@@ -483,8 +483,8 @@ static void _wl_shm_buffer_handle_res_destroy(struct wl_resource *resource) {
   free(shm);
 }
 
-static void _shm_buffer_attachment_destroy(struct vt_buffer_t *buf, void *owner,
-                                           void *data) {
+static void _shm_buffer_attachment_destroy(struct vt_buffer_t *buf,
+                                           const void *owner, void *data) {
   (void)buf;
   (void)owner;
 

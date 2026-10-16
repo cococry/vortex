@@ -120,7 +120,7 @@ struct vt_surface_role_impl_t {
 };
 
 struct vt_surface_role_t {
-  struct vt_surface_role_impl_t *impl;
+  const struct vt_surface_role_impl_t *impl;
   void                          *data;
 };
 
@@ -215,4 +215,4 @@ bool vt_surface_set_role(struct vt_surface_t                 *surf,
 bool vt_surface_has_role(struct vt_surface_t        *surf,
                          enum vt_surface_role_type_t type);
 
-struct vt_buffer_t *vt_surface_get_buffer(struct vt_surface_t *surf);
+struct vt_buffer_t *vt_surface_get_buffer(const struct vt_surface_t *surf);

@@ -44,8 +44,8 @@ struct vt_buffer_release_implementation_t {
 };
 
 struct vt_buffer_attachment_implementation_t {
-  void (*destroy)(struct vt_buffer_t *buf, void *owner, void *data);
-  void (*end_use)(struct vt_buffer_t *buf, void *owner, void *data);
+  void (*destroy)(struct vt_buffer_t *buf, const void *owner, void *data);
+  void (*end_use)(struct vt_buffer_t *buf, const void *owner, void *data);
 };
 
 struct vt_buffer_attachment_t {
@@ -121,7 +121,7 @@ struct vt_buffer_attachment_t *vt_buffer_find_attachment(
 
 void vt_buffer_release_init_and_ref(
     struct vt_buffer_release_t *release, struct vt_compositor_t *comp,
-    struct vt_buffer_release_implementation_t *impl);
+    const struct vt_buffer_release_implementation_t *impl);
 
 struct vt_buffer_release_t *
 vt_buffer_release_ref(struct vt_buffer_release_t *release);

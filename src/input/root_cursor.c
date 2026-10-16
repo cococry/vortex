@@ -33,8 +33,8 @@
 
 #define _SUBSYS_NAME "CURSOR"
 
-static void _root_cursor_pixels_destroy(struct vt_buffer_t *buf, void *owner,
-                                        void *data) {
+static void _root_cursor_pixels_destroy(struct vt_buffer_t *buf,
+                                        const void *owner, void *data) {
   (void)buf;
   (void)owner;
   XcursorImageDestroy(data);
