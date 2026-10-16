@@ -74,6 +74,10 @@ struct vt_drm_crtc_t {
   struct vt_drm_plane_t *plane_cursor;
   struct vt_drm_plane_t *plane_primary;
 
+  /* per CRTC: liftoff writes every plane of its device into each request,
+   * a shared device would drag other CRTCs into per-output commits */
+  struct liftoff_device *liftoff_dev;
+
   bool in_use;
 };
 
@@ -173,8 +177,6 @@ struct vt_drm_backend_state_t {
   struct wl_array sampling_formats;
 
   drmModeRes *res;
-
-  struct liftoff_device *liftoff_dev;
 };
 
 struct vt_drm_backend_master_state_t {

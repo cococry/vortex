@@ -873,19 +873,6 @@ static bool _drm_init_for_device(struct vt_compositor_t        *comp,
 
   _drm_update_tearing_cap(drm);
 
-  int liftoff_fd = dup(drm->drm_fd);
-  if (liftoff_fd < 0) {
-    VT_ERROR(comp->log, "Failed to dup DRM fd for libliftoff.");
-    return false;
-  }
-
-  drm->liftoff_dev = liftoff_device_create(liftoff_fd);
-  if (!drm->liftoff_dev) {
-    close(liftoff_fd);
-    VT_ERROR(comp->log, "Failed to create liftoff device.");
-    return false;
-  }
-
   /* Renderer is only initialized on the main DRM device */
   if (!drm_master->main_drm && comp->renderer->impl.is_handle_renderable(
                                    comp->renderer, drm->native_handle)) {
@@ -1109,17 +1096,56 @@ static bool _drm_plane_init(struct vt_drm_backend_state_t *drm,
       return false;
   }
 
-  if (drm->impl->atomic && plane->type != DRM_PLANE_TYPE_CURSOR) {
-    plane->liftoff_plane = liftoff_plane_create(drm->liftoff_dev, plane->id);
-    if (!plane->liftoff_plane) {
-      VT_ERROR(comp->log,
-               "Failed to create liftoff plane for plane %p (plane ID: %d)",
-               plane, plane->id);
-      return false;
+  return true;
+}
+
+static void _drm_liftoff_finish(struct vt_drm_backend_state_t *drm) {
+  struct vt_drm_crtc_t *crtc;
+  wl_array_for_each(crtc, &drm->crtcs) {
+    // also destroys the device's planes
+    liftoff_device_destroy(crtc->liftoff_dev);
+    crtc->liftoff_dev = NULL;
+  }
+
+  struct vt_drm_plane_t *plane;
+  wl_array_for_each(plane, &drm->planes) {
+    plane->liftoff_plane = NULL;
+  }
+}
+
+static bool _drm_liftoff_init(struct vt_drm_backend_state_t *drm) {
+  struct vt_drm_crtc_t *crtc;
+  wl_array_for_each(crtc, &drm->crtcs) {
+    // liftoff dups the fd itself
+    crtc->liftoff_dev = liftoff_device_create(drm->drm_fd);
+    if (!crtc->liftoff_dev) {
+      VT_ERROR(drm->comp->log, "Failed to create liftoff device for CRTC %u.",
+               crtc->id);
+      goto fail;
+    }
+
+    struct vt_drm_plane_t *plane;
+    wl_array_for_each(plane, &drm->planes) {
+      // a plane shared between CRTCs goes to the first one only
+      if (plane->type == DRM_PLANE_TYPE_CURSOR || plane->liftoff_plane ||
+          !(plane->possible_crtcs & (1u << crtc->index)))
+        continue;
+
+      plane->liftoff_plane = liftoff_plane_create(crtc->liftoff_dev, plane->id);
+      if (!plane->liftoff_plane) {
+        VT_ERROR(drm->comp->log,
+                 "Failed to create liftoff plane %u for CRTC %u.", plane->id,
+                 crtc->id);
+        goto fail;
+      }
     }
   }
 
   return true;
+
+fail:
+  _drm_liftoff_finish(drm);
+  return false;
 }
 
 static bool _drm_planes_init(struct vt_drm_backend_state_t *drm) {
@@ -1263,6 +1289,12 @@ static bool _drm_init_crtcs_and_planes(struct vt_drm_backend_state_t *drm) {
     }
   } else {
     _drm_assign_crtc_planes(drm);
+
+    if (drm->impl->atomic && !_drm_liftoff_init(drm)) {
+      VT_WARN(comp->log, "Failed to initialize libliftoff, using legacy KMS.");
+      drm->impl = &drm_kms_legacy_impl;
+      _drm_update_tearing_cap(drm);
+    }
   }
 
   drmModeFreeResources(res);
@@ -1694,7 +1726,8 @@ static bool _drm_create_output_for_device(struct vt_drm_backend_state_t *drm,
 
   if (drm->impl->atomic) {
     if (!(drm_output->liftoff_output =
-              liftoff_output_create(drm->liftoff_dev, drm_output->crtc->id))) {
+              liftoff_output_create(drm_output->crtc->liftoff_dev,
+                                    drm_output->crtc->id))) {
       VT_ERROR(comp->log, "Failed to create liftoff output for output.");
       return false;
     }
@@ -2324,15 +2357,11 @@ static bool _drm_terminate_for_device(struct vt_drm_backend_state_t *drm) {
     _drm_destroy_output_for_device(drm, output);
   }
 
-  if (drm->impl->atomic)
-    liftoff_device_destroy(drm->liftoff_dev);
+  _drm_liftoff_finish(drm);
 
   struct vt_drm_plane_t *plane;
   wl_array_for_each(plane, &drm->planes) {
     vt_drm_format_array_free(&plane->formats);
-    if (plane->liftoff_plane) {
-      liftoff_plane_destroy(plane->liftoff_plane);
-    }
     free(plane->cursor_sizes);
   }
   wl_array_release(&drm->planes);
