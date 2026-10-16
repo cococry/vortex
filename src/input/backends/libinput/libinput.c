@@ -461,6 +461,7 @@ bool input_backend_suspend_li(struct vt_input_backend_t *backend) {
       BACKEND_DATA(backend, struct vt_input_backend_li_t);
   libinput_suspend(li->input);
   VT_TRACE(backend->comp->log, "Suspended libinput.");
+  return true;
 }
 
 bool input_backend_resume_li(struct vt_input_backend_t *backend) {
@@ -468,6 +469,10 @@ bool input_backend_resume_li(struct vt_input_backend_t *backend) {
     return false;
   struct vt_input_backend_li_t *li =
       BACKEND_DATA(backend, struct vt_input_backend_li_t);
-  libinput_resume(li->input);
+  if (libinput_resume(li->input) != 0) {
+    VT_ERROR(backend->comp->log, "Failed to resume libinput.");
+    return false;
+  }
   VT_TRACE(backend->comp->log, "Resumed libinput.");
+  return true;
 }
