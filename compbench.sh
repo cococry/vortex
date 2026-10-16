@@ -25,7 +25,7 @@ wl)
 	;;
 drm)
 	# build stays user-owned, only the VT session needs root
-	sudo --preserve-env=VERBOSE,TIMEOUT,VT scripts/bench-drm.sh "$BUILD" "$@"
+	sudo --preserve-env=VERBOSE,TIMEOUT,VT,VORTEX_ARGS scripts/bench-drm.sh "$BUILD" "$@"
 	;;
 *)
 	echo "unknown mode '$MODE' (wl|drm)" >&2

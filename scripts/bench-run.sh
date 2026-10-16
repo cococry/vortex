@@ -39,6 +39,8 @@ LOG_ARGS=()
 if [[ "${VERBOSE:-0}" == 1 ]]; then
 	LOG_ARGS=(--verbose)
 fi
+# extra vortex flags for A/B runs, e.g. "-expt linux-dmabuf-explicit-sync"
+read -ra VT_ARGS <<<"${VORTEX_ARGS:-}"
 
 # a killed vortex leaves its socket behind and the next one reuses the
 # name, so match on creation after launch rather than on a new name
@@ -50,7 +52,7 @@ new_socket() {
 
 # line-buffered so the last lines before a hang/kill reach the log
 timeout -s ABRT -k 5 "$TIMEOUT" stdbuf -oL -eL \
-	"$BUILD/vortex" "${LOG_ARGS[@]}" --backend-path "$BACKEND" \
+	"$BUILD/vortex" "${LOG_ARGS[@]}" "${VT_ARGS[@]}" --backend-path "$BACKEND" \
 	>"$LOG" 2>&1 &
 VPID=$!
 trap 'kill "$VPID" || true; wait "$VPID" || true; rm -f "$MARK"' EXIT
