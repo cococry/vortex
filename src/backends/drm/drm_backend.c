@@ -30,6 +30,7 @@
 #include <libinput.h>
 #include <linux/kd.h>
 #include <linux/vt.h>
+#include <poll.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -695,6 +696,38 @@ fail:
   return false;
 }
 
+static bool _drm_any_flip_inflight(struct vt_drm_backend_state_t *drm) {
+  struct vt_output_t *output;
+  wl_list_for_each(output, &drm->outputs, link_local) {
+    if (output->user_data &&
+        BACKEND_DATA(output, struct vt_drm_output_state_t)->flip_inflight)
+      return true;
+  }
+  return false;
+}
+
+/* libseat hands out a non-blocking fd: reading before the flip event
+ * arrives fails with EAGAIN, so wait for it instead */
+static bool _drm_drain_flips(struct vt_drm_backend_state_t *drm) {
+  while (_drm_any_flip_inflight(drm)) {
+    struct pollfd pfd = {.fd = drm->drm_fd, .events = POLLIN};
+    int           ret = poll(&pfd, 1, 1000);
+    if (ret < 0 && errno == EINTR)
+      continue;
+    if (ret <= 0) {
+      VT_WARN(drm->comp->log, "Waiting for DRM flips failed: %s",
+              ret == 0 ? "timed out" : strerror(errno));
+      return false;
+    }
+    if (drmHandleEvent(drm->drm_fd, &drm->evctx) != 0 && errno != EAGAIN) {
+      VT_WARN(drm->comp->log, "Failed to drain DRM events: %s",
+              strerror(errno));
+      return false;
+    }
+  }
+  return true;
+}
+
 static bool _drm_suspend(struct vt_drm_backend_state_t *backend) {
   if (!backend || !backend->comp || backend->drm_fd < 0 || !backend->impl)
     return false;
@@ -706,27 +739,8 @@ static bool _drm_suspend(struct vt_drm_backend_state_t *backend) {
     output->needs_repaint = false;
   }
 
-  bool any_inflight;
-  do {
-    any_inflight = false;
-    wl_list_for_each(output, &backend->outputs, link_local) {
-      if (!output->user_data)
-        continue;
-
-      struct vt_drm_output_state_t *drm_output =
-          BACKEND_DATA(output, struct vt_drm_output_state_t);
-      if (drm_output->flip_inflight) {
-        any_inflight = true;
-        break;
-      }
-    }
-
-    if (any_inflight && drmHandleEvent(backend->drm_fd, &backend->evctx) != 0) {
-      VT_ERROR(backend->comp->log, "Failed to drain DRM events: %s",
-               strerror(errno));
-      return false;
-    }
-  } while (any_inflight);
+  if (!_drm_drain_flips(backend))
+    return false;
 
   wl_list_for_each(output, &backend->outputs, link_local) {
     if (!output->user_data)
@@ -2329,25 +2343,9 @@ static bool _drm_terminate_for_device(struct vt_drm_backend_state_t *drm) {
     return false;
   struct vt_compositor_t *comp = drm->comp;
 
-  if (!comp->suspended && drm->drm_fd >= 0) {
-    bool any_inflight;
-    do {
-      any_inflight = false;
-      struct vt_output_t *output;
-      wl_list_for_each(output, &drm->outputs, link_local) {
-        if (output->user_data &&
-            BACKEND_DATA(output, struct vt_drm_output_state_t)->flip_inflight) {
-          any_inflight = true;
-          break;
-        }
-      }
-      if (any_inflight && drmHandleEvent(drm->drm_fd, &drm->evctx) != 0) {
-        VT_WARN(comp->log, "Failed to drain DRM events during teardown: %s",
-                strerror(errno));
-        break;
-      }
-    } while (any_inflight);
-  }
+  // teardown goes on regardless, the warning is the only signal
+  if (!comp->suspended && drm->drm_fd >= 0)
+    _drm_drain_flips(drm);
 
   if (drm->res)
     drmModeFreeResources(drm->res);
