@@ -288,12 +288,48 @@ static void _drm_complete_pending(struct vt_drm_output_state_t *drm_output) {
   }
 }
 
+static void _drm_frame_stats_record(struct vt_drm_output_state_t *drm_output,
+                                    unsigned int sec, unsigned int usec,
+                                    bool busy) {
+  uint64_t now = (uint64_t)sec * 1000000 + usec;
+  uint32_t hz = drm_output->mode.vrefresh;
+
+  // only a frame wanted right after the last one can miss a vblank
+  if (drm_output->frame_stats.busy && drm_output->frame_stats.last_us && hz) {
+    uint64_t interval = now - drm_output->frame_stats.last_us;
+    uint64_t expected = 1000000 / hz;
+    if (interval > expected + expected / 2)
+      drm_output->frame_stats.missed++;
+    if (interval > drm_output->frame_stats.worst_us)
+      drm_output->frame_stats.worst_us = interval;
+  }
+
+  drm_output->frame_stats.frames++;
+  drm_output->frame_stats.last_us = now;
+  drm_output->frame_stats.busy = busy;
+}
+
+static void _drm_frame_stats_log(struct vt_drm_output_state_t *drm_output) {
+  struct vt_compositor_t *comp = drm_output->base->backend->comp;
+
+  if (drm_output->frame_stats.missed == 0) {
+    VT_TRACE(comp->log, "CRTC %u: %" PRIu64 " frames, no missed vblanks.",
+             drm_output->crtc->id, drm_output->frame_stats.frames);
+    return;
+  }
+
+  VT_WARN(comp->log,
+          "CRTC %u (%u Hz): %" PRIu64 " of %" PRIu64
+          " frames missed a vblank, worst interval %.2f ms.",
+          drm_output->crtc->id, drm_output->mode.vrefresh,
+          drm_output->frame_stats.missed, drm_output->frame_stats.frames,
+          drm_output->frame_stats.worst_us / 1000.0);
+}
+
 static void _drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec,
                                    unsigned int usec, void *data) {
   (void)fd;
   (void)frame;
-  (void)sec;
-  (void)usec;
 
   struct vt_output_t *output = (struct vt_output_t *)data;
   if (!output || !output->user_data || !output->backend ||
@@ -325,6 +361,9 @@ static void _drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec,
     uint32_t t = vt_util_get_time_msec();
     vt_comp_frame_done(output->backend->comp, output, t);
   }
+
+  if (frame_commit)
+    _drm_frame_stats_record(drm_output, sec, usec, output->needs_repaint);
 
   if (output->needs_repaint) {
     vt_comp_schedule_repaint(output->backend->comp, output);
@@ -759,6 +798,8 @@ static bool _drm_suspend(struct vt_drm_backend_state_t *backend) {
     _drm_release_all_layers(output);
     drm_output->needs_modeset = true;
     drm_output->flip_inflight = false;
+    // time spent switched away is not a missed vblank
+    drm_output->frame_stats.busy = false;
   }
 
   return true;
@@ -2354,6 +2395,8 @@ static bool _drm_terminate_for_device(struct vt_drm_backend_state_t *drm) {
 
   struct vt_output_t *output, *tmp;
   wl_list_for_each_safe(output, tmp, &drm->outputs, link_local) {
+    if (output->user_data)
+      _drm_frame_stats_log(BACKEND_DATA(output, struct vt_drm_output_state_t));
     _drm_destroy_output_for_device(drm, output);
   }
 

@@ -233,6 +233,13 @@ struct vt_drm_output_state_t {
 
   bool needs_modeset;
   bool flip_inflight;
+
+  // kernel flip timestamps, summarized at teardown
+  struct {
+    uint64_t last_us, worst_us;
+    uint64_t frames, missed;
+    bool     busy;
+  } frame_stats;
   bool modeset_bootstrapped;
   bool renderable_setup;
   bool connector_seen;
