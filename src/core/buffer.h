@@ -29,6 +29,7 @@
 #include "core_types.h"
 
 struct vt_buffer_t;
+struct vt_buffer_release_t;
 
 struct vt_buffer_implementation_t {
   bool (*get_dmabuf)(struct vt_buffer_t *buf, struct vt_dmabuf_attr_t *o_attr);

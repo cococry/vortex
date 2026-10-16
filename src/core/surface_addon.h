@@ -25,6 +25,7 @@
 #include <stdbool.h>
 #include <wayland-util.h>
 
+struct vt_surface_t;
 struct vt_surface_addon_t;
 struct vt_content_update_t;
 
