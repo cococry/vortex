@@ -174,6 +174,9 @@ struct vt_drm_backend_state_t {
 
   bool caps[VT_DRM_CAP__COUNT];
 
+  // VT_DRM_NO_DIRECT_SCANOUT: composite every surface
+  bool no_direct_scanout;
+
   struct wl_array sampling_formats;
 
   drmModeRes *res;
@@ -238,6 +241,7 @@ struct vt_drm_output_state_t {
   struct {
     uint64_t last_us, worst_us;
     uint64_t frames, missed;
+    uint64_t direct_layers, direct_fenced;
     bool     busy;
   } frame_stats;
   bool modeset_bootstrapped;

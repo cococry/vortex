@@ -35,6 +35,7 @@ systemd-run --unit="$UNIT" --wait --collect \
 	-p WorkingDirectory="$ROOT" \
 	--setenv=TIMEOUT="$TIMEOUT" --setenv=VERBOSE="${VERBOSE:-0}" \
 	--setenv=VORTEX_ARGS="${VORTEX_ARGS:-}" \
+	--setenv=VT_DRM_NO_DIRECT_SCANOUT="${VT_DRM_NO_DIRECT_SCANOUT:-}" \
 	"$ROOT/scripts/bench-run.sh" "$BUILD" drm "$@" || status=$?
 
 # unit stdout did not reach the journal in testing, read results back

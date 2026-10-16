@@ -315,10 +315,13 @@ static void _drm_frame_stats_log(struct vt_drm_output_state_t *drm_output) {
 
   VT_INFO(comp->log,
           "CRTC %u (%u Hz): %" PRIu64 " of %" PRIu64
-          " frames missed a vblank, worst interval %.2f ms.",
+          " frames missed a vblank, worst interval %.2f ms, %" PRIu64
+          " direct scanout layers (%" PRIu64 " with IN_FENCE_FD).",
           drm_output->crtc->id, drm_output->mode.vrefresh,
           drm_output->frame_stats.missed, drm_output->frame_stats.frames,
-          drm_output->frame_stats.worst_us / 1000.0);
+          drm_output->frame_stats.worst_us / 1000.0,
+          drm_output->frame_stats.direct_layers,
+          drm_output->frame_stats.direct_fenced);
 }
 
 static void _drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec,
@@ -927,6 +930,9 @@ static bool _drm_init_for_device(struct vt_compositor_t        *comp,
 
   bool use_atomic =
       getenv("VT_DRM_NO_ATOMIC") ? false : drm->caps[VT_DRM_CAP_ATOMIC_MODESET];
+  // the bench forwards unset variables as empty strings
+  const char *no_direct = getenv("VT_DRM_NO_DIRECT_SCANOUT");
+  drm->no_direct_scanout = no_direct && *no_direct;
   drm->impl = use_atomic ? &drm_kms_atomic_impl : &drm_kms_legacy_impl;
 
   _drm_update_tearing_cap(drm);
@@ -3358,6 +3364,9 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
 
     struct vt_dmabuf_attr_t attr = {0};
 
+    if (drm->no_direct_scanout)
+      goto composited;
+
     /* 1. Prove layer has a DMABUF */
     if (!vt_buffer_get_dmabuf(use->buf, &attr)) {
       VT_TRACE(backend->comp->log,
@@ -3567,6 +3576,10 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
         goto fail_plan;
 
       planned->acquire_fence_fd = vt_buffer_use_acquire_fence(test->use);
+
+      drm_output->frame_stats.direct_layers++;
+      if (planned->acquire_fence_fd >= 0)
+        drm_output->frame_stats.direct_fenced++;
     } else {
       /*
        * the renderer is going to draw this surface into the compositor FB.
