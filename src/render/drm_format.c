@@ -179,6 +179,28 @@ void vt_drm_format_array_free(struct wl_array *formats) {
   wl_array_release(formats);
 }
 
+/* wl_array_for_each leaves its cursor one past the end on a miss, so
+ * lookups must return NULL instead of the cursor */
+static const struct vt_drm_format_t *
+_drm_format_array_find(const struct wl_array *formats, uint32_t format) {
+  const struct vt_drm_format_t *fmt;
+  wl_array_for_each(fmt, formats) {
+    if (fmt->format == format)
+      return fmt;
+  }
+  return NULL;
+}
+
+static const struct vt_drm_format_modifier_t *
+_drm_format_find_mod(const struct vt_drm_format_t *fmt, uint64_t mod) {
+  const struct vt_drm_format_modifier_t *it;
+  wl_array_for_each(it, &fmt->mods) {
+    if (it->mod == mod)
+      return it;
+  }
+  return NULL;
+}
+
 bool vt_drm_format_array_intersect(struct wl_array       *dst,
                                    const struct wl_array *a,
                                    const struct wl_array *b) {
@@ -187,17 +209,10 @@ bool vt_drm_format_array_intersect(struct wl_array       *dst,
 
   const struct vt_drm_format_t *afmt;
   wl_array_for_each(afmt, a) {
-    const struct vt_drm_format_t *bfmt = NULL;
-
-    wl_array_for_each(bfmt, b) {
-      if (afmt->format == bfmt->format) {
-        break;
-      }
-    }
-
-    if (bfmt == NULL || afmt->format != bfmt->format) {
+    const struct vt_drm_format_t *bfmt =
+        _drm_format_array_find(b, afmt->format);
+    if (!bfmt)
       continue;
-    }
 
     struct vt_drm_format_t *ofmt = wl_array_add(&out, sizeof(*ofmt));
     if (ofmt == NULL) {
@@ -209,17 +224,10 @@ bool vt_drm_format_array_intersect(struct wl_array       *dst,
 
     const struct vt_drm_format_modifier_t *amod;
     wl_array_for_each(amod, &afmt->mods) {
-      const struct vt_drm_format_modifier_t *bmod = NULL;
-
-      wl_array_for_each(bmod, &bfmt->mods) {
-        if (amod->mod == bmod->mod) {
-          break;
-        }
-      }
-
-      if (bmod == NULL || amod->mod != bmod->mod) {
+      const struct vt_drm_format_modifier_t *bmod =
+          _drm_format_find_mod(bfmt, amod->mod);
+      if (!bmod)
         continue;
-      }
 
       struct vt_drm_format_modifier_t *omod =
           vt_drm_format_add_mod(ofmt, amod->mod);
@@ -289,14 +297,9 @@ bool vt_drm_format_array_union(struct wl_array *dst, const struct wl_array *a,
   }
 
   wl_array_for_each(fmt, b) {
-    struct vt_drm_format_t *ofmt = NULL;
+    struct vt_drm_format_t *ofmt = vt_drm_format_array_get_format(&out, fmt);
 
-    wl_array_for_each(ofmt, &out) {
-      if (ofmt->format == fmt->format)
-        break;
-    }
-
-    if (ofmt == NULL || ofmt->format != fmt->format) {
+    if (!ofmt) {
       if (!vt_drm_format_array_push(&out, fmt)) {
         vt_drm_format_array_free(&out);
         return false;
@@ -307,14 +310,10 @@ bool vt_drm_format_array_union(struct wl_array *dst, const struct wl_array *a,
 
     const struct vt_drm_format_modifier_t *mod;
     wl_array_for_each(mod, &fmt->mods) {
-      struct vt_drm_format_modifier_t *omod = NULL;
+      struct vt_drm_format_modifier_t *omod =
+          vt_drm_format_get_mod(ofmt, mod->mod);
 
-      wl_array_for_each(omod, &ofmt->mods) {
-        if (omod->mod == mod->mod)
-          break;
-      }
-
-      if (omod != NULL && omod->mod == mod->mod) {
+      if (omod) {
         /*
          * It is extension-only only if neither side has a normal
          * representation of this modifier.
