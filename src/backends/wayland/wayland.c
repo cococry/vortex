@@ -196,8 +196,9 @@ static const struct xdg_toplevel_listener parent_toplevel_listener = {
     .close = _wl_parent_xdg_toplevel_close,
 };
 
+// bound at version 1: done/scale/name/description are never sent
 static const struct wl_output_listener output_listener = {
-    _wl_parent_output_geometry, _wl_parent_output_mode};
+    .geometry = _wl_parent_output_geometry, .mode = _wl_parent_output_mode};
 
 static void output_sync_callback(void *data, struct wl_callback *callback,
                                  uint32_t unused) {
@@ -304,7 +305,7 @@ void _wl_parent_xdg_toplevel_configure(void                *data,
     return;
 
   // Handle resize output in renderer
-  if (w != output->width || h != output->height) {
+  if (w != (int32_t)output->width || h != (int32_t)output->height) {
     _output_handle_render_resize(output, w, h);
   }
 }
@@ -341,7 +342,7 @@ void _wl_parent_xdg_surface_configure(void *data, struct xdg_surface *surf,
   int h = output->height > 0 ? output->height : _WL_DEFAULT_OUTPUT_HEIGHT;
 
   // Handle resize output in renderer
-  if (w != output->width || h != output->height) {
+  if (w != (int32_t)output->width || h != (int32_t)output->height) {
     _output_handle_render_resize(output, w, h);
   }
 }

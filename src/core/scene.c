@@ -48,8 +48,8 @@ static void _scene_render_layers(struct vt_scene_t  *scene,
                                  struct vt_output_t *output);
 static void _composite_pass(struct vt_scene_t  *scene,
                             struct vt_output_t *output);
-static void _scene_node_get_size(struct vt_scene_node_t *node, uint32_t *o_w,
-                                 uint32_t *o_h);
+static void _scene_node_get_size(struct vt_scene_node_t *node, int32_t *o_w,
+                                 int32_t *o_h);
 
 static void _scene_node_update_surface_feedback(struct vt_scene_node_t *node);
 
@@ -275,8 +275,8 @@ static void _composite_pass(struct vt_scene_t  *scene,
   r->impl.end_scene(r, output);
 }
 
-static void _scene_node_get_size(struct vt_scene_node_t *node, uint32_t *o_w,
-                                 uint32_t *o_h) {
+static void _scene_node_get_size(struct vt_scene_node_t *node, int32_t *o_w,
+                                 int32_t *o_h) {
   if (!node || !o_w || !o_h)
     return;
 

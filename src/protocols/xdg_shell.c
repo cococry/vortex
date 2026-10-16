@@ -607,7 +607,11 @@ void _xdg_wm_base_get_xdg_surface(struct wl_client   *client,
 }
 
 void _xdg_wm_base_pong(struct wl_client *client, struct wl_resource *resource,
-                       uint32_t serial) {}
+                       uint32_t serial) {
+  (void)client;
+  (void)resource;
+  (void)serial;
+}
 
 void _xdg_positioner_destroy(struct wl_client   *client,
                              struct wl_resource *resource) {
@@ -1164,23 +1168,51 @@ void _xdg_toplevel_set_app_id(struct wl_client   *client,
 void _xdg_toplevel_show_window_menu(struct wl_client   *client,
                                     struct wl_resource *resource,
                                     struct wl_resource *seat, uint32_t serial,
-                                    int32_t x, int32_t y) {}
+                                    int32_t x, int32_t y) {
+  (void)client;
+  (void)resource;
+  (void)seat;
+  (void)serial;
+  (void)x;
+  (void)y;
+}
 
 void _xdg_toplevel_move(struct wl_client *client, struct wl_resource *resource,
-                        struct wl_resource *seat, uint32_t serial) {}
+                        struct wl_resource *seat, uint32_t serial) {
+  (void)client;
+  (void)resource;
+  (void)seat;
+  (void)serial;
+}
 
 void _xdg_toplevel_resize(struct wl_client   *client,
                           struct wl_resource *resource,
                           struct wl_resource *seat, uint32_t serial,
-                          uint32_t edges) {}
+                          uint32_t edges) {
+  (void)client;
+  (void)resource;
+  (void)seat;
+  (void)serial;
+  (void)edges;
+}
 
 void _xdg_toplevel_set_max_size(struct wl_client   *client,
                                 struct wl_resource *resource, int32_t width,
-                                int32_t height) {}
+                                int32_t height) {
+  (void)client;
+  (void)resource;
+  (void)width;
+  (void)height;
+}
 
 void _xdg_toplevel_set_min_size(struct wl_client   *client,
                                 struct wl_resource *resource, int32_t width,
-                                int32_t height) {}
+                                int32_t height) {
+  (void)client;
+  (void)resource;
+  (void)width;
+  (void)height;
+}
 
 void _xdg_toplevel_set_maximized(struct wl_client   *client,
                                  struct wl_resource *resource) {
@@ -1190,7 +1222,10 @@ void _xdg_toplevel_set_maximized(struct wl_client   *client,
 }
 
 void _xdg_toplevel_unset_maximized(struct wl_client   *client,
-                                   struct wl_resource *resource) {}
+                                   struct wl_resource *resource) {
+  (void)client;
+  (void)resource;
+}
 
 static void _xdg_toplevel_set_fullscreen(struct wl_client   *client,
                                          struct wl_resource *resource,
@@ -1242,10 +1277,16 @@ static void _xdg_toplevel_set_fullscreen(struct wl_client   *client,
 }
 
 void _xdg_toplevel_unset_fullscreen(struct wl_client   *client,
-                                    struct wl_resource *resource) {}
+                                    struct wl_resource *resource) {
+  (void)client;
+  (void)resource;
+}
 
 void _xdg_toplevel_set_minimized(struct wl_client   *client,
-                                 struct wl_resource *resource) {}
+                                 struct wl_resource *resource) {
+  (void)client;
+  (void)resource;
+}
 
 void _xdg_popup_destroy(struct wl_client   *client,
                         struct wl_resource *resource) {

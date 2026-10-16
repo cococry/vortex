@@ -463,8 +463,8 @@ void vt_surface_frame_done(struct vt_surface_t *surf,
 
 bool vt_surface_compute_final_size(const struct vt_surface_t *surf,
                                    uint32_t                   buffer_scale,
-                                   uint32_t buffer_transform, uint32_t *o_w,
-                                   uint32_t *o_h) {
+                                   uint32_t buffer_transform, int32_t *o_w,
+                                   int32_t *o_h) {
   if (!surf || !o_w || !o_h)
     return false;
 

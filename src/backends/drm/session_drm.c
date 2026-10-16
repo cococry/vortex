@@ -527,7 +527,7 @@ vt_session_get_native_handle_render_node(struct vt_session_t *session,
 }
 
 struct vt_device_t *vt_session_device_from_fd_drm(struct vt_session_t *session,
-                                                  uint32_t             fd) {
+                                                  int32_t              fd) {
   if (!session || !session->user_data)
     return NULL;
   struct vt_session_drm_t *session_drm =

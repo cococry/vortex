@@ -145,7 +145,7 @@ _content_update_prepare_dag_recursive(struct vt_content_update_t *cu) {
   /* If a content update fails any part of preperation, it must not be applied.
    */
   {
-    uint32_t _w, _h;
+    int32_t _w, _h;
     if (!vt_surface_compute_final_size(cu->surf, cu->state.buffer_scale,
                                        cu->state.buffer_transform, &_w, &_h)) {
       return false;

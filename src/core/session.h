@@ -51,7 +51,7 @@ struct vt_session_interface_t {
   const char *(*get_native_handle_render_node)(struct vt_session_t *session,
                                                void                *handle);
   struct vt_device_t *(*device_from_fd)(struct vt_session_t *session,
-                                        uint32_t             fd);
+                                        int32_t              fd);
 };
 
 struct vt_session_t {

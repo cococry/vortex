@@ -462,7 +462,9 @@ void _vt_comp_load_backend(struct vt_compositor_t *c, const char *backend_name,
     VT_ERROR(c->log, "Backend name is too long.");
     return;
   }
-  backend_implement_func_t sym_ptr = dlsym(_vt_comp_dl_handle, sym);
+  // POSIX-sanctioned way to turn dlsym's void * into a function pointer
+  backend_implement_func_t sym_ptr;
+  *(void **)&sym_ptr = dlsym(_vt_comp_dl_handle, sym);
 
   if (!sym_ptr) {
     dlclose(_vt_comp_dl_handle);
@@ -814,6 +816,9 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
     break;
   case VT_BACKEND_WAYLAND:
     input_backend = VT_INPUT_WAYLAND;
+    break;
+  case VT_BACKEND_SURFACELESS:
+    // headless: no input devices to drive
     break;
   }
   vt_input_implement(c->input_backend, input_backend);

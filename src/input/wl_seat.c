@@ -491,10 +491,10 @@ bool vt_seat_init(struct vt_seat_t *seat) {
   if (first) {
     seat->pointer_x += seat->cursor.root_hotspot_x < (int32_t)first->width
                            ? seat->cursor.root_hotspot_x
-                           : first->width - 1;
+                           : (int32_t)first->width - 1;
     seat->pointer_y += seat->cursor.root_hotspot_y < (int32_t)first->height
                            ? seat->cursor.root_hotspot_y
-                           : first->height - 1;
+                           : (int32_t)first->height - 1;
   }
 
   /* Outputs already exist when the seat is initialized. */
@@ -901,8 +901,9 @@ void vt_seat_handle_pointer_button(struct vt_seat_t *seat, uint32_t button,
   uint32_t serial = wl_display_next_serial(seat->comp->wl.dsp);
 
   VT_TRACE(seat->comp->log, "BUTTON: ptr_focus=%p picked=%p button=%u",
-           seat->ptr_focus.surf,
-           vt_comp_pick_surface(seat->comp, seat->pointer_x, seat->pointer_y),
+           (void *)seat->ptr_focus.surf,
+           (void *)(vt_comp_pick_surface(seat->comp, seat->pointer_x,
+                                         seat->pointer_y)),
            button);
 
   if (pressed && surf) {

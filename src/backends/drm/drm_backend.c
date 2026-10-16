@@ -1258,7 +1258,7 @@ static bool _drm_init_crtcs_and_planes(struct vt_drm_backend_state_t *drm) {
     goto fail_resources;
   }
 
-  assert(drm->crtcs.size / sizeof(*crtcs) == res->count_crtcs);
+  assert(drm->crtcs.size / sizeof(*crtcs) == (size_t)res->count_crtcs);
 
   memset(crtcs, 0, crtc_bytes);
 
@@ -2124,7 +2124,8 @@ static bool _drm_import_cursor_image(struct vt_drm_output_state_t *drm_output,
     uint32_t w = plane->cursor_sizes[i].width;
     uint32_t h = plane->cursor_sizes[i].height;
 
-    if (w < shm.width || h < shm.height)
+    // shm dims checked positive above
+    if (w < (uint32_t)shm.width || h < (uint32_t)shm.height)
       continue;
 
     if (bo_width == 0 || (uint64_t)w * h < (uint64_t)bo_width * bo_height) {
@@ -2171,7 +2172,7 @@ static bool _drm_import_cursor_image(struct vt_drm_output_state_t *drm_output,
   switch (shm.format) {
 
   case WL_SHM_FORMAT_ARGB8888:
-    for (uint32_t y = 0; y < shm.height; y++) {
+    for (int32_t y = 0; y < shm.height; y++) {
       memcpy(dst + (size_t)y * dst_stride, src + (size_t)y * shm.stride,
              (size_t)shm.width * 4);
     }
@@ -2179,13 +2180,13 @@ static bool _drm_import_cursor_image(struct vt_drm_output_state_t *drm_output,
   case WL_SHM_FORMAT_XRGB8888:
     /* XRGB -> ARGB. Cursor planes require meaningful alpha, so we force
      * fully opaque alpha */
-    for (uint32_t y = 0; y < shm.height; y++) {
+    for (int32_t y = 0; y < shm.height; y++) {
       const uint32_t *src_row =
           (const uint32_t *)(src + (size_t)y * shm.stride);
 
       uint32_t *dst_row = (uint32_t *)(dst + (size_t)y * dst_stride);
 
-      for (uint32_t x = 0; x < shm.width; x++)
+      for (int32_t x = 0; x < shm.width; x++)
         dst_row[x] = src_row[x] | 0xff000000u;
     }
     break;
@@ -2525,8 +2526,8 @@ static bool _drm_output_sync_refresh(struct vt_drm_output_state_t *drm_output) {
   struct vt_output_mode_t *mode;
   wl_list_for_each(mode, &output->physical.modes, link) {
     mode->flags &= ~WL_OUTPUT_MODE_CURRENT;
-    if (mode->width == output->width && mode->height == output->height &&
-        mode->refresh == refresh) {
+    if ((uint32_t)mode->width == output->width &&
+        (uint32_t)mode->height == output->height && mode->refresh == refresh) {
       mode->flags |= WL_OUTPUT_MODE_CURRENT;
     }
   }
