@@ -262,9 +262,12 @@ const char *_vt_comp_handle_cmd_flags(struct vt_compositor_t *c, int argc,
       if (!flag)
         continue;
       if (_flag_cmp(flag, "--logfile", "-lf")) {
-        c->log.stream = fopen(vt_util_log_get_filepath(), "a");
-        if (c->log.stream) {
-          setvbuf(c->log.stream, NULL, _IONBF, 0);
+        // keep the current stream on failure, log macros never check NULL
+        const char *logpath = vt_util_log_get_filepath();
+        FILE       *stream = logpath ? fopen(logpath, "a") : NULL;
+        if (stream) {
+          setvbuf(stream, NULL, _IONBF, 0);
+          c->log.stream = stream;
         } else {
           perror("log fopen");
         }
