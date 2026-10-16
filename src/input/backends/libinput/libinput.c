@@ -286,11 +286,8 @@ bool _vt_li_input_handle_pointer_scroll_event(
 }
 
 bool _vt_li_init_xkb(struct vt_input_backend_li_t *li) {
-  struct xkb_rule_names rules = {.rules = "evdev",
-                                 .model = "pc105",
-                                 .layout = "us",
-                                 .variant = NULL,
-                                 .options = NULL};
+  // NULL fields make xkbcommon read XKB_DEFAULT_*, then evdev/pc105/us
+  struct xkb_rule_names rules = {0};
 
   struct vt_input_backend_t *backend = li->comp->input_backend;
 
