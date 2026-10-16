@@ -241,7 +241,7 @@ int32_t _vt_session_drm_udev_dispatch(int fd, uint32_t mask, void *data) {
   VT_TRACE(session->comp->log, "Received udev event for device %s (%s)", name,
            action);
 
-  if (!_vt_session_drm_card_valid(name) || !action || !action) {
+  if (!_vt_session_drm_card_valid(name) || !node || !action) {
     udev_device_unref(udev_dev);
     return 1;
   }
