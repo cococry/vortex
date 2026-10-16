@@ -1214,8 +1214,8 @@ static bool _drm_init_crtc(struct vt_compositor_t *comp,
   if (!crtc)
     return false;
 
-  crtc->id = id;
-  crtc->index = index;
+  // wl_array_add memory is uninitialized
+  *crtc = (struct vt_drm_crtc_t){.id = id, .index = index};
 
   if (!drm_kms_props_get_crtc(drm_fd, id, crtc->props)) {
     memset(crtc->props, 0, sizeof(crtc->props));
