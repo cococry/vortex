@@ -12,6 +12,8 @@ shift 2
 TIMEOUT="${TIMEOUT:-600}"
 LOG="$BUILD/vortex-$MODE.log"
 OUT="$BUILD/glmark2-$MODE.txt"
+# a failed run must not leave the previous score looking current
+rm -f "$OUT"
 
 case "$MODE" in
 wl)
@@ -32,13 +34,29 @@ drm)
 	;;
 esac
 
-# line-buffered so the readiness lines show up while vortex runs
-timeout -s ABRT -k 5 "$TIMEOUT" stdbuf -oL -eL \
-	"$BUILD/vortex" --verbose --backend-path "$BACKEND" >"$LOG" 2>&1 &
-VPID=$!
-trap 'kill "$VPID" || true; wait "$VPID" || true' EXIT
+# trace logging costs frames, only turn it on when debugging
+LOG_ARGS=()
+if [[ "${VERBOSE:-0}" == 1 ]]; then
+	LOG_ARGS=(--verbose)
+fi
 
-# socket is bound before session/backend init, seat init comes last
+# a killed vortex leaves its socket behind and the next one reuses the
+# name, so match on creation after launch rather than on a new name
+MARK="$(mktemp)"
+new_socket() {
+	find "$XDG_RUNTIME_DIR" -maxdepth 1 -type s -name 'wayland-*' \
+		-newer "$MARK" -printf '%f\n'
+}
+
+# line-buffered so the last lines before a hang/kill reach the log
+timeout -s ABRT -k 5 "$TIMEOUT" stdbuf -oL -eL \
+	"$BUILD/vortex" "${LOG_ARGS[@]}" --backend-path "$BACKEND" \
+	>"$LOG" 2>&1 &
+VPID=$!
+trap 'kill "$VPID" || true; wait "$VPID" || true; rm -f "$MARK"' EXIT
+
+# the new socket is vortex's. connecting before init finishes is fine:
+# the first roundtrip is only answered once the event loop runs.
 SOCK=""
 for _ in $(seq 100); do
 	if ! kill -0 "$VPID"; then
@@ -46,8 +64,8 @@ for _ in $(seq 100); do
 		cat "$LOG"
 		exit 1
 	fi
-	if grep -q "Initialized wayland seat." "$LOG"; then
-		SOCK="$(grep -oP "ready on socket '\K[^']+" "$LOG")"
+	SOCK="$(new_socket)"
+	if [[ -n "$SOCK" ]]; then
 		break
 	fi
 	sleep 0.1
