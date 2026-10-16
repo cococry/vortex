@@ -922,6 +922,7 @@ bool backend_implement_wl(struct vt_compositor_t *comp) {
 
   // No session in Wayland nested
   memset(&comp->session->impl, 0, sizeof(comp->session->impl));
+  return true;
 }
 
 bool backend_handle_frame_wl(struct vt_backend_t *backend,
