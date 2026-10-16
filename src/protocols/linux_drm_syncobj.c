@@ -282,9 +282,10 @@ static int _waiter_handle_ready(int fd, uint32_t mask, void *data) {
   return 0;
 }
 
-/* The fence is only exported if the buffer is drawn or scanned out. The
- * point may not exist yet when the client commits before submitting its GPU
- * work: hold the update until it does. */
+/* Hold the update only until the client has submitted its GPU work, the
+ * fence wait (EGL or KMS IN_FENCE_FD) covers the rest. Holding until
+ * signaled starves fast clients of buffers: releases queue behind the held
+ * commits. The fence itself is only exported if the buffer gets used. */
 static bool _acquire_attach(struct vt_content_update_t       *cu,
                             struct vt_drm_syncobj_timeline_t *tl,
                             uint64_t                          point) {
