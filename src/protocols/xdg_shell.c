@@ -1233,8 +1233,6 @@ static void _xdg_toplevel_set_fullscreen(struct wl_client   *client,
 
   wl_array_release(&states);
 
-  uint32_t serial = wl_display_next_serial(wl_client_get_display(client));
-
   top->fullscreen = true;
   top->fullscreen_output = output;
 

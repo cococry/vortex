@@ -62,9 +62,6 @@ bool renderer_import_buffer_egl(struct vt_renderer_t    *r,
                                 struct vt_buffer_t      *buf,
                                 const pixman_region32_t *damage);
 
-bool renderer_destroy_buffer_texture_egl(struct vt_renderer_t *r,
-                                         struct vt_buffer_t   *buf);
-
 bool renderer_drop_context_egl(struct vt_renderer_t *r);
 
 void renderer_set_vsync_egl(struct vt_renderer_t *r, bool vsync);

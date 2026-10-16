@@ -33,8 +33,6 @@
 
 #define _SUBSYS_NAME "SCENE"
 
-static void sceneprintindent(int indent);
-
 static struct vt_output_layer_state_t *
 _scene_push_layer(struct vt_scene_t *scene);
 

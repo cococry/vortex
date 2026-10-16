@@ -486,8 +486,6 @@ bool vt_session_unmanage_device_drm(struct vt_session_t *session,
                                     struct vt_device_t  *dev) {
   if (!dev || !session || !session->user_data)
     return false;
-  struct vt_session_drm_t *session_drm =
-      BACKEND_DATA(session, struct vt_session_drm_t);
   wl_list_remove(&dev->link);
   return true;
 }

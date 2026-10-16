@@ -616,38 +616,6 @@ static void _vt_comp_schedule_output_commit(struct vt_compositor_t *comp,
       wl_event_loop_add_idle(comp->wl.evloop, _vt_comp_commit_handler, output);
 }
 
-static void _wl_region_add(struct wl_client   *client,
-                           struct wl_resource *resource, int32_t x, int32_t y,
-                           int32_t width, int32_t height) {
-  struct vt_region_t *r = resource ? wl_resource_get_user_data(resource) : NULL;
-  if (!r)
-    return;
-  if (width <= 0 || height <= 0)
-    return;
-  pixman_region32_union_rect(&r->region, &r->region, x, y, width, height);
-}
-
-static void _wl_region_subtract(struct wl_client   *client,
-                                struct wl_resource *resource, int32_t x,
-                                int32_t y, int32_t width, int32_t height) {
-  struct vt_region_t *r = resource ? wl_resource_get_user_data(resource) : NULL;
-  if (!r)
-    return;
-  if (width <= 0 || height <= 0)
-    return;
-  pixman_region32_t rect;
-  pixman_region32_init_rect(&rect, x, y, width, height);
-  pixman_region32_subtract(&r->region, &r->region, &rect);
-  pixman_region32_fini(&rect);
-}
-
-static void _wl_region_handle_destroy(struct wl_resource *resource) {
-  struct vt_region_t *r = resource ? wl_resource_get_user_data(resource) : NULL;
-  if (!r)
-    return;
-  pixman_region32_fini(&r->region);
-  free(r);
-}
 bool _vt_comp_wl_init(struct vt_compositor_t *c) {
   if (!c)
     return false;

@@ -495,7 +495,6 @@ static void _wl_parent_output_geometry(
     const char *make, const char *model, int32_t transform) {
   parent_physical_output_t *output = data;
 
-  static int32_t x_ptr = 0;
   output->x = x;
   output->y = y;
 
@@ -655,9 +654,6 @@ bool _wl_backend_destroy_output(struct vt_backend_t *backend,
                                 struct vt_output_t  *output) {
   if (!output || !output->user_data)
     return false;
-
-  wayland_backend_state_t *wl_backend =
-      BACKEND_DATA(backend, wayland_backend_state_t);
 
   wayland_output_state_t *wl_output =
       BACKEND_DATA(output, wayland_output_state_t);
@@ -843,8 +839,6 @@ bool backend_init_wl(struct vt_backend_t *backend) {
 
   free(shm_formats);
 
-  const uint8_t dmabuf_ver = 4, dmabuf_explicit_sync_ver = 2;
-
   if (backend->comp->have_proto_dmabuf) {
     // initialize the dmabuf protocol with default feedback
     struct vt_dmabuf_feedback_t *default_feedback =
@@ -939,9 +933,6 @@ bool backend_handle_frame_wl(struct vt_backend_t *backend,
     return false;
 
   wayland_backend_state_t *wl = BACKEND_DATA(backend, wayland_backend_state_t);
-
-  wayland_output_state_t *wl_output =
-      BACKEND_DATA(output, wayland_output_state_t);
 
   if (!_wl_parent_flush(wl))
     return false;

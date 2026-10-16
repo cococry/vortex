@@ -418,9 +418,6 @@ bool _egl_pick_config_from_format(struct vt_compositor_t     *c,
 bool _egl_pick_config(struct vt_compositor_t     *comp,
                       struct egl_backend_state_t *egl,
                       struct vt_backend_t        *backend) {
-  EGLint attribs[32];
-  int    i = 0;
-
   switch (backend->platform) {
   case VT_BACKEND_DRM_GBM: {
     // DRM/GBM backend: use DRM fourcc to pick config
@@ -1318,9 +1315,6 @@ bool renderer_import_buffer_egl(struct vt_renderer_t    *r,
                                             egl->has_dmabuf_support);
 }
 
-bool renderer_destroy_buffer_texture_egl(struct vt_renderer_t *r,
-                                         struct vt_buffer_t   *buf) {}
-
 bool renderer_drop_context_egl(struct vt_renderer_t *r) {
   if (!r || !r->impl.drop_context || !r->user_data) {
     VT_ERROR(r->comp->log,
@@ -1361,9 +1355,6 @@ void renderer_stencil_damage_pass_egl(struct vt_renderer_t *r,
   if (!r || !output || !output->user_data_render)
     return;
 
-  struct egl_output_state_t *egl_output =
-      (struct egl_output_state_t *)output->user_data_render;
-
   glEnable(GL_STENCIL_TEST);
 
   glStencilMask(0xFF);
@@ -1380,9 +1371,6 @@ void renderer_composite_pass_egl(struct vt_renderer_t *r,
                                  struct vt_output_t   *output) {
   if (!r || !output || !output->user_data_render)
     return;
-
-  struct egl_output_state_t *egl_output =
-      (struct egl_output_state_t *)output->user_data_render;
 
   // ========== PASS 2: SCENE ==========
   glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);

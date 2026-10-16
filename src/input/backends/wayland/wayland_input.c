@@ -20,7 +20,6 @@
  * SOFTWARE.
  */
 
-#pragma once
 #include "src/core/output.h"
 #include "src/input/input.h"
 #include "src/input/wl_seat.h"
@@ -402,7 +401,6 @@ bool input_backend_init_wl(struct vt_input_backend_t *backend,
 bool input_backend_terminate_wl(struct vt_input_backend_t *backend) {
   if (!backend || !backend->user_data)
     return false;
-  struct vt_input_backend_wl_t *wl = backend->user_data;
   VT_TRACE(backend->comp->log, "Terminated Wayland nested backend.");
   return true;
 }

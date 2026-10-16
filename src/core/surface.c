@@ -35,14 +35,6 @@
 
 #define _SUBSYS_NAME "SURFACE"
 
-static void _surface_update_mapping(struct vt_surface_t *surf);
-
-static void _surface_update_mapping(struct vt_surface_t *surf) {
-  bool mapped = surf->current_buf_use != NULL;
-
-  vt_surface_set_mapped(surf, mapped);
-}
-
 bool vt_surface_init(struct vt_surface_t *surf) {
   if (!surf)
     return false;

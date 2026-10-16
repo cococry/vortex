@@ -3125,18 +3125,6 @@ bool backend_is_dmabuf_importable_drm(struct vt_backend_t     *backend,
   return drm_prime_test_import(master->main_drm->drm_fd, attr);
 }
 
-static struct vt_drm_plane_t *
-_drm_plane_from_id(struct vt_drm_backend_state_t *drm, uint32_t plane_id) {
-  struct vt_drm_plane_t *plane;
-
-  wl_array_for_each(plane, &drm->planes) {
-    if (plane->id == plane_id)
-      return plane;
-  }
-
-  return NULL;
-}
-
 static bool
 _drm_output_can_scanout_dmabuf(struct vt_drm_backend_state_t *drm,
                                struct vt_drm_output_state_t  *output,

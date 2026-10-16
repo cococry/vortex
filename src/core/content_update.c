@@ -71,8 +71,6 @@ static void _content_update_dependency_destroy(
 static bool _content_update_prepare_buffer(struct vt_content_update_t *cu) {
   assert(cu && cu->surf && cu->surf->comp && cu->surf->comp->renderer);
 
-  struct vt_renderer_t *r = cu->surf->comp->renderer;
-
   if (!cu->state.buffer_attached)
     return true;
 

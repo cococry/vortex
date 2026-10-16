@@ -1178,8 +1178,6 @@ void vt_seat_set_pointer_focus(struct vt_seat_t    *seat,
   }
 
   if (surf && surf->res && new_client) {
-    uint32_t serial = wl_display_next_serial(seat->comp->wl.dsp);
-
     struct vt_pointer_t *ptr;
     wl_list_for_each(ptr, &seat->pointers, link) {
       if (!ptr->res)
