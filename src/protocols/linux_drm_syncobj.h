@@ -42,3 +42,5 @@ struct vt_linux_drm_syncobj_v1_surface_state_t {
  * the device timelines are imported into. */
 bool vt_proto_linux_drm_syncobj_v1_init(struct vt_compositor_t *comp,
                                         int                     drm_fd);
+
+void vt_proto_linux_drm_syncobj_v1_log_stats(void);

@@ -36,6 +36,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <xf86drm.h>
@@ -312,13 +313,7 @@ static void _drm_frame_stats_record(struct vt_drm_output_state_t *drm_output,
 static void _drm_frame_stats_log(struct vt_drm_output_state_t *drm_output) {
   struct vt_compositor_t *comp = drm_output->base->backend->comp;
 
-  if (drm_output->frame_stats.missed == 0) {
-    VT_TRACE(comp->log, "CRTC %u: %" PRIu64 " frames, no missed vblanks.",
-             drm_output->crtc->id, drm_output->frame_stats.frames);
-    return;
-  }
-
-  VT_WARN(comp->log,
+  VT_INFO(comp->log,
           "CRTC %u (%u Hz): %" PRIu64 " of %" PRIu64
           " frames missed a vblank, worst interval %.2f ms.",
           drm_output->crtc->id, drm_output->mode.vrefresh,
@@ -2401,6 +2396,14 @@ static bool _drm_terminate_for_device(struct vt_drm_backend_state_t *drm) {
       _drm_frame_stats_log(BACKEND_DATA(output, struct vt_drm_output_state_t));
     _drm_destroy_output_for_device(drm, output);
   }
+
+  // main thread load next to the vblank stats tells CPU from GPU stalls
+  struct rusage ru;
+  if (getrusage(RUSAGE_SELF, &ru) == 0)
+    VT_INFO(comp->log, "CPU time: user %.2fs, sys %.2fs.",
+            ru.ru_utime.tv_sec + ru.ru_utime.tv_usec / 1e6,
+            ru.ru_stime.tv_sec + ru.ru_stime.tv_usec / 1e6);
+  vt_proto_linux_drm_syncobj_v1_log_stats();
 
   _drm_liftoff_finish(drm);
 

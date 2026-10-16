@@ -69,6 +69,11 @@ struct vt_drm_syncobj_acquire_waiter_t {
 static struct {
   struct vt_compositor_t *comp;
   int                     drm_fd;
+
+  // per-run counters, reported at teardown
+  struct {
+    uint64_t commits, waited, exported, release_imported, release_signaled;
+  } stats;
 } _proto = {.drm_fd = -1};
 
 /* ===================================================
@@ -106,6 +111,7 @@ static int _timeline_export_sync_file(struct vt_drm_syncobj_timeline_t *tl,
   if (drmSyncobjCreate(tl->drm_fd, 0, &tmp) != 0)
     return -1;
 
+  _proto.stats.exported++;
   int fd = -1;
   if (drmSyncobjTransfer(tl->drm_fd, tmp, 0, tl->handle, point, 0) != 0 ||
       drmSyncobjExportSyncFile(tl->drm_fd, tmp, &fd) != 0)
@@ -121,6 +127,7 @@ static bool _timeline_import_sync_file(struct vt_drm_syncobj_timeline_t *tl,
   if (drmSyncobjCreate(tl->drm_fd, 0, &tmp) != 0)
     return false;
 
+  _proto.stats.release_imported++;
   bool ok =
       drmSyncobjImportSyncFile(tl->drm_fd, tmp, sync_file_fd) == 0 &&
       drmSyncobjTransfer(tl->drm_fd, tl->handle, point, tmp, 0, 0) == 0;
@@ -131,6 +138,7 @@ static bool _timeline_import_sync_file(struct vt_drm_syncobj_timeline_t *tl,
 
 static void _timeline_signal(struct vt_drm_syncobj_timeline_t *tl,
                              uint64_t                          point) {
+  _proto.stats.release_signaled++;
   uint32_t handle = tl->handle;
   if (drmSyncobjTimelineSignal(tl->drm_fd, &handle, &point, 1) != 0)
     VT_ERROR(_proto.comp->log, "Failed to signal timeline point %" PRIu64 ": %s",
@@ -251,6 +259,7 @@ static bool _acquire_attach(struct vt_content_update_t       *cu,
   if (!w)
     return false;
 
+  _proto.stats.waited++;
   w->cu = cu;
   w->point = point;
   w->timeline = _timeline_ref(tl);
@@ -340,6 +349,7 @@ static bool _addon_commit(struct vt_surface_t        *surf,
     return true;
 
   // validated: both points are set and a dmabuf is attached
+  _proto.stats.commits++;
   struct vt_drm_syncobj_release_t *rel = calloc(1, sizeof(*rel));
   if (!rel) {
     _state_clear_points(s);
@@ -592,4 +602,16 @@ bool vt_proto_linux_drm_syncobj_v1_init(struct vt_compositor_t *comp,
 
   VT_TRACE(comp->log, "Initialized linux-drm-syncobj-v1.");
   return true;
+}
+
+void vt_proto_linux_drm_syncobj_v1_log_stats(void) {
+  if (!_proto.comp)
+    return;
+
+  VT_INFO(_proto.comp->log,
+          "syncobj: %" PRIu64 " commits, %" PRIu64 " waited for submit, %" PRIu64
+          " acquire exports, %" PRIu64 " release imports, %" PRIu64
+          " release signals.",
+          _proto.stats.commits, _proto.stats.waited, _proto.stats.exported,
+          _proto.stats.release_imported, _proto.stats.release_signaled);
 }
