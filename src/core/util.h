@@ -51,6 +51,17 @@
     }                                                                          \
   }
 
+// shown without --verbose, for summaries rather than problems
+#define VT_INFO(logstate, ...)                                                 \
+  if (!(logstate).quiet) {                                                     \
+    do {                                                                       \
+      vt_util_log_header((logstate).stream, VT_LL_INFO);                       \
+      fprintf((logstate).stream, "%s: ", _SUBSYS_NAME);                        \
+      fprintf((logstate).stream, __VA_ARGS__);                                 \
+      fprintf((logstate).stream, "\n");                                        \
+    } while (0);                                                               \
+  }
+
 #define VT_WARN(logstate, ...)                                                 \
   if (!(logstate).quiet) {                                                     \
     do {                                                                       \
@@ -146,6 +157,7 @@
 
 typedef enum {
   VT_LL_TRACE = 0,
+  VT_LL_INFO,
   VT_LL_WARN,
   VT_LL_ERR,
   VT_LL_FATAL,

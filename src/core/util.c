@@ -121,10 +121,11 @@ char *vt_util_log_get_filepath() {
 }
 
 void vt_util_log_header(FILE *stream, log_level_t lvl) {
-  static const char *lvl_str[VT_LL_COUNT] = {"TRACE", "WARNING", "ERROR",
-                                             "FATAL"};
+  static const char *lvl_str[VT_LL_COUNT] = {"TRACE", "INFO", "WARNING",
+                                             "ERROR", "FATAL"};
   static const char *lvl_clr[VT_LL_COUNT] = {
       "\033[1;32m",   // TRACE - bright green
+      "\033[1;36m",   // INFO - bright cyan
       "\033[1;33m",   // WARNING - yellow
       "\033[1;31m",   // ERROR - bright red
       "\033[38;5;88m" // FATAL - dark red
