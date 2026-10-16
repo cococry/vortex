@@ -638,7 +638,8 @@ bool _egl_gl_create_output_fbo(struct vt_output_t *output, uint32_t w,
 
   if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
     VT_ERROR(output->backend->comp->log,
-             "FBO creation for output %p (%u%u) failed.\n", output, w, h);
+             "FBO creation for output %p (%u%u) failed.\n", (void *)output, w,
+             h);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     return false;
   }
@@ -743,7 +744,7 @@ static void _egl_buffer_attachment_destroy(struct vt_buffer_t *buf, void *owner,
   if (egl_buf->tex.id)
     glDeleteTextures(1, &egl_buf->tex.id);
 
-  VT_TRACE(r->comp->log, "Deleted OpenGL texture for buffer %p", buf);
+  VT_TRACE(r->comp->log, "Deleted OpenGL texture for buffer %p", (void *)buf);
 
   if (egl_buf->egl_img != EGL_NO_IMAGE_KHR) {
     eglDestroyImageKHR_ptr(egl->egl_dsp, (EGLImageKHR)egl_buf->egl_img);
@@ -754,7 +755,8 @@ static void _egl_buffer_attachment_destroy(struct vt_buffer_t *buf, void *owner,
   egl_buf->tex.width = 0;
   egl_buf->tex.height = 0;
 
-  VT_TRACE(r->comp->log, "Destroyed EGL Image handle for buffer %p", buf);
+  VT_TRACE(r->comp->log, "Destroyed EGL Image handle for buffer %p",
+           (void *)buf);
 }
 
 static bool _egl_track_rendered_buffer_use(struct vt_output_t     *output,
@@ -1176,7 +1178,7 @@ bool renderer_setup_renderable_output_egl(struct vt_renderer_t *r,
   vt_comp_schedule_repaint(r->comp, output);
 
   VT_TRACE(r->comp->log, "Created EGL render surface %p for output %p (%ux%u)",
-           egl_surf, output, output->width, output->height);
+           egl_surf, (void *)output, output->width, output->height);
   return true;
 }
 
@@ -1293,7 +1295,8 @@ static bool _egl_import_buffer_by_deduced_type(struct vt_renderer_t    *r,
     return _egl_gl_import_buffer_shm(r, &shm_attr, buf, egl_buf, damage);
   }
 
-  VT_WARN(r->comp->log, "Unknown buffer import type for buffer %p", buf);
+  VT_WARN(r->comp->log, "Unknown buffer import type for buffer %p",
+          (void *)buf);
   return false;
 }
 
@@ -1305,7 +1308,7 @@ bool renderer_import_buffer_egl(struct vt_renderer_t    *r,
 
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
 
-  VT_TRACE(r->comp->log, "Importing buffer to handle %p", buf);
+  VT_TRACE(r->comp->log, "Importing buffer to handle %p", (void *)buf);
 
   struct vt_egl_buffer_t *egl_buf = _egl_get_or_create_egl_buffer(r, buf);
 
@@ -1453,7 +1456,7 @@ void renderer_draw_surface_egl(struct vt_renderer_t *r,
   if (!surface->current_buf_use) {
     VT_TRACE(r->comp->log,
              "Not rendering surface %p, no active buffer use on surface.",
-             surface);
+             (void *)surface);
     return;
   }
 
@@ -1473,7 +1476,7 @@ void renderer_draw_surface_egl(struct vt_renderer_t *r,
 
   if (!renderer_import_buffer_egl(r, use->buf, &surface->applied.damage)) {
     VT_ERROR(r->comp->log, "Failed to import buffer %p for surface %p.",
-             use->buf, surface);
+             (void *)use->buf, (void *)surface);
     return;
   }
 
@@ -1512,12 +1515,12 @@ void renderer_draw_surface_egl(struct vt_renderer_t *r,
 
   if (!vt_output_track_presented_surface(output, surface)) {
     VT_ERROR(r->comp->log, "Failed to track presented surface %p on output %p.",
-             surface, output);
+             (void *)surface, (void *)output);
   }
 
   if (!_egl_track_rendered_buffer_use(output, use)) {
     VT_ERROR(r->comp->log, "Failed to track EGL buffer use %p (buffer: %p).",
-             use, buf);
+             (void *)use, (void *)buf);
   }
 
   surface->damaged = false;
@@ -1526,8 +1529,9 @@ void renderer_draw_surface_egl(struct vt_renderer_t *r,
            "Presented surface %p "
            "src=[x:%d y:%d w:%u h:%u] "
            "dst=[x:%d y:%d w:%u h:%u].",
-           surface, src_box->x, src_box->y, src_box->width, src_box->height,
-           dst_box->x, dst_box->y, dst_box->width, dst_box->height);
+           (void *)surface, src_box->x, src_box->y, src_box->width,
+           src_box->height, dst_box->x, dst_box->y, dst_box->width,
+           dst_box->height);
 }
 
 void renderer_draw_surface_simple_egl(struct vt_renderer_t *r,
@@ -1613,21 +1617,21 @@ void renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,
   GLenum gl_err = glGetError();
   if (gl_err != GL_NO_ERROR) {
     VT_ERROR(r->comp->log,
-             "glBlitFramebuffer failed for output %p: GL error 0x%x", output,
-             gl_err);
+             "glBlitFramebuffer failed for output %p: GL error 0x%x",
+             (void *)output, gl_err);
     return;
   }
 
   if (!_egl_record_surface_release_fences(r, output)) {
     VT_ERROR(r->comp->log,
              "Cannot record surface release fences after render for output %p.",
-             output);
+             (void *)output);
   }
 
   if (!eglSwapBuffers(egl->egl_dsp, output->render_surface)) {
     VT_ERROR(r->comp->log,
-             "eglSwapBuffers failed for output %p: EGL error 0x%x", output,
-             eglGetError());
+             "eglSwapBuffers failed for output %p: EGL error 0x%x",
+             (void *)output, eglGetError());
     return;
   }
 

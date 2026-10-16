@@ -65,7 +65,7 @@ static void _buffer_destroy(struct vt_buffer_t *buf) {
     return;
   }
 
-  VT_TRACE(buf->comp->log, "Destroying buffer %p", buf);
+  VT_TRACE(buf->comp->log, "Destroying buffer %p", (void *)buf);
 
   struct vt_buffer_attachment_t *attachment, *tmp;
 
@@ -73,7 +73,7 @@ static void _buffer_destroy(struct vt_buffer_t *buf) {
     _buffer_remove_attachment(attachment);
   }
 
-  VT_TRACE(buf->comp->log, "Destroyed buffer %p", buf);
+  VT_TRACE(buf->comp->log, "Destroyed buffer %p", (void *)buf);
 
   free(buf);
 }
@@ -113,7 +113,7 @@ struct vt_buffer_t *vt_buffer_ref(struct vt_buffer_t *buf) {
 
   buf->refcount++;
 
-  VT_TRACE(buf->comp->log, "Referenced buffer: buf=%p refs=%u", buf,
+  VT_TRACE(buf->comp->log, "Referenced buffer: buf=%p refs=%u", (void *)buf,
            buf->refcount);
 
   return buf;
@@ -130,7 +130,7 @@ void vt_buffer_unref(struct vt_buffer_t **buf_ptr) {
 
   assert(buf->refcount > 0);
 
-  VT_TRACE(buf->comp->log, "Unreferenced buffer: buf=%p refs=%u", buf,
+  VT_TRACE(buf->comp->log, "Unreferenced buffer: buf=%p refs=%u", (void *)buf,
            buf->refcount);
 
   if (--buf->refcount != 0)
@@ -162,7 +162,8 @@ void vt_buffer_begin_use(struct vt_buffer_t *buf) {
 
   buf->uses++;
 
-  VT_TRACE(buf->comp->log, "Began buffer use: buf=%p uses=%u", buf, buf->uses);
+  VT_TRACE(buf->comp->log, "Began buffer use: buf=%p uses=%u", (void *)buf,
+           buf->uses);
 }
 
 void vt_buffer_end_use(struct vt_buffer_t *buf) {
@@ -173,7 +174,8 @@ void vt_buffer_end_use(struct vt_buffer_t *buf) {
 
   assert(buf->uses > 0);
 
-  VT_TRACE(buf->comp->log, "Ending buffer use: buf=%p uses=%u", buf, buf->uses);
+  VT_TRACE(buf->comp->log, "Ending buffer use: buf=%p uses=%u", (void *)buf,
+           buf->uses);
 
   if (--buf->uses != 0)
     return;
@@ -258,7 +260,7 @@ vt_buffer_release_ref(struct vt_buffer_release_t *release) {
   release->refcount++;
 
   VT_TRACE(release->comp->log, "Referenced buffer release: release=%p refs=%u",
-           release, release->refcount);
+           (void *)release, release->refcount);
 
   return release;
 }
@@ -275,13 +277,13 @@ void vt_buffer_release_unref(struct vt_buffer_release_t **release_ptr) {
   assert(release->refcount > 0);
 
   VT_TRACE(release->comp->log,
-           "Unreferenced buffer release: release=%p refs=%u", release,
+           "Unreferenced buffer release: release=%p refs=%u", (void *)release,
            release->refcount);
 
   if (--release->refcount != 0)
     return;
 
-  VT_TRACE(release->comp->log, "Destroying buffer release %p", release);
+  VT_TRACE(release->comp->log, "Destroying buffer release %p", (void *)release);
 
   assert(release->impl->destroy);
   release->impl->destroy(release);
@@ -320,7 +322,7 @@ struct vt_buffer_use_t *vt_buffer_use_ref(struct vt_buffer_use_t *use) {
 
   use->refcount++;
 
-  VT_TRACE(use->comp->log, "Referenced buffer use: use=%p refs=%u", use,
+  VT_TRACE(use->comp->log, "Referenced buffer use: use=%p refs=%u", (void *)use,
            use->refcount);
 
   return use;
@@ -333,8 +335,8 @@ static void _buffer_use_destroy(struct vt_buffer_use_t *use) {
   }
 
   VT_TRACE(use->comp->log,
-           "Buffer use destroy: use=%p release=%p acquire_fence_fd=%i", use,
-           use->release, use->acquire_fence_fd);
+           "Buffer use destroy: use=%p release=%p acquire_fence_fd=%i",
+           (void *)use, (void *)use->release, use->acquire_fence_fd);
 
   if (use->release)
     vt_buffer_release_finish(use->release, use->release_fence_fd);
@@ -413,7 +415,7 @@ struct vt_buffer_use_t *vt_buffer_use_create_take(
   use->release_fence_fd = -1;
 
   VT_TRACE(use->comp->log, "Buffer use create: use=%p taking buf=%p release=%p",
-           use, use->buf, use->release);
+           (void *)use, (void *)use->buf, (void *)use->release);
 
   return use;
 }
@@ -435,8 +437,8 @@ bool vt_buffer_use_set_release_fence_fd(struct vt_buffer_use_t *use, int fd) {
 
   use->release_fence_fd = owned_fd;
 
-  VT_TRACE(use->comp->log, "Set buffer use=%p release_fence_fd to %i", use,
-           use->release_fence_fd);
+  VT_TRACE(use->comp->log, "Set buffer use=%p release_fence_fd to %i",
+           (void *)use, use->release_fence_fd);
 
   return true;
 }

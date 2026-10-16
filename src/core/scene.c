@@ -101,7 +101,8 @@ static bool _scene_node_on_output(struct vt_scene_node_t *node,
   struct vt_box_t *box = vt_scene_node_get_global_bounds(node);
   if (!box) {
     VT_TRACE(output->backend->comp->log,
-             "SCENE: node_on_output: node=%p has no global bounds", node);
+             "SCENE: node_on_output: node=%p has no global bounds",
+             (void *)node);
     return false;
   }
 
@@ -216,7 +217,7 @@ static void _scene_render_layers(struct vt_scene_t  *scene,
       VT_TRACE(
           renderer->comp->log,
           "Surface=%p accepted as direct-scanout layer; Will not be rendered.",
-          layer->surface);
+          (void *)layer->surface);
       continue;
     }
 
@@ -353,8 +354,8 @@ struct vt_scene_node_t *vt_scene_node_create(struct vt_compositor_t *c,
     surf->scene_node = n;
 
   VT_TRACE(c->log,
-           "Created scene node %p for surface %p at (%d,%d), geom_dirty=%d", n,
-           surf, n->x, n->y, n->geom_dirty);
+           "Created scene node %p for surface %p at (%d,%d), geom_dirty=%d",
+           (void *)n, (void *)surf, n->x, n->y, n->geom_dirty);
 
   return n;
 }
@@ -371,11 +372,12 @@ bool vt_scene_node_damage_whole(struct vt_compositor_t *comp,
                                 struct vt_scene_node_t *node) {
   if (!node || !comp)
     return false;
-  VT_TRACE(comp->log, "DEBUG: node %p damaged; repainting all outputs", node);
+  VT_TRACE(comp->log, "DEBUG: node %p damaged; repainting all outputs",
+           (void *)node);
 
   struct vt_output_t *it;
   wl_list_for_each(it, &comp->outputs, link_global) {
-    VT_TRACE(comp->log, "DEBUG: scheduling output %p", it);
+    VT_TRACE(comp->log, "DEBUG: scheduling output %p", (void *)it);
 
     vt_comp_schedule_repaint(comp, it);
   }
@@ -599,7 +601,7 @@ struct vt_output_t *vt_scene_node_primary_output(struct vt_compositor_t *comp,
     VT_ERROR(comp->log,
              "Failed to pick primary output for scene node %p. Node has "
              "invalid global bounds",
-             node);
+             (void *)node);
     return NULL;
   }
 
@@ -635,7 +637,7 @@ struct vt_output_t *vt_scene_node_primary_output(struct vt_compositor_t *comp,
     VT_ERROR(comp->log,
              "Failed to pick primary output for scene node %p. [x: %i, y: %i, "
              "w: %u, h: %u]",
-             node, rect->x, rect->y, rect->width, rect->height);
+             (void *)node, rect->x, rect->y, rect->width, rect->height);
   }
   return best;
 }

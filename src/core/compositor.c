@@ -130,7 +130,8 @@ void _vt_comp_commit_handler(void *data) {
       return;
     }
 
-    VT_TRACE(c->log, "Pending repaint on output %p got satisfied.", output);
+    VT_TRACE(c->log, "Pending repaint on output %p got satisfied.",
+             (void *)output);
   }
 
   if (output->cursor_dirty) {
@@ -160,7 +161,7 @@ void vt_comp_frame_done(struct vt_compositor_t *c, struct vt_output_t *output,
     free(entry);
   }
 
-  VT_TRACE(c->log, "Sent frame callbacks for output %p.", output);
+  VT_TRACE(c->log, "Sent frame callbacks for output %p.", (void *)output);
 }
 
 void vt_comp_frame_done_all(struct vt_compositor_t *c, uint32_t t) {
@@ -525,7 +526,8 @@ void _vt_comp_wl_region_handle_resource_destroy(struct wl_resource *resource) {
   if (!r)
     return;
 
-  VT_TRACE(r->comp->log, "region.destroy_resoure: destroying region %p", r);
+  VT_TRACE(r->comp->log, "region.destroy_resoure: destroying region %p",
+           (void *)r);
   pixman_region32_fini(&r->region);
   free(r);
 }
@@ -566,7 +568,8 @@ void _vt_comp_wl_surface_create_region(struct wl_client   *client,
   wl_resource_set_implementation(res, &region_impl, region,
                                  _vt_comp_wl_region_handle_resource_destroy);
 
-  VT_TRACE(comp->log, "compositor.create_region: created region %p", region);
+  VT_TRACE(comp->log, "compositor.create_region: created region %p",
+           (void *)region);
 }
 
 void _vt_comp_wl_region_destroy(struct wl_client   *client,
@@ -979,7 +982,7 @@ void vt_comp_schedule_repaint(struct vt_compositor_t *c,
   _vt_comp_schedule_output_commit(c, output);
 
   if (output->needs_repaint != old)
-    VT_TRACE(c->log, "Scheduling repaint on output %p.", output);
+    VT_TRACE(c->log, "Scheduling repaint on output %p.", (void *)output);
 }
 
 void vt_comp_schedule_cursor_commit(struct vt_compositor_t *c,
@@ -993,7 +996,7 @@ void vt_comp_schedule_cursor_commit(struct vt_compositor_t *c,
   _vt_comp_schedule_output_commit(c, output);
 
   if (output->cursor_dirty != old)
-    VT_TRACE(c->log, "Scheduling cursor commit on output %p.", output);
+    VT_TRACE(c->log, "Scheduling cursor commit on output %p.", (void *)output);
 }
 
 void vt_comp_repaint_scene(struct vt_compositor_t *c,

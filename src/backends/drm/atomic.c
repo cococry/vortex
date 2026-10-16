@@ -219,7 +219,7 @@ static bool _atomic_prepare_liftoff(struct vt_drm_backend_state_t *drm,
 
       if (!liftoff_layer) {
         VT_ERROR(drm->comp->log, "Layer %p has no retained Liftoff layer.",
-                 layer);
+                 (void *)layer);
         return false;
       }
 

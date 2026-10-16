@@ -117,7 +117,7 @@ static bool _linux_explicit_sync_addon_commit(struct vt_surface_t        *surf,
   VT_TRACE(
       surf->comp->log,
       "Moved acquire_fence_fd=%i owned by explicit sync to content update %p",
-      cu->acquire_fence_fd, cu);
+      cu->acquire_fence_fd, (void *)cu);
 
   return true;
 }
@@ -155,7 +155,7 @@ _linux_explicit_sync_v1_from_surf(struct vt_surface_t *surf) {
 
   VT_TRACE(_proto.comp->log,
            "Created linux-explicit-synchronization-v1 surface state %p for %p.",
-           state, surf);
+           (void *)state, (void *)surf);
 
   return state;
 }
@@ -207,7 +207,7 @@ void _linux_explicit_sync_v1_get_synchronization(
   VT_TRACE(surf->comp->log,
            "linux_explicit_sync.get_synchronization: created synchronization "
            "object for surface %p.",
-           surf);
+           (void *)surf);
 }
 
 void _linux_explicit_sync_v1_destroy(struct wl_client   *client,
@@ -274,7 +274,7 @@ void _linux_surface_sync_v1_set_acquire_fence(struct wl_client   *client,
   VT_TRACE(state->surf->comp->log,
            "linux_surface_sync.set_acquire_fence: set acquire fence FD=%i for "
            "surface %p.",
-           fd, state->surf);
+           fd, (void *)state->surf);
 }
 
 static struct vt_wayland_buffer_release_t *

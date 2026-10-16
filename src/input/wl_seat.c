@@ -295,7 +295,7 @@ static void _wl_seat_pointer_set_cursor(struct wl_client   *client,
       wl_resource_post_error(resource, WL_POINTER_ERROR_ROLE,
                              "wl_surface already has another role");
       VT_ERROR(surf->comp->log, "Failed to set cursor role for surface %p",
-               surf);
+               (void *)surf);
       return;
     }
   }

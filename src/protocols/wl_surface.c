@@ -159,7 +159,8 @@ void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
 
     new_buf = vt_buffer_ref(new_buf);
     VT_TRACE(surf->comp->log, "attach: buffer_res=%p id=%u wrapper=%p refs=%u",
-             buffer, wl_resource_get_id(buffer), new_buf, new_buf->refcount);
+             (void *)buffer, wl_resource_get_id(buffer), (void *)new_buf,
+             new_buf->refcount);
 
     if (!_wayland_buffer_attachment_get_or_create(new_buf, buffer)) {
       VT_WL_OUT_OF_MEMORY(surf->comp, client);
@@ -191,7 +192,8 @@ void _wl_surface_commit(struct wl_client   *client,
     return;
   }
 
-  VT_TRACE(surf->comp->log, "Got wl_surface.commit for surface %p", surf)
+  VT_TRACE(surf->comp->log, "Got wl_surface.commit for surface %p",
+           (void *)surf)
 
   if (!vt_surface_validate_commit(surf)) {
     VT_ERROR(surf->comp->log, "wl_surface.commit: Commit validation failed");
@@ -253,7 +255,8 @@ void _wl_surface_frame(struct wl_client *client, struct wl_resource *resource,
   wl_list_insert(surf->pending.frame_callbacks.prev, &cb->link);
 
   VT_TRACE(surf->comp->log,
-           "wl_surface.frame: Queued callback %p for surface %p.", cb, surf);
+           "wl_surface.frame: Queued callback %p for surface %p.", (void *)cb,
+           (void *)surf);
 }
 void _wl_surface_damage(struct wl_client *client, struct wl_resource *resource,
                         int32_t x, int32_t y, int32_t width, int32_t height) {
@@ -274,7 +277,7 @@ void _wl_surface_damage(struct wl_client *client, struct wl_resource *resource,
   VT_TRACE(surf->comp->log,
            "wl_surface.damage: Accumulated damage [x: %i, y: %i, w: %i, "
            "h: %i] into pending surface damage of surface %p",
-           x, y, width, height, surf);
+           x, y, width, height, (void *)surf);
 }
 
 void _wl_surface_damage_buffer(struct wl_client   *client,
@@ -296,7 +299,7 @@ void _wl_surface_damage_buffer(struct wl_client   *client,
   VT_TRACE(surf->comp->log,
            "wl_surface.damage_buffer: Accumulated damage [x: %i, y: %i, w: %i, "
            "h: %i] into pending buffer damage of surface %p",
-           x, y, width, height, surf);
+           x, y, width, height, (void *)surf);
 }
 
 void _wl_surface_set_opaque_region(struct wl_client   *client,
@@ -327,7 +330,7 @@ void _wl_surface_set_opaque_region(struct wl_client   *client,
   VT_TRACE(surf->comp->log,
            "wl_surface.set_opaque_region: updated pending opaque region for "
            "surface %p",
-           surf);
+           (void *)surf);
 }
 
 void _wl_surface_set_input_region(struct wl_client   *client,
@@ -359,7 +362,7 @@ void _wl_surface_set_input_region(struct wl_client   *client,
   VT_TRACE(surf->comp->log,
            "wl_surface.set_input_region: updated pending input region for "
            "surface %p",
-           surf);
+           (void *)surf);
 }
 
 void _wl_surface_set_buffer_transform(struct wl_client   *client,
@@ -376,7 +379,7 @@ void _wl_surface_set_buffer_transform(struct wl_client   *client,
       transform > WL_OUTPUT_TRANSFORM_FLIPPED_270) {
     wl_resource_post_error(resource, WL_SURFACE_ERROR_INVALID_TRANSFORM,
                            "invalid transform %d", transform);
-    VT_WARN(surf->comp->log, "%p", surf);
+    VT_WARN(surf->comp->log, "%p", (void *)surf);
     return;
   }
 
@@ -387,7 +390,7 @@ void _wl_surface_set_buffer_transform(struct wl_client   *client,
   VT_TRACE(surf->comp->log,
            "wl_surface.set_buffer_transform: Set pending transform=%d for "
            "surface %p",
-           transform, surf);
+           transform, (void *)surf);
 }
 
 void _wl_surface_set_buffer_scale(struct wl_client   *client,
@@ -415,7 +418,7 @@ void _wl_surface_set_buffer_scale(struct wl_client   *client,
 
   VT_TRACE(surf->comp->log,
            "wl_surface.set_buffer_scale: Set pending scale=%d for surface %p",
-           scale, surf);
+           scale, (void *)surf);
 }
 
 void _wl_surface_offset(struct wl_client *client, struct wl_resource *resource,
@@ -432,7 +435,7 @@ void _wl_surface_offset(struct wl_client *client, struct wl_resource *resource,
 
   VT_TRACE(surf->comp->log,
            "wl_surface.offset: Set pending offset=[%d, %d] for surface %p", x,
-           y, surf);
+           y, (void *)surf);
 }
 
 void _wl_surface_destroy(struct wl_client   *client,

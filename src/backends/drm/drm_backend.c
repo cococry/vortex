@@ -1636,19 +1636,19 @@ static bool _drm_create_output_for_device(struct vt_drm_backend_state_t *drm,
     VT_WARN(comp->log,
             "CRTC %" PRIu32
             " does not have a cursor plane. Using software cursor on output %p",
-            drm_output->crtc->id, output);
+            drm_output->crtc->id, (void *)output);
     output->cursor_mode = VT_CURSOR_MODE_SOFTWARE;
   } else if (getenv("VT_DRM_NO_HARDWARE_CURSOR")) {
     VT_TRACE(comp->log,
              "Hardware cursor was disabled by the environment. Using software "
              "cursor on output %p",
-             output);
+             (void *)output);
     output->cursor_mode = VT_CURSOR_MODE_SOFTWARE;
   } else {
     VT_TRACE(comp->log,
              "CRTC %" PRIu32
              " has a cursor plane. Using hardware cursor on output %p",
-             drm_output->crtc->id, output);
+             drm_output->crtc->id, (void *)output);
     output->cursor_mode = VT_CURSOR_MODE_HARDWARE;
   }
 
@@ -2693,17 +2693,17 @@ static bool _drm_handle_frame_for_device(struct vt_drm_backend_state_t *drm,
 
     if (!vt_output_track_presented_surface(output, layer->surface)) {
       VT_ERROR(comp->log, "Failed to track directly scanned-out surface %p.",
-               layer->surface);
+               (void *)layer->surface);
       continue;
     }
 
     VT_TRACE(comp->log, "OUTPUT: tracking presented surface=%p output=%p",
-             layer->surface, output);
+             (void *)layer->surface, (void *)output);
   }
 
   VT_TRACE(
       comp->log, "real commit succeeded output=%p event_pending=%d layers=%zu",
-      output, commit.event_pending,
+      (void *)output, commit.event_pending,
       drm_output->pending_layers.size / sizeof(struct vt_drm_layer_state_t));
 
   drm_output->pending_valid = true;
@@ -3599,7 +3599,7 @@ bool backend_build_surface_feedback(struct vt_backend_t         *backend,
     VT_ERROR(drm_master->comp->log,
              "Cannot build surface feedback for surface %p, output %p; CRTC or"
              "primary plane is not available",
-             surface, output);
+             (void *)surface, (void *)output);
     return false;
   }
 
@@ -3613,7 +3613,7 @@ bool backend_build_surface_feedback(struct vt_backend_t         *backend,
     VT_ERROR(drm_master->comp->log,
              "Failed to create direct-scanout tranche for surface feedback of "
              "surface %p, output %p",
-             surface, output);
+             (void *)surface, (void *)output);
     return false;
   }
 
@@ -3623,7 +3623,7 @@ bool backend_build_surface_feedback(struct vt_backend_t         *backend,
 
   VT_TRACE(drm_master->comp->log,
            "Surface feedback for surface=%p output=%p: direct scanout tranche",
-           surface, output);
+           (void *)surface, (void *)output);
 
   _log_dmabuf_tranche(drm_master->comp, scanout_tranche,
                       drm_master->main_drm->dev->path);
@@ -3635,7 +3635,7 @@ bool backend_build_surface_feedback(struct vt_backend_t         *backend,
     VT_ERROR(drm_master->comp->log,
              "Failed to create fallback tranche for surface feedback of "
              "surface %p, output %p",
-             surface, output);
+             (void *)surface, (void *)output);
     return false;
   }
 
@@ -3648,7 +3648,7 @@ bool backend_build_surface_feedback(struct vt_backend_t         *backend,
 
   VT_TRACE(drm_master->comp->log,
            "Surface feedback for surface=%p output=%p: composite tranche",
-           surface, output);
+           (void *)surface, (void *)output);
 
   _log_dmabuf_tranche(drm_master->comp, fallback_tranche,
                       drm_master->main_drm->dev->path);
@@ -3714,7 +3714,7 @@ bool backend_build_surface_feedback_drm(struct vt_backend_t         *backend,
     VT_ERROR(drm_master->comp->log,
              "Cannot build surface feedback for surface %p, output %p; CRTC or"
              "primary plane is not available",
-             surface, output);
+             (void *)surface, (void *)output);
     return false;
   }
 
@@ -3728,7 +3728,7 @@ bool backend_build_surface_feedback_drm(struct vt_backend_t         *backend,
     VT_ERROR(drm_master->comp->log,
              "Failed to create direct-scanout tranche for surface feedback of "
              "surface %p, output %p",
-             surface, output);
+             (void *)surface, (void *)output);
     return false;
   }
 
@@ -3738,7 +3738,7 @@ bool backend_build_surface_feedback_drm(struct vt_backend_t         *backend,
   if (!_drm_output_scanout_formats(drm_output->drm_backend, drm_output,
                                    &scanout_formats)) {
     VT_ERROR(drm_master->comp->log,
-             "Failed to collect scanout formats for output %p", output);
+             "Failed to collect scanout formats for output %p", (void *)output);
     return false;
   }
 
@@ -3753,7 +3753,7 @@ bool backend_build_surface_feedback_drm(struct vt_backend_t         *backend,
 
   VT_TRACE(drm_master->comp->log,
            "Surface feedback for surface=%p output=%p: direct scanout tranche",
-           surface, output);
+           (void *)surface, (void *)output);
 
   _log_dmabuf_tranche(drm_master->comp, scanout_tranche,
                       drm_master->main_drm->dev->path);
@@ -3765,7 +3765,7 @@ bool backend_build_surface_feedback_drm(struct vt_backend_t         *backend,
     VT_ERROR(drm_master->comp->log,
              "Failed to create fallback tranche for surface feedback of "
              "surface %p, output %p",
-             surface, output);
+             (void *)surface, (void *)output);
     return false;
   }
 
@@ -3778,7 +3778,7 @@ bool backend_build_surface_feedback_drm(struct vt_backend_t         *backend,
 
   VT_TRACE(drm_master->comp->log,
            "Surface feedback for surface=%p output=%p: composite tranche",
-           surface, output);
+           (void *)surface, (void *)output);
 
   _log_dmabuf_tranche(drm_master->comp, fallback_tranche,
                       drm_master->main_drm->dev->path);

@@ -307,7 +307,8 @@ void _proto_linux_dmabuf_v1_bind(struct wl_client *client, void *data,
     VT_TRACE(_proto->comp->log,
              "linux_dmabuf.bind: sending legacy formats for client %p (%zu "
              "formats).",
-             client, vt_drm_format_array_count(&_proto->default_formats));
+             (void *)client,
+             vt_drm_format_array_count(&_proto->default_formats));
   }
 }
 
@@ -408,7 +409,7 @@ void _linux_dmabuf_v1_create_params(struct wl_client   *client,
 
   VT_TRACE(_proto->comp->log,
            "linux_dmabuf.create_params: created buffer params resource %p.",
-           params->res);
+           (void *)params->res);
 }
 
 void _linux_dmabuf_v1_get_default_feedback(struct wl_client   *client,
@@ -437,7 +438,7 @@ void _linux_dmabuf_v1_get_default_feedback(struct wl_client   *client,
   VT_TRACE(
       _proto->comp->log,
       "linux_dmabuf.get_default_feedback: sent default feedback to client %p.",
-      client);
+      (void *)client);
 }
 
 void _linux_dmabuf_v1_get_surface_feedback(struct wl_client   *client,
@@ -485,7 +486,7 @@ void _linux_dmabuf_v1_get_surface_feedback(struct wl_client   *client,
     VT_WARN(_proto->comp->log,
             "Failed to update DMABUF feedback for surface %p; using default "
             "feedback.",
-            surf);
+            (void *)surf);
   }
 
   /* 6. Track resource in DMA-BUF surface list */
@@ -499,7 +500,7 @@ void _linux_dmabuf_v1_get_surface_feedback(struct wl_client   *client,
   VT_TRACE(_proto->comp->log,
            "linux_dmabuf.get_surface_feedback: sent feedback to surface %p "
            "(version %i).",
-           surface, wl_resource_get_version(surface));
+           (void *)surface, wl_resource_get_version(surface));
 }
 
 void _linux_dmabuf_v1_params_destroy(struct wl_client   *client,
@@ -781,7 +782,7 @@ void _linux_dmabuf_params_create(struct wl_resource *resource, uint32_t buf_id,
   VT_TRACE(_proto->comp->log,
            "linux_dmabuf.params_create: successfully created wl_buffer %p "
            "(%ix%i, format=%u).",
-           buf->res, width, height, format);
+           (void *)buf->res, width, height, format);
 }
 
 void _linux_dmabuf_v1_params_create(struct wl_client   *client,
@@ -882,7 +883,7 @@ static bool _accumulate_tranche_formats(struct vt_compositor_t *comp,
           vt_drm_format_fini(&new_fmt);
           VT_ERROR(comp->log,
                    "Failed to push format %p (n mods: %zu) into format array.",
-                   fmt, vt_drm_format_mod_count(fmt));
+                   (void *)fmt, vt_drm_format_mod_count(fmt));
           return false;
         }
 
@@ -1410,7 +1411,7 @@ _linux_dmabuf_surface_from_surf(struct vt_surface_t *surf) {
 
   VT_TRACE(_proto->comp->log,
            "linux_dmabuf.surface_from_surf: created dmabuf surface %p for %p.",
-           dmabuf_surf, surf);
+           (void *)dmabuf_surf, (void *)surf);
   return dmabuf_surf;
 }
 
@@ -1533,7 +1534,7 @@ static bool _dmabuf_buffer_get_dmabuf(struct vt_buffer_t      *buf,
     VT_ERROR(buf->comp->log,
              "Requested dmabuf backing of buffer %p but cannot find dmabuf "
              "attachment",
-             buf)
+             (void *)buf)
     return false;
   }
 
@@ -1624,15 +1625,15 @@ vt_proto_linux_dmabuf_v1_from_buffer_res(struct wl_resource *res) {
                                &_dmabuf_wl_buffer_impl) ||
       wl_resource_get_user_data(res) == NULL) {
     VT_TRACE(_proto->comp->log,
-             "linux_dmabuf.from_buffer_res: invalid resource %p.", res);
+             "linux_dmabuf.from_buffer_res: invalid resource %p.", (void *)res);
     return NULL;
   }
 
   /* 2. Retrieve internal DMABUF buffer handle */
   struct vt_linux_dmabuf_v1_buffer_t *buf = wl_resource_get_user_data(res);
   VT_TRACE(_proto->comp->log,
-           "linux_dmabuf.from_buffer_res: resolved wl_buffer %p to %p.", res,
-           buf);
+           "linux_dmabuf.from_buffer_res: resolved wl_buffer %p to %p.",
+           (void *)res, (void *)buf);
   return buf;
 }
 
@@ -1678,7 +1679,7 @@ bool vt_proto_linux_dmabuf_v1_update_surface_feedback(
         VT_WARN(surf->comp->log,
                 "Failed to build cached DMABUF feedback for output %p; using "
                 "default feedback.",
-                primary_output);
+                (void *)primary_output);
       }
 
       generation = cache->generation;

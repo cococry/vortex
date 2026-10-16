@@ -463,7 +463,7 @@ void vt_surface_frame_done(struct vt_surface_t *surf,
     wl_callback_send_done(cb->res, frame_time_msec);
 
     VT_TRACE(surf->comp->log, "Sent wl_callback done for surf=%p callback=%p",
-             surf, cb);
+             (void *)surf, (void *)cb);
 
     wl_resource_destroy(cb->res);
   }
