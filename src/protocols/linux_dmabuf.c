@@ -1182,7 +1182,7 @@ bool _linux_dmabuf_pack_feedback(
 
     if (!wl_array_add(&tranche_packed->indices, n_entries * sizeof(uint16_t))) {
       VT_ERROR(feedback->comp->log, "Failed to allocate tranche indices array");
-      goto fail_ro_fd;
+      goto fail_packed;
     }
 
     n = 0;
@@ -1198,7 +1198,7 @@ bool _linux_dmabuf_pack_feedback(
                    "Format 0x%" PRIX32 " modifier 0x%" PRIX64
                    " in tranche %u is missing from the global table",
                    fmt->format, mod->mod, i);
-          goto fail_ro_fd;
+          goto fail_packed;
         }
         indices[n] = (uint16_t)index;
         n++;
@@ -1215,10 +1215,13 @@ bool _linux_dmabuf_pack_feedback(
 
   return true;
 
+fail_packed:
+  for (size_t i = 0; i < n_tranches; i++)
+    wl_array_release(&packed->tranches[i].indices);
+  free(packed);
 fail_ro_fd:
   if (ro_fd >= 0)
     close(ro_fd);
-fail_rw_fd:
   if (rw_fd >= 0)
     close(rw_fd);
 fail_all_formats:
