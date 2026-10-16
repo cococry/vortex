@@ -854,7 +854,9 @@ static int _drm_dispatch(int fd, uint32_t mask, void *data) {
     VT_ERROR(drm->comp->log, "DRM event source failed.");
     return -1;
   }
-  if ((mask & WL_EVENT_READABLE) && drmHandleEvent(fd, &drm->evctx) != 0) {
+  // the libseat fd is non-blocking: EAGAIN only means nothing to read yet
+  if ((mask & WL_EVENT_READABLE) && drmHandleEvent(fd, &drm->evctx) != 0 &&
+      errno != EAGAIN) {
     VT_ERROR(drm->comp->log, "Failed to handle DRM event: %s", strerror(errno));
     return -1;
   }
