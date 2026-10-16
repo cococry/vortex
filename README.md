@@ -97,7 +97,7 @@ vortex -bp /usr/lib/vortex/backends/libcustom.so
 ### Environment Variables
 Vortex handles the following environment variables:
 
-| Env | Description | 
+| Env | Description |
 |--------|--------------|
 | `VT_DRM_NO_ATOMIC` | Force legacy DRM/KMS implementation |
 | `VT_DRM_NO_HARDWARE_CURSOR` | Force cursor compositing |
