@@ -33,7 +33,7 @@ systemd-run --unit="$UNIT" --wait --collect \
 	-p TTYReset=yes -p TTYVTDisallocate=yes \
 	-p RuntimeMaxSec="$((TIMEOUT + 30))" \
 	-p WorkingDirectory="$ROOT" \
-	--setenv=TIMEOUT="$TIMEOUT" \
+	--setenv=TIMEOUT="$TIMEOUT" --setenv=VERBOSE="${VERBOSE:-0}" \
 	"$ROOT/scripts/bench-run.sh" "$BUILD" drm "$@" || status=$?
 
 # unit stdout did not reach the journal in testing, read results back
