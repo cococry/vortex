@@ -46,6 +46,16 @@ struct vt_content_update_t {
 
   struct vt_buffer_use_t *buffer_use;
   int                     acquire_fence_fd;
+
+  struct vt_buffer_acquire_source_t *acquire_source;
+};
+
+/* Holds a content update back until resolved, e.g. while a client's GPU work
+ * for the attached buffer has not been submitted yet. destroy runs if the
+ * update dies first. */
+struct vt_content_update_constraint_t {
+  struct wl_list link;
+  void (*destroy)(struct vt_content_update_constraint_t *constraint);
 };
 
 struct vt_content_update_dependency_t {
@@ -69,6 +79,17 @@ bool vt_content_update_add_dependency(struct vt_content_update_t *cu,
                                       struct vt_content_update_t *dependency);
 
 bool vt_content_update_apply_dag(struct vt_content_update_t *root);
+
+// true while cu or an update queued ahead of it is held by a constraint
+bool vt_content_update_waits(const struct vt_content_update_t *cu);
+
+void vt_content_update_add_constraint(
+    struct vt_content_update_t *cu, struct vt_content_update_constraint_t *c);
+
+/* Detaches the constraint and applies whatever became ready. cu may be
+ * destroyed by the time this returns. */
+void vt_content_update_resolve_constraint(
+    struct vt_content_update_t *cu, struct vt_content_update_constraint_t *c);
 
 bool vt_content_update_reaches(struct vt_content_update_t *from,
                                struct vt_content_update_t *target);

@@ -74,6 +74,10 @@ struct vt_drm_crtc_t {
   struct vt_drm_plane_t *plane_cursor;
   struct vt_drm_plane_t *plane_primary;
 
+  /* per CRTC: liftoff writes every plane of its device into each request,
+   * a shared device would drag other CRTCs into per-output commits */
+  struct liftoff_device *liftoff_dev;
+
   bool in_use;
 };
 
@@ -170,11 +174,12 @@ struct vt_drm_backend_state_t {
 
   bool caps[VT_DRM_CAP__COUNT];
 
+  // VT_DRM_NO_DIRECT_SCANOUT: composite every surface
+  bool no_direct_scanout;
+
   struct wl_array sampling_formats;
 
   drmModeRes *res;
-
-  struct liftoff_device *liftoff_dev;
 };
 
 struct vt_drm_backend_master_state_t {
@@ -231,6 +236,14 @@ struct vt_drm_output_state_t {
 
   bool needs_modeset;
   bool flip_inflight;
+
+  // kernel flip timestamps, summarized at teardown
+  struct {
+    uint64_t last_us, worst_us;
+    uint64_t frames, missed;
+    uint64_t direct_layers, direct_fenced;
+    bool     busy;
+  } frame_stats;
   bool modeset_bootstrapped;
   bool renderable_setup;
   bool connector_seen;

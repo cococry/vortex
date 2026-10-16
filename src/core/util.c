@@ -87,14 +87,22 @@ char *vt_util_log_get_filepath() {
     snprintf(path, sizeof(path), "%s/.local/state", home);
     state_home = path;
   }
+  if (!state_home)
+    return NULL;
 
+  // a truncated path would create and log into the wrong directory
   char log_dir[PATH_MAX];
-  snprintf(log_dir, sizeof(log_dir), "%s/%s/logs", state_home, _BRAND_NAME);
+  int  n =
+      snprintf(log_dir, sizeof(log_dir), "%s/%s/logs", state_home, _BRAND_NAME);
+  if (n < 0 || (size_t)n >= sizeof(log_dir))
+    return NULL;
 
   // create directories if they don't exist
   mkdir(state_home, 0755);
+  // shorter than log_dir, so it cannot truncate
   char app_dir[PATH_MAX];
-  snprintf(app_dir, sizeof(app_dir), "%s/%s", state_home, _BRAND_NAME);
+  if (snprintf(app_dir, sizeof(app_dir), "%s/%s", state_home, _BRAND_NAME) < 0)
+    return NULL;
   mkdir(app_dir, 0755);
   mkdir(log_dir, 0755);
 
@@ -104,17 +112,20 @@ char *vt_util_log_get_filepath() {
 
   // scheme: <log_dir>/<appname>-<timestamp>-<pid>.log
   static char logfile[PATH_MAX];
-  snprintf(logfile, sizeof(logfile), "%s/%s-%s-%d.log", log_dir, _BRAND_NAME,
-           timestamp, pid);
+  n = snprintf(logfile, sizeof(logfile), "%s/%s-%s-%d.log", log_dir,
+               _BRAND_NAME, timestamp, pid);
+  if (n < 0 || (size_t)n >= sizeof(logfile))
+    return NULL;
 
   return logfile;
 }
 
 void vt_util_log_header(FILE *stream, log_level_t lvl) {
-  static const char *lvl_str[VT_LL_COUNT] = {"TRACE", "WARNING", "ERROR",
-                                             "FATAL"};
+  static const char *lvl_str[VT_LL_COUNT] = {"TRACE", "INFO", "WARNING",
+                                             "ERROR", "FATAL"};
   static const char *lvl_clr[VT_LL_COUNT] = {
       "\033[1;32m",   // TRACE - bright green
+      "\033[1;36m",   // INFO - bright cyan
       "\033[1;33m",   // WARNING - yellow
       "\033[1;31m",   // ERROR - bright red
       "\033[38;5;88m" // FATAL - dark red

@@ -30,11 +30,13 @@
 #include <libinput.h>
 #include <linux/kd.h>
 #include <linux/vt.h>
+#include <poll.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <xf86drm.h>
@@ -58,6 +60,7 @@
 #include "core/util.h"
 #include "input/wl_seat.h"
 #include "protocols/linux_dmabuf.h"
+#include "protocols/linux_drm_syncobj.h"
 #include "protocols/linux_explicit_sync.h"
 #include "protocols/wl_output.h"
 #include "protocols/wl_shm.h"
@@ -286,12 +289,45 @@ static void _drm_complete_pending(struct vt_drm_output_state_t *drm_output) {
   }
 }
 
+static void _drm_frame_stats_record(struct vt_drm_output_state_t *drm_output,
+                                    unsigned int sec, unsigned int usec,
+                                    bool busy) {
+  uint64_t now = (uint64_t)sec * 1000000 + usec;
+  uint32_t hz = drm_output->mode.vrefresh;
+
+  // only a frame wanted right after the last one can miss a vblank
+  if (drm_output->frame_stats.busy && drm_output->frame_stats.last_us && hz) {
+    uint64_t interval = now - drm_output->frame_stats.last_us;
+    uint64_t expected = 1000000 / hz;
+    if (interval > expected + expected / 2)
+      drm_output->frame_stats.missed++;
+    if (interval > drm_output->frame_stats.worst_us)
+      drm_output->frame_stats.worst_us = interval;
+  }
+
+  drm_output->frame_stats.frames++;
+  drm_output->frame_stats.last_us = now;
+  drm_output->frame_stats.busy = busy;
+}
+
+static void _drm_frame_stats_log(struct vt_drm_output_state_t *drm_output) {
+  struct vt_compositor_t *comp = drm_output->base->backend->comp;
+
+  VT_INFO(comp->log,
+          "CRTC %u (%u Hz): %" PRIu64 " of %" PRIu64
+          " frames missed a vblank, worst interval %.2f ms, %" PRIu64
+          " direct scanout layers (%" PRIu64 " with IN_FENCE_FD).",
+          drm_output->crtc->id, drm_output->mode.vrefresh,
+          drm_output->frame_stats.missed, drm_output->frame_stats.frames,
+          drm_output->frame_stats.worst_us / 1000.0,
+          drm_output->frame_stats.direct_layers,
+          drm_output->frame_stats.direct_fenced);
+}
+
 static void _drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec,
                                    unsigned int usec, void *data) {
   (void)fd;
   (void)frame;
-  (void)sec;
-  (void)usec;
 
   struct vt_output_t *output = (struct vt_output_t *)data;
   if (!output || !output->user_data || !output->backend ||
@@ -323,6 +359,9 @@ static void _drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec,
     uint32_t t = vt_util_get_time_msec();
     vt_comp_frame_done(output->backend->comp, output, t);
   }
+
+  if (frame_commit)
+    _drm_frame_stats_record(drm_output, sec, usec, output->needs_repaint);
 
   if (output->needs_repaint) {
     vt_comp_schedule_repaint(output->backend->comp, output);
@@ -695,9 +734,63 @@ fail:
   return false;
 }
 
+#define VT_DRM_SCANOUT_BACKOFF_FRAMES 60
+
+static bool _drm_scanout_fence_ready(struct vt_surface_t    *surface,
+                                     struct vt_buffer_use_t *use) {
+  int fd = vt_buffer_use_acquire_fence(use);
+  if (fd >= 0) {
+    struct pollfd pfd = {.fd = fd, .events = POLLIN};
+    if (poll(&pfd, 1, 0) <= 0) {
+      surface->scanout_backoff = VT_DRM_SCANOUT_BACKOFF_FRAMES;
+      return false;
+    }
+  }
+
+  if (surface->scanout_backoff > 0) {
+    surface->scanout_backoff--;
+    return false;
+  }
+  return true;
+}
+
+static bool _drm_any_flip_inflight(struct vt_drm_backend_state_t *drm) {
+  struct vt_output_t *output;
+  wl_list_for_each(output, &drm->outputs, link_local) {
+    if (output->user_data &&
+        BACKEND_DATA(output, struct vt_drm_output_state_t)->flip_inflight)
+      return true;
+  }
+  return false;
+}
+
+/* libseat hands out a non-blocking fd: reading before the flip event
+ * arrives fails with EAGAIN, so wait for it instead */
+static bool _drm_drain_flips(struct vt_drm_backend_state_t *drm) {
+  while (_drm_any_flip_inflight(drm)) {
+    struct pollfd pfd = {.fd = drm->drm_fd, .events = POLLIN};
+    int           ret = poll(&pfd, 1, 1000);
+    if (ret < 0 && errno == EINTR)
+      continue;
+    if (ret <= 0) {
+      VT_WARN(drm->comp->log, "Waiting for DRM flips failed: %s",
+              ret == 0 ? "timed out" : strerror(errno));
+      return false;
+    }
+    if (drmHandleEvent(drm->drm_fd, &drm->evctx) != 0 && errno != EAGAIN) {
+      VT_WARN(drm->comp->log, "Failed to drain DRM events: %s",
+              strerror(errno));
+      return false;
+    }
+  }
+  return true;
+}
+
 static bool _drm_suspend(struct vt_drm_backend_state_t *backend) {
   if (!backend || !backend->comp || backend->drm_fd < 0 || !backend->impl)
     return false;
+
+  vt_proto_linux_drm_syncobj_v1_log_stats();
 
   VT_TRACE(backend->comp->log, "Suspending seat session (VT switch away)...");
 
@@ -706,27 +799,8 @@ static bool _drm_suspend(struct vt_drm_backend_state_t *backend) {
     output->needs_repaint = false;
   }
 
-  bool any_inflight;
-  do {
-    any_inflight = false;
-    wl_list_for_each(output, &backend->outputs, link_local) {
-      if (!output->user_data)
-        continue;
-
-      struct vt_drm_output_state_t *drm_output =
-          BACKEND_DATA(output, struct vt_drm_output_state_t);
-      if (drm_output->flip_inflight) {
-        any_inflight = true;
-        break;
-      }
-    }
-
-    if (any_inflight && drmHandleEvent(backend->drm_fd, &backend->evctx) != 0) {
-      VT_ERROR(backend->comp->log, "Failed to drain DRM events: %s",
-               strerror(errno));
-      return false;
-    }
-  } while (any_inflight);
+  if (!_drm_drain_flips(backend))
+    return false;
 
   wl_list_for_each(output, &backend->outputs, link_local) {
     if (!output->user_data)
@@ -734,6 +808,9 @@ static bool _drm_suspend(struct vt_drm_backend_state_t *backend) {
 
     struct vt_drm_output_state_t *drm_output =
         BACKEND_DATA(output, struct vt_drm_output_state_t);
+
+    // a VT switch often ends a run, report what was measured so far
+    _drm_frame_stats_log(drm_output);
 
     if (!backend->impl->disable(backend, drm_output)) {
       VT_WARN(backend->comp->log,
@@ -744,6 +821,8 @@ static bool _drm_suspend(struct vt_drm_backend_state_t *backend) {
     _drm_release_all_layers(output);
     drm_output->needs_modeset = true;
     drm_output->flip_inflight = false;
+    // time spent switched away is not a missed vblank
+    drm_output->frame_stats.busy = false;
   }
 
   return true;
@@ -798,7 +877,9 @@ static int _drm_dispatch(int fd, uint32_t mask, void *data) {
     VT_ERROR(drm->comp->log, "DRM event source failed.");
     return -1;
   }
-  if ((mask & WL_EVENT_READABLE) && drmHandleEvent(fd, &drm->evctx) != 0) {
+  // the libseat fd is non-blocking: EAGAIN only means nothing to read yet
+  if ((mask & WL_EVENT_READABLE) && drmHandleEvent(fd, &drm->evctx) != 0 &&
+      errno != EAGAIN) {
     VT_ERROR(drm->comp->log, "Failed to handle DRM event: %s", strerror(errno));
     return -1;
   }
@@ -869,22 +950,12 @@ static bool _drm_init_for_device(struct vt_compositor_t        *comp,
 
   bool use_atomic =
       getenv("VT_DRM_NO_ATOMIC") ? false : drm->caps[VT_DRM_CAP_ATOMIC_MODESET];
+  // the bench forwards unset variables as empty strings
+  const char *no_direct = getenv("VT_DRM_NO_DIRECT_SCANOUT");
+  drm->no_direct_scanout = no_direct && *no_direct;
   drm->impl = use_atomic ? &drm_kms_atomic_impl : &drm_kms_legacy_impl;
 
   _drm_update_tearing_cap(drm);
-
-  int liftoff_fd = dup(drm->drm_fd);
-  if (liftoff_fd < 0) {
-    VT_ERROR(comp->log, "Failed to dup DRM fd for libliftoff.");
-    return false;
-  }
-
-  drm->liftoff_dev = liftoff_device_create(liftoff_fd);
-  if (!drm->liftoff_dev) {
-    close(liftoff_fd);
-    VT_ERROR(comp->log, "Failed to create liftoff device.");
-    return false;
-  }
 
   /* Renderer is only initialized on the main DRM device */
   if (!drm_master->main_drm && comp->renderer->impl.is_handle_renderable(
@@ -1109,17 +1180,56 @@ static bool _drm_plane_init(struct vt_drm_backend_state_t *drm,
       return false;
   }
 
-  if (drm->impl->atomic && plane->type != DRM_PLANE_TYPE_CURSOR) {
-    plane->liftoff_plane = liftoff_plane_create(drm->liftoff_dev, plane->id);
-    if (!plane->liftoff_plane) {
-      VT_ERROR(comp->log,
-               "Failed to create liftoff plane for plane %p (plane ID: %d)",
-               plane, plane->id);
-      return false;
+  return true;
+}
+
+static void _drm_liftoff_finish(struct vt_drm_backend_state_t *drm) {
+  struct vt_drm_crtc_t *crtc;
+  wl_array_for_each(crtc, &drm->crtcs) {
+    // also destroys the device's planes
+    liftoff_device_destroy(crtc->liftoff_dev);
+    crtc->liftoff_dev = NULL;
+  }
+
+  struct vt_drm_plane_t *plane;
+  wl_array_for_each(plane, &drm->planes) {
+    plane->liftoff_plane = NULL;
+  }
+}
+
+static bool _drm_liftoff_init(struct vt_drm_backend_state_t *drm) {
+  struct vt_drm_crtc_t *crtc;
+  wl_array_for_each(crtc, &drm->crtcs) {
+    // liftoff dups the fd itself
+    crtc->liftoff_dev = liftoff_device_create(drm->drm_fd);
+    if (!crtc->liftoff_dev) {
+      VT_ERROR(drm->comp->log, "Failed to create liftoff device for CRTC %u.",
+               crtc->id);
+      goto fail;
+    }
+
+    struct vt_drm_plane_t *plane;
+    wl_array_for_each(plane, &drm->planes) {
+      // a plane shared between CRTCs goes to the first one only
+      if (plane->type == DRM_PLANE_TYPE_CURSOR || plane->liftoff_plane ||
+          !(plane->possible_crtcs & (1u << crtc->index)))
+        continue;
+
+      plane->liftoff_plane = liftoff_plane_create(crtc->liftoff_dev, plane->id);
+      if (!plane->liftoff_plane) {
+        VT_ERROR(drm->comp->log,
+                 "Failed to create liftoff plane %u for CRTC %u.", plane->id,
+                 crtc->id);
+        goto fail;
+      }
     }
   }
 
   return true;
+
+fail:
+  _drm_liftoff_finish(drm);
+  return false;
 }
 
 static bool _drm_planes_init(struct vt_drm_backend_state_t *drm) {
@@ -1188,8 +1298,8 @@ static bool _drm_init_crtc(struct vt_compositor_t *comp,
   if (!crtc)
     return false;
 
-  crtc->id = id;
-  crtc->index = index;
+  // wl_array_add memory is uninitialized
+  *crtc = (struct vt_drm_crtc_t){.id = id, .index = index};
 
   if (!drm_kms_props_get_crtc(drm_fd, id, crtc->props)) {
     memset(crtc->props, 0, sizeof(crtc->props));
@@ -1232,7 +1342,7 @@ static bool _drm_init_crtcs_and_planes(struct vt_drm_backend_state_t *drm) {
     goto fail_resources;
   }
 
-  assert(drm->crtcs.size / sizeof(*crtcs) == res->count_crtcs);
+  assert(drm->crtcs.size / sizeof(*crtcs) == (size_t)res->count_crtcs);
 
   memset(crtcs, 0, crtc_bytes);
 
@@ -1263,6 +1373,12 @@ static bool _drm_init_crtcs_and_planes(struct vt_drm_backend_state_t *drm) {
     }
   } else {
     _drm_assign_crtc_planes(drm);
+
+    if (drm->impl->atomic && !_drm_liftoff_init(drm)) {
+      VT_WARN(comp->log, "Failed to initialize libliftoff, using legacy KMS.");
+      drm->impl = &drm_kms_legacy_impl;
+      _drm_update_tearing_cap(drm);
+    }
   }
 
   drmModeFreeResources(res);
@@ -1604,19 +1720,19 @@ static bool _drm_create_output_for_device(struct vt_drm_backend_state_t *drm,
     VT_WARN(comp->log,
             "CRTC %" PRIu32
             " does not have a cursor plane. Using software cursor on output %p",
-            drm_output->crtc->id, output);
+            drm_output->crtc->id, (void *)output);
     output->cursor_mode = VT_CURSOR_MODE_SOFTWARE;
   } else if (getenv("VT_DRM_NO_HARDWARE_CURSOR")) {
     VT_TRACE(comp->log,
              "Hardware cursor was disabled by the environment. Using software "
              "cursor on output %p",
-             output);
+             (void *)output);
     output->cursor_mode = VT_CURSOR_MODE_SOFTWARE;
   } else {
     VT_TRACE(comp->log,
              "CRTC %" PRIu32
              " has a cursor plane. Using hardware cursor on output %p",
-             drm_output->crtc->id, output);
+             drm_output->crtc->id, (void *)output);
     output->cursor_mode = VT_CURSOR_MODE_HARDWARE;
   }
 
@@ -1694,7 +1810,8 @@ static bool _drm_create_output_for_device(struct vt_drm_backend_state_t *drm,
 
   if (drm->impl->atomic) {
     if (!(drm_output->liftoff_output =
-              liftoff_output_create(drm->liftoff_dev, drm_output->crtc->id))) {
+              liftoff_output_create(drm_output->crtc->liftoff_dev,
+                                    drm_output->crtc->id))) {
       VT_ERROR(comp->log, "Failed to create liftoff output for output.");
       return false;
     }
@@ -1870,7 +1987,7 @@ static void _drm_on_drm_change(struct wl_listener *listener, void *data) {
 
   struct vt_drm_backend_state_t *drm;
   wl_list_for_each(drm, &master->backends, link) {
-    if (!drm->dev || !drm->dev->path || !event->device_node_name)
+    if (!drm->dev || !drm->dev->path[0] || !event->device_node_name)
       continue;
 
     const char *node = strrchr(drm->dev->path, '/');
@@ -2081,7 +2198,7 @@ static bool _drm_import_cursor_image(struct vt_drm_output_state_t *drm_output,
     return false;
   }
 
-  if (!shm.data || shm.width == 0 || shm.height == 0 || shm.stride == 0)
+  if (!shm.data || shm.width <= 0 || shm.height <= 0 || shm.stride <= 0)
     return false;
 
   /* Pick viable supported hardware cursor size */
@@ -2091,7 +2208,8 @@ static bool _drm_import_cursor_image(struct vt_drm_output_state_t *drm_output,
     uint32_t w = plane->cursor_sizes[i].width;
     uint32_t h = plane->cursor_sizes[i].height;
 
-    if (w < shm.width || h < shm.height)
+    // shm dims checked positive above
+    if (w < (uint32_t)shm.width || h < (uint32_t)shm.height)
       continue;
 
     if (bo_width == 0 || (uint64_t)w * h < (uint64_t)bo_width * bo_height) {
@@ -2138,7 +2256,7 @@ static bool _drm_import_cursor_image(struct vt_drm_output_state_t *drm_output,
   switch (shm.format) {
 
   case WL_SHM_FORMAT_ARGB8888:
-    for (uint32_t y = 0; y < shm.height; y++) {
+    for (int32_t y = 0; y < shm.height; y++) {
       memcpy(dst + (size_t)y * dst_stride, src + (size_t)y * shm.stride,
              (size_t)shm.width * 4);
     }
@@ -2146,13 +2264,13 @@ static bool _drm_import_cursor_image(struct vt_drm_output_state_t *drm_output,
   case WL_SHM_FORMAT_XRGB8888:
     /* XRGB -> ARGB. Cursor planes require meaningful alpha, so we force
      * fully opaque alpha */
-    for (uint32_t y = 0; y < shm.height; y++) {
+    for (int32_t y = 0; y < shm.height; y++) {
       const uint32_t *src_row =
           (const uint32_t *)(src + (size_t)y * shm.stride);
 
       uint32_t *dst_row = (uint32_t *)(dst + (size_t)y * dst_stride);
 
-      for (uint32_t x = 0; x < shm.width; x++)
+      for (int32_t x = 0; x < shm.width; x++)
         dst_row[x] = src_row[x] | 0xff000000u;
     }
     break;
@@ -2295,25 +2413,9 @@ static bool _drm_terminate_for_device(struct vt_drm_backend_state_t *drm) {
     return false;
   struct vt_compositor_t *comp = drm->comp;
 
-  if (!comp->suspended && drm->drm_fd >= 0) {
-    bool any_inflight;
-    do {
-      any_inflight = false;
-      struct vt_output_t *output;
-      wl_list_for_each(output, &drm->outputs, link_local) {
-        if (output->user_data &&
-            BACKEND_DATA(output, struct vt_drm_output_state_t)->flip_inflight) {
-          any_inflight = true;
-          break;
-        }
-      }
-      if (any_inflight && drmHandleEvent(drm->drm_fd, &drm->evctx) != 0) {
-        VT_WARN(comp->log, "Failed to drain DRM events during teardown: %s",
-                strerror(errno));
-        break;
-      }
-    } while (any_inflight);
-  }
+  // teardown goes on regardless, the warning is the only signal
+  if (!comp->suspended && drm->drm_fd >= 0)
+    _drm_drain_flips(drm);
 
   if (drm->res)
     drmModeFreeResources(drm->res);
@@ -2321,18 +2423,24 @@ static bool _drm_terminate_for_device(struct vt_drm_backend_state_t *drm) {
 
   struct vt_output_t *output, *tmp;
   wl_list_for_each_safe(output, tmp, &drm->outputs, link_local) {
+    if (output->user_data)
+      _drm_frame_stats_log(BACKEND_DATA(output, struct vt_drm_output_state_t));
     _drm_destroy_output_for_device(drm, output);
   }
 
-  if (drm->impl->atomic)
-    liftoff_device_destroy(drm->liftoff_dev);
+  // main thread load next to the vblank stats tells CPU from GPU stalls
+  struct rusage ru;
+  if (getrusage(RUSAGE_SELF, &ru) == 0)
+    VT_INFO(comp->log, "CPU time: user %.2fs, sys %.2fs.",
+            ru.ru_utime.tv_sec + ru.ru_utime.tv_usec / 1e6,
+            ru.ru_stime.tv_sec + ru.ru_stime.tv_usec / 1e6);
+  vt_proto_linux_drm_syncobj_v1_log_stats();
+
+  _drm_liftoff_finish(drm);
 
   struct vt_drm_plane_t *plane;
   wl_array_for_each(plane, &drm->planes) {
     vt_drm_format_array_free(&plane->formats);
-    if (plane->liftoff_plane) {
-      liftoff_plane_destroy(plane->liftoff_plane);
-    }
     free(plane->cursor_sizes);
   }
   wl_array_release(&drm->planes);
@@ -2496,8 +2604,8 @@ static bool _drm_output_sync_refresh(struct vt_drm_output_state_t *drm_output) {
   struct vt_output_mode_t *mode;
   wl_list_for_each(mode, &output->physical.modes, link) {
     mode->flags &= ~WL_OUTPUT_MODE_CURRENT;
-    if (mode->width == output->width && mode->height == output->height &&
-        mode->refresh == refresh) {
+    if ((uint32_t)mode->width == output->width &&
+        (uint32_t)mode->height == output->height && mode->refresh == refresh) {
       mode->flags |= WL_OUTPUT_MODE_CURRENT;
     }
   }
@@ -2664,17 +2772,17 @@ static bool _drm_handle_frame_for_device(struct vt_drm_backend_state_t *drm,
 
     if (!vt_output_track_presented_surface(output, layer->surface)) {
       VT_ERROR(comp->log, "Failed to track directly scanned-out surface %p.",
-               layer->surface);
+               (void *)layer->surface);
       continue;
     }
 
     VT_TRACE(comp->log, "OUTPUT: tracking presented surface=%p output=%p",
-             layer->surface, output);
+             (void *)layer->surface, (void *)output);
   }
 
   VT_TRACE(
       comp->log, "real commit succeeded output=%p event_pending=%d layers=%zu",
-      output, commit.event_pending,
+      (void *)output, commit.event_pending,
       drm_output->pending_layers.size / sizeof(struct vt_drm_layer_state_t));
 
   drm_output->pending_valid = true;
@@ -2968,6 +3076,14 @@ bool backend_init_drm(struct vt_backend_t *backend) {
     vt_dmabuf_feedback_fini(default_feedback);
   }
 
+  // timelines import into the main device, the one the renderer waits on
+  struct vt_renderer_t *r = backend->comp->renderer;
+  if (drm_master->main_drm && r && r->impl.supports_explicit_sync &&
+      r->impl.supports_explicit_sync(r)) {
+    vt_proto_linux_drm_syncobj_v1_init(backend->comp,
+                                       drm_master->main_drm->drm_fd);
+  }
+
   if (backend->comp->have_proto_dmabuf_explicit_sync) {
     const uint32_t dmabuf_explicit_sync_ver = 2;
     if (!vt_proto_linux_explicit_sync_v1_init(backend->comp,
@@ -3094,18 +3210,6 @@ bool backend_is_dmabuf_importable_drm(struct vt_backend_t     *backend,
     return false;
 
   return drm_prime_test_import(master->main_drm->drm_fd, attr);
-}
-
-static struct vt_drm_plane_t *
-_drm_plane_from_id(struct vt_drm_backend_state_t *drm, uint32_t plane_id) {
-  struct vt_drm_plane_t *plane;
-
-  wl_array_for_each(plane, &drm->planes) {
-    if (plane->id == plane_id)
-      return plane;
-  }
-
-  return NULL;
 }
 
 static bool
@@ -3280,6 +3384,16 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
 
     struct vt_dmabuf_attr_t attr = {0};
 
+    if (drm->no_direct_scanout)
+      goto composited;
+
+    /* A KMS flip holds on IN_FENCE_FD, so an unfinished client frame would
+     * stall the whole output. Compositing waits on the GPU instead. Back off
+     * for a while so a client that is late half the time does not flap
+     * between plane and composition every frame. */
+    if (!_drm_scanout_fence_ready(layer->surface, use))
+      goto composited;
+
     /* 1. Prove layer has a DMABUF */
     if (!vt_buffer_get_dmabuf(use->buf, &attr)) {
       VT_TRACE(backend->comp->log,
@@ -3366,7 +3480,7 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
     }
 
     if (!drm_liftoff_set_layer_props(test->liftoff_layer, layer, test->fb.id,
-                                     use->acquire_fence_fd, i)) {
+                                     vt_buffer_use_acquire_fence(use), i)) {
       VT_TRACE(backend->comp->log,
                "layer %zu surface=%p rejected from liftoff test: "
                "failed to set liftoff layer properties.",
@@ -3488,7 +3602,11 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
       if (!planned->use)
         goto fail_plan;
 
-      planned->acquire_fence_fd = test->use->acquire_fence_fd;
+      planned->acquire_fence_fd = vt_buffer_use_acquire_fence(test->use);
+
+      drm_output->frame_stats.direct_layers++;
+      if (planned->acquire_fence_fd >= 0)
+        drm_output->frame_stats.direct_fenced++;
     } else {
       /*
        * the renderer is going to draw this surface into the compositor FB.
@@ -3570,7 +3688,7 @@ bool backend_build_surface_feedback(struct vt_backend_t         *backend,
     VT_ERROR(drm_master->comp->log,
              "Cannot build surface feedback for surface %p, output %p; CRTC or"
              "primary plane is not available",
-             surface, output);
+             (void *)surface, (void *)output);
     return false;
   }
 
@@ -3584,7 +3702,7 @@ bool backend_build_surface_feedback(struct vt_backend_t         *backend,
     VT_ERROR(drm_master->comp->log,
              "Failed to create direct-scanout tranche for surface feedback of "
              "surface %p, output %p",
-             surface, output);
+             (void *)surface, (void *)output);
     return false;
   }
 
@@ -3594,7 +3712,7 @@ bool backend_build_surface_feedback(struct vt_backend_t         *backend,
 
   VT_TRACE(drm_master->comp->log,
            "Surface feedback for surface=%p output=%p: direct scanout tranche",
-           surface, output);
+           (void *)surface, (void *)output);
 
   _log_dmabuf_tranche(drm_master->comp, scanout_tranche,
                       drm_master->main_drm->dev->path);
@@ -3606,7 +3724,7 @@ bool backend_build_surface_feedback(struct vt_backend_t         *backend,
     VT_ERROR(drm_master->comp->log,
              "Failed to create fallback tranche for surface feedback of "
              "surface %p, output %p",
-             surface, output);
+             (void *)surface, (void *)output);
     return false;
   }
 
@@ -3619,7 +3737,7 @@ bool backend_build_surface_feedback(struct vt_backend_t         *backend,
 
   VT_TRACE(drm_master->comp->log,
            "Surface feedback for surface=%p output=%p: composite tranche",
-           surface, output);
+           (void *)surface, (void *)output);
 
   _log_dmabuf_tranche(drm_master->comp, fallback_tranche,
                       drm_master->main_drm->dev->path);
@@ -3685,7 +3803,7 @@ bool backend_build_surface_feedback_drm(struct vt_backend_t         *backend,
     VT_ERROR(drm_master->comp->log,
              "Cannot build surface feedback for surface %p, output %p; CRTC or"
              "primary plane is not available",
-             surface, output);
+             (void *)surface, (void *)output);
     return false;
   }
 
@@ -3699,7 +3817,7 @@ bool backend_build_surface_feedback_drm(struct vt_backend_t         *backend,
     VT_ERROR(drm_master->comp->log,
              "Failed to create direct-scanout tranche for surface feedback of "
              "surface %p, output %p",
-             surface, output);
+             (void *)surface, (void *)output);
     return false;
   }
 
@@ -3709,7 +3827,7 @@ bool backend_build_surface_feedback_drm(struct vt_backend_t         *backend,
   if (!_drm_output_scanout_formats(drm_output->drm_backend, drm_output,
                                    &scanout_formats)) {
     VT_ERROR(drm_master->comp->log,
-             "Failed to collect scanout formats for output %p", output);
+             "Failed to collect scanout formats for output %p", (void *)output);
     return false;
   }
 
@@ -3724,7 +3842,7 @@ bool backend_build_surface_feedback_drm(struct vt_backend_t         *backend,
 
   VT_TRACE(drm_master->comp->log,
            "Surface feedback for surface=%p output=%p: direct scanout tranche",
-           surface, output);
+           (void *)surface, (void *)output);
 
   _log_dmabuf_tranche(drm_master->comp, scanout_tranche,
                       drm_master->main_drm->dev->path);
@@ -3736,7 +3854,7 @@ bool backend_build_surface_feedback_drm(struct vt_backend_t         *backend,
     VT_ERROR(drm_master->comp->log,
              "Failed to create fallback tranche for surface feedback of "
              "surface %p, output %p",
-             surface, output);
+             (void *)surface, (void *)output);
     return false;
   }
 
@@ -3749,7 +3867,7 @@ bool backend_build_surface_feedback_drm(struct vt_backend_t         *backend,
 
   VT_TRACE(drm_master->comp->log,
            "Surface feedback for surface=%p output=%p: composite tranche",
-           surface, output);
+           (void *)surface, (void *)output);
 
   _log_dmabuf_tranche(drm_master->comp, fallback_tranche,
                       drm_master->main_drm->dev->path);

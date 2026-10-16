@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -48,6 +49,17 @@
         }                                                                      \
       } while (0);                                                             \
     }                                                                          \
+  }
+
+// shown without --verbose, for summaries rather than problems
+#define VT_INFO(logstate, ...)                                                 \
+  if (!(logstate).quiet) {                                                     \
+    do {                                                                       \
+      vt_util_log_header((logstate).stream, VT_LL_INFO);                       \
+      fprintf((logstate).stream, "%s: ", _SUBSYS_NAME);                        \
+      fprintf((logstate).stream, __VA_ARGS__);                                 \
+      fprintf((logstate).stream, "\n");                                        \
+    } while (0);                                                               \
   }
 
 #define VT_WARN(logstate, ...)                                                 \
@@ -140,11 +152,12 @@
     wl_client_post_no_memory((client));                                        \
   } while (0)
 
-#define VT_MAX(a, b) a > b ? a : b
-#define VT_MIN(a, b) a < b ? a : b
+#define VT_MAX(a, b) ((a) > (b) ? (a) : (b))
+#define VT_MIN(a, b) ((a) < (b) ? (a) : (b))
 
 typedef enum {
   VT_LL_TRACE = 0,
+  VT_LL_INFO,
   VT_LL_WARN,
   VT_LL_ERR,
   VT_LL_FATAL,
@@ -180,9 +193,11 @@ void vt_util_arena_destroy(struct vt_arena_t *a);
 
 void vt_util_emit_signal(struct wl_signal *signal, void *data);
 
+struct vt_compositor_t;
+struct vt_output_t;
+
 int vt_util_allocate_shm_file(struct vt_compositor_t *comp, size_t size);
 
-struct vt_compositor_t;
 bool vt_util_allocate_shm_rwro_pair(struct vt_compositor_t *comp, size_t size,
                                     int *rw_fd, int *ro_fd);
 

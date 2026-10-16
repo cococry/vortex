@@ -77,7 +77,7 @@ vt_session_get_native_handle_render_node(struct vt_session_t *session,
 // ====== DRM ONLY =======
 // =======================
 struct vt_device_t *vt_session_device_from_fd_drm(struct vt_session_t *session,
-                                                  uint32_t             fd);
+                                                  int32_t              fd);
 
 uint32_t vt_session_enumerate_cards_drm(struct vt_session_t *session,
                                         struct vt_device_t **devs,

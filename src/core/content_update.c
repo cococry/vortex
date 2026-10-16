@@ -71,8 +71,6 @@ static void _content_update_dependency_destroy(
 static bool _content_update_prepare_buffer(struct vt_content_update_t *cu) {
   assert(cu && cu->surf && cu->surf->comp && cu->surf->comp->renderer);
 
-  struct vt_renderer_t *r = cu->surf->comp->renderer;
-
   if (!cu->state.buffer_attached)
     return true;
 
@@ -115,19 +113,14 @@ static bool _content_update_is_candidate(const struct vt_content_update_t *cu) {
   if (!cu)
     return false;
 
-  if (cu->type != VT_CU_DESYNC)
+  if (cu->type != VT_CU_DESYNC || wl_list_empty(&cu->surf->content_updates))
     return false;
 
-  const struct vt_content_update_t *it;
-  wl_list_for_each(it, &cu->surf->content_updates, queue_link) {
-    if (it == cu)
-      return true;
-
-    if (it->type == VT_CU_SYNC)
-      return false;
-  }
-
-  return false;
+  // anything queued ahead is unapplied (sync, or held by a constraint), and
+  // applying past it would show frames out of order
+  const struct vt_content_update_t *head =
+      wl_container_of(cu->surf->content_updates.next, head, queue_link);
+  return head == cu;
 }
 
 static bool
@@ -147,7 +140,7 @@ _content_update_prepare_dag_recursive(struct vt_content_update_t *cu) {
   /* If a content update fails any part of preperation, it must not be applied.
    */
   {
-    uint32_t _w, _h;
+    int32_t _w, _h;
     if (!vt_surface_compute_final_size(cu->surf, cu->state.buffer_scale,
                                        cu->state.buffer_transform, &_w, &_h)) {
       return false;
@@ -329,7 +322,7 @@ vt_content_update_create(struct vt_surface_t               *surf,
   VT_TRACE(surf->comp->log,
            "Creating content update for surface %p with pending buffer=%p, "
            "buffer_release=%p, buffer_attached=%s",
-           surf, state->buf, state->buffer_release,
+           (void *)surf, (void *)state->buf, (void *)state->buffer_release,
            state->buffer_attached ? "true" : "false");
 
   vt_surface_pending_state_move(&update->state, state);
@@ -359,13 +352,16 @@ bool vt_content_update_finish_create(struct vt_content_update_t *cu) {
 
     if (!cu->buffer_use)
       return false;
+
+    cu->buffer_use->acquire_source = cu->acquire_source;
+    cu->acquire_source = NULL;
   }
 
   VT_TRACE(cu->surf->comp->log,
            "Finished creating content update cu=%p for "
            "surface=%p with "
            "buffer use=%p",
-           cu, cu->surf, cu->buffer_use);
+           (void *)cu, (void *)cu->surf, (void *)cu->buffer_use);
 
   return true;
 }
@@ -383,6 +379,13 @@ void vt_content_update_destroy(struct vt_content_update_t *cu) {
     _content_update_dependency_destroy(it);
   }
 
+  struct vt_content_update_constraint_t *c, *c_tmp;
+  wl_list_for_each_safe(c, c_tmp, &cu->constraints, link) {
+    wl_list_remove(&c->link);
+    wl_list_init(&c->link);
+    c->destroy(c);
+  }
+
   vt_surface_pending_state_fini(&cu->state);
 
   if (cu->queued) {
@@ -393,6 +396,9 @@ void vt_content_update_destroy(struct vt_content_update_t *cu) {
     close(cu->acquire_fence_fd);
     cu->acquire_fence_fd = -1;
   }
+
+  if (cu->acquire_source)
+    cu->acquire_source->destroy(cu->acquire_source);
 
   if (cu->buffer_use)
     vt_buffer_use_unref(&cu->buffer_use);
@@ -427,45 +433,109 @@ bool vt_content_update_apply_dag(struct vt_content_update_t *root) {
 
   struct vt_compositor_t *comp = root->surf->comp;
 
-  VT_TRACE(comp->log, "Content update apply DAG: root=%p type=%d", root,
+  VT_TRACE(comp->log, "Content update apply DAG: root=%p type=%d", (void *)root,
            root->type);
 
   if (!_content_update_is_candidate(root)) {
     VT_TRACE(comp->log, "Content update apply DAG: root=%p NOT CANDIDATE",
-             root);
+             (void *)root);
     return false;
   }
 
-  VT_TRACE(comp->log, "Content update apply DAG: root=%p is candidate", root);
+  VT_TRACE(comp->log, "Content update apply DAG: root=%p is candidate",
+           (void *)root);
 
   if (!_content_update_is_ready(root)) {
-    VT_TRACE(comp->log, "Content update apply DAG: root=%p not ready", root);
+    VT_TRACE(comp->log, "Content update apply DAG: root=%p not ready",
+             (void *)root);
     return false;
   }
 
-  VT_TRACE(comp->log, "Content update DAG root=%p is ready", root);
+  VT_TRACE(comp->log, "Content update DAG root=%p is ready", (void *)root);
 
   if (!_content_update_prepare_dag_recursive(root)) {
     VT_WARN(comp->log, "Content update apply DAG: root=%p prepare failed",
-            root);
+            (void *)root);
     return false;
   }
 
-  VT_TRACE(comp->log, "Content update DAG: root=%p prepared", root);
+  VT_TRACE(comp->log, "Content update DAG: root=%p prepared", (void *)root);
 
   if (!_content_update_apply_dag_recursive(root)) {
     log_fatal(comp->log,
               "Content update DAG: root=%p apply failed with valid prepare",
-              root);
+              (void *)root);
     return false;
   }
 
   VT_TRACE(comp->log, "Content update apply DAG: root=%p applied, retiring",
-           root);
+           (void *)root);
 
   _content_update_retire_applied_dag(root);
 
   return true;
+}
+
+bool vt_content_update_waits(const struct vt_content_update_t *cu) {
+  assert(cu && cu->surf);
+
+  const struct vt_content_update_t *it;
+  wl_list_for_each(it, &cu->surf->content_updates, queue_link) {
+    if (!_content_update_is_ready(it))
+      return true;
+    if (it == cu)
+      break;
+  }
+  return false;
+}
+
+void vt_content_update_add_constraint(
+    struct vt_content_update_t *cu, struct vt_content_update_constraint_t *c) {
+  assert(cu && c && c->destroy);
+  wl_list_insert(&cu->constraints, &c->link);
+}
+
+static void _content_update_collect_dependant_surfaces(
+    struct vt_content_update_t *cu, struct wl_array *surfs) {
+  struct vt_content_update_dependency_t *edge;
+  wl_list_for_each(edge, &cu->dependants, dependant_link) {
+    struct vt_surface_t **slot = wl_array_add(surfs, sizeof(*slot));
+    if (slot)
+      *slot = edge->cu->surf;
+    _content_update_collect_dependant_surfaces(edge->cu, surfs);
+  }
+}
+
+// applies queue heads in order until one is not ready yet
+static void _content_update_flush_surface(struct vt_surface_t *surf) {
+  while (!wl_list_empty(&surf->content_updates)) {
+    struct vt_content_update_t *head =
+        wl_container_of(surf->content_updates.next, head, queue_link);
+    if (!vt_content_update_apply_dag(head))
+      return;
+  }
+}
+
+void vt_content_update_resolve_constraint(
+    struct vt_content_update_t *cu, struct vt_content_update_constraint_t *c) {
+  assert(cu && c);
+
+  wl_list_remove(&c->link);
+  wl_list_init(&c->link);
+
+  // applying retires updates, so gather the affected surfaces up front
+  struct wl_array surfs;
+  wl_array_init(&surfs);
+  struct vt_surface_t **slot = wl_array_add(&surfs, sizeof(*slot));
+  if (slot)
+    *slot = cu->surf;
+  _content_update_collect_dependant_surfaces(cu, &surfs);
+
+  wl_array_for_each(slot, &surfs) {
+    _content_update_flush_surface(*slot);
+  }
+
+  wl_array_release(&surfs);
 }
 
 bool vt_content_update_reaches(struct vt_content_update_t *from,

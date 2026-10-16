@@ -176,6 +176,7 @@ static void _get_data_device(struct wl_client   *client,
 
 static void _client_source_accept(struct vt_data_source_t *source,
                                   uint32_t serial, const char *mime_type) {
+  (void)serial;
   wl_data_source_send_target(source->resource, mime_type);
 }
 
@@ -191,6 +192,7 @@ static void _client_source_cancel(struct vt_data_source_t *source) {
 
 static void _data_source_offer(struct wl_client   *client,
                                struct wl_resource *resource, const char *type) {
+  (void)client;
   struct vt_data_source_t *source = wl_resource_get_user_data(resource);
   char                   **p;
 
@@ -203,12 +205,14 @@ static void _data_source_offer(struct wl_client   *client,
 
 static void _data_source_destroy(struct wl_client   *client,
                                  struct wl_resource *resource) {
+  (void)client;
   wl_resource_destroy(resource);
 }
 
 static void _data_source_set_actions(struct wl_client   *client,
                                      struct wl_resource *resource,
                                      uint32_t            dnd_actions) {
+  (void)client;
   struct vt_data_source_t *source = wl_resource_get_user_data(resource);
 
   if (source->actions_set) {
@@ -239,6 +243,7 @@ static void _data_source_set_actions(struct wl_client   *client,
 
 static void _manager_bind(struct wl_client *client, void *data,
                           uint32_t version, uint32_t id) {
+  (void)data;
   struct wl_resource *resource;
 
   resource = wl_resource_create(client, &wl_data_device_manager_interface,

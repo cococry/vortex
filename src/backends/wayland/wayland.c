@@ -196,11 +196,13 @@ static const struct xdg_toplevel_listener parent_toplevel_listener = {
     .close = _wl_parent_xdg_toplevel_close,
 };
 
+// bound at version 1: done/scale/name/description are never sent
 static const struct wl_output_listener output_listener = {
-    _wl_parent_output_geometry, _wl_parent_output_mode};
+    .geometry = _wl_parent_output_geometry, .mode = _wl_parent_output_mode};
 
 static void output_sync_callback(void *data, struct wl_callback *callback,
                                  uint32_t unused) {
+  (void)unused;
   parent_physical_output_t *output = data;
 
   assert(output->sync_cb == callback);
@@ -292,6 +294,8 @@ static void _output_handle_render_resize(struct vt_output_t *output, int32_t w,
 void _wl_parent_xdg_toplevel_configure(void                *data,
                                        struct xdg_toplevel *toplevel, int32_t w,
                                        int32_t h, struct wl_array *states) {
+  (void)toplevel;
+  (void)states;
   struct vt_output_t *output = data;
   if (!output || !output->user_data)
     return;
@@ -301,7 +305,7 @@ void _wl_parent_xdg_toplevel_configure(void                *data,
     return;
 
   // Handle resize output in renderer
-  if (w != output->width || h != output->height) {
+  if (w != (int32_t)output->width || h != (int32_t)output->height) {
     _output_handle_render_resize(output, w, h);
   }
 }
@@ -338,14 +342,17 @@ void _wl_parent_xdg_surface_configure(void *data, struct xdg_surface *surf,
   int h = output->height > 0 ? output->height : _WL_DEFAULT_OUTPUT_HEIGHT;
 
   // Handle resize output in renderer
-  if (w != output->width || h != output->height) {
+  if (w != (int32_t)output->width || h != (int32_t)output->height) {
     _output_handle_render_resize(output, w, h);
   }
 }
 
 void _wl_parent_xdg_toplevel_close(void *data, struct xdg_toplevel *toplevel) {
+  (void)toplevel;
   struct vt_output_t *output = data;
-  (output->backend, output);
+  // destroying the output here leaves its pending frame callbacks dangling,
+  // closing any nested window ends the session instead
+  output->backend->comp->running = false;
 }
 
 int _wl_parent_dispatch(int fd, uint32_t mask, void *data) {
@@ -489,7 +496,6 @@ static void _wl_parent_output_geometry(
     const char *make, const char *model, int32_t transform) {
   parent_physical_output_t *output = data;
 
-  static int32_t x_ptr = 0;
   output->x = x;
   output->y = y;
 
@@ -545,6 +551,7 @@ static void _wl_parent_output_mode(void             *data,
                                    struct wl_output *wl_output_proxy,
                                    uint32_t flags, int32_t width,
                                    int32_t height, int32_t refresh) {
+  (void)wl_output_proxy;
   parent_physical_output_t *output = data;
 
   struct vt_output_mode_t *mode =
@@ -557,6 +564,7 @@ static void _wl_parent_output_mode(void             *data,
 
 bool _wl_backend_create_output(struct vt_backend_t *backend,
                                struct vt_output_t *output, void *data) {
+  (void)data;
   if (!backend || !output)
     return false;
 
@@ -647,9 +655,6 @@ bool _wl_backend_destroy_output(struct vt_backend_t *backend,
                                 struct vt_output_t  *output) {
   if (!output || !output->user_data)
     return false;
-
-  wayland_backend_state_t *wl_backend =
-      BACKEND_DATA(backend, wayland_backend_state_t);
 
   wayland_output_state_t *wl_output =
       BACKEND_DATA(output, wayland_output_state_t);
@@ -835,8 +840,6 @@ bool backend_init_wl(struct vt_backend_t *backend) {
 
   free(shm_formats);
 
-  const uint8_t dmabuf_ver = 4, dmabuf_explicit_sync_ver = 2;
-
   if (backend->comp->have_proto_dmabuf) {
     // initialize the dmabuf protocol with default feedback
     struct vt_dmabuf_feedback_t *default_feedback =
@@ -922,6 +925,7 @@ bool backend_implement_wl(struct vt_compositor_t *comp) {
 
   // No session in Wayland nested
   memset(&comp->session->impl, 0, sizeof(comp->session->impl));
+  return true;
 }
 
 bool backend_handle_frame_wl(struct vt_backend_t *backend,
@@ -930,9 +934,6 @@ bool backend_handle_frame_wl(struct vt_backend_t *backend,
     return false;
 
   wayland_backend_state_t *wl = BACKEND_DATA(backend, wayland_backend_state_t);
-
-  wayland_output_state_t *wl_output =
-      BACKEND_DATA(output, wayland_output_state_t);
 
   if (!_wl_parent_flush(wl))
     return false;
@@ -965,6 +966,7 @@ bool backend_terminate_wl(struct vt_backend_t *backend) {
 }
 bool backend_prepare_output_frame_wl(struct vt_backend_t *backend,
                                      struct vt_output_t  *output) {
+  (void)backend;
   wayland_output_state_t *wl_output =
       BACKEND_DATA(output, wayland_output_state_t);
 

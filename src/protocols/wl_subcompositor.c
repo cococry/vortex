@@ -77,6 +77,7 @@ static const struct vt_surface_role_impl_t subsurface_role_impl = {
 
 static void _subcompositor_bind(struct wl_client *client, void *data,
                                 uint32_t version, uint32_t id) {
+  (void)version;
 
   struct vt_compositor_t *comp = data;
 
@@ -92,6 +93,7 @@ static void _subcompositor_bind(struct wl_client *client, void *data,
 
 static void _subcompositor_destroy(struct wl_client   *client,
                                    struct wl_resource *resource) {
+  (void)client;
   wl_resource_destroy(resource);
 }
 

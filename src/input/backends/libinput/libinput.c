@@ -38,12 +38,6 @@
 
 #define _SUBSYS_NAME "INPUT/LIBINPUT"
 
-#define _VT_XKB_GET_MOD_MASK(keymap, name)                                     \
-  ({                                                                           \
-    int idx = xkb_keymap_mod_get_index((keymap), (name));                      \
-    idx == XKB_MOD_INVALID ? 0 : (1u << idx);                                  \
-  })
-
 struct vt_input_backend_li_t {
   struct libinput        *input;
   struct vt_compositor_t *comp;
@@ -74,6 +68,7 @@ static const struct libinput_interface input_interface = {
 
 int32_t _vt_li_open_restricted(const char *path, int32_t flags,
                                void *user_data) {
+  (void)flags;
   struct vt_session_t *session = (struct vt_session_t *)user_data;
 
   struct vt_device_t *dev = VT_ALLOC(session->comp, sizeof(*dev));
@@ -101,6 +96,8 @@ void _vt_li_close_restricted(int32_t fd, void *user_data) {
 }
 
 int32_t _vt_li_input_dispatch(int fd, uint32_t mask, void *data) {
+  (void)fd;
+  (void)mask;
   struct vt_input_backend_li_t *li = (struct vt_input_backend_li_t *)data;
   libinput_dispatch(li->input);
 
@@ -286,11 +283,8 @@ bool _vt_li_input_handle_pointer_scroll_event(
 }
 
 bool _vt_li_init_xkb(struct vt_input_backend_li_t *li) {
-  struct xkb_rule_names rules = {.rules = "evdev",
-                                 .model = "pc105",
-                                 .layout = "us",
-                                 .variant = NULL,
-                                 .options = NULL};
+  // NULL fields make xkbcommon read XKB_DEFAULT_*, then evdev/pc105/us
+  struct xkb_rule_names rules = {0};
 
   struct vt_input_backend_t *backend = li->comp->input_backend;
 
@@ -314,15 +308,15 @@ bool _vt_li_init_xkb(struct vt_input_backend_li_t *li) {
   }
 
   li->comp->input_backend->mods.shift =
-      _VT_XKB_GET_MOD_MASK(backend->keymap, XKB_MOD_NAME_SHIFT);
+      vt_input_xkb_mod_mask(backend->keymap, XKB_MOD_NAME_SHIFT);
   li->comp->input_backend->mods.ctrl =
-      _VT_XKB_GET_MOD_MASK(backend->keymap, XKB_MOD_NAME_CTRL);
+      vt_input_xkb_mod_mask(backend->keymap, XKB_MOD_NAME_CTRL);
   li->comp->input_backend->mods.alt =
-      _VT_XKB_GET_MOD_MASK(backend->keymap, XKB_MOD_NAME_ALT);
+      vt_input_xkb_mod_mask(backend->keymap, XKB_MOD_NAME_ALT);
   li->comp->input_backend->mods.super =
-      _VT_XKB_GET_MOD_MASK(backend->keymap, XKB_MOD_NAME_LOGO);
+      vt_input_xkb_mod_mask(backend->keymap, XKB_MOD_NAME_LOGO);
   li->comp->input_backend->mods.caps =
-      _VT_XKB_GET_MOD_MASK(backend->keymap, XKB_MOD_NAME_CAPS);
+      vt_input_xkb_mod_mask(backend->keymap, XKB_MOD_NAME_CAPS);
 
   return true;
 }
@@ -464,6 +458,7 @@ bool input_backend_suspend_li(struct vt_input_backend_t *backend) {
       BACKEND_DATA(backend, struct vt_input_backend_li_t);
   libinput_suspend(li->input);
   VT_TRACE(backend->comp->log, "Suspended libinput.");
+  return true;
 }
 
 bool input_backend_resume_li(struct vt_input_backend_t *backend) {
@@ -471,6 +466,10 @@ bool input_backend_resume_li(struct vt_input_backend_t *backend) {
     return false;
   struct vt_input_backend_li_t *li =
       BACKEND_DATA(backend, struct vt_input_backend_li_t);
-  libinput_resume(li->input);
+  if (libinput_resume(li->input) != 0) {
+    VT_ERROR(backend->comp->log, "Failed to resume libinput.");
+    return false;
+  }
   VT_TRACE(backend->comp->log, "Resumed libinput.");
+  return true;
 }

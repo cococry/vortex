@@ -27,6 +27,12 @@
 
 #include "../core/core_types.h"
 
+static inline uint32_t vt_input_xkb_mod_mask(struct xkb_keymap *keymap,
+                                             const char        *name) {
+  xkb_mod_index_t idx = xkb_keymap_mod_get_index(keymap, name);
+  return idx == XKB_MOD_INVALID ? 0 : (1u << idx);
+}
+
 enum vt_input_backend_platform_t {
   VT_INPUT_LIBINPUT = 0,
   VT_INPUT_WAYLAND,

@@ -22,7 +22,10 @@
 
 #include <EGL/eglplatform.h>
 #include <cglm/types-struct.h>
+#include <assert.h>
+#include <poll.h>
 #include <stdbool.h>
+#include <string.h>
 #include <unistd.h>
 #include <wayland-util.h>
 
@@ -100,13 +103,16 @@ struct egl_backend_state_t {
   bool has_swap_buffers_with_damage_khr;
   bool has_swap_buffers_with_damage_ext;
 
+  // acquire fences seen at draw time, and how many had not signaled yet
+  uint64_t fenced_draws, fence_pending_draws;
+
   RnState *render;
 
   struct wl_array formats;
 };
 
 struct egl_output_state_t {
-  GLint fbo_id, fbo_tex_id, rbo_tex_depth;
+  GLuint fbo_id, fbo_tex_id, rbo_tex_depth;
 
   struct wl_list rendered_buffer_uses;
 };
@@ -133,8 +139,8 @@ static bool _egl_create_renderer(struct vt_renderer_t      *renderer,
                                  enum vt_backend_platform_t platform,
                                  void *native_handle, bool log_error);
 
-static void _egl_buffer_attachment_destroy(struct vt_buffer_t *buf, void *owner,
-                                           void *data);
+static void _egl_buffer_attachment_destroy(struct vt_buffer_t *buf,
+                                           const void *owner, void *data);
 
 static bool _egl_track_rendered_buffer_use(struct vt_output_t     *output,
                                            struct vt_buffer_use_t *use);
@@ -183,6 +189,7 @@ bool _egl_gl_import_buffer_shm(struct vt_renderer_t *r, struct vt_shm_attr_t *a,
                                struct vt_buffer_t      *buf,
                                struct vt_egl_buffer_t  *egl_buf,
                                const pixman_region32_t *damage) {
+  (void)damage;
   if (!buf || !a || !r || !egl_buf || !a->data)
     return false;
 
@@ -209,8 +216,10 @@ bool _egl_gl_import_buffer_shm(struct vt_renderer_t *r, struct vt_shm_attr_t *a,
 
   void *data = a->data;
 
-  bool need_buf_regen = egl_buf->tex.id == 0 || egl_buf->tex.width != width ||
-                        egl_buf->tex.height != height;
+  // width/height checked positive above
+  bool need_buf_regen = egl_buf->tex.id == 0 ||
+                        egl_buf->tex.width != (uint32_t)width ||
+                        egl_buf->tex.height != (uint32_t)height;
 
   if (egl_buf->tex.id == 0)
     glGenTextures(1, &egl_buf->tex.id);
@@ -251,6 +260,7 @@ bool _egl_gl_import_buffer_dmabuf(struct vt_renderer_t    *r,
                                   struct vt_dmabuf_attr_t *a,
                                   struct vt_buffer_t      *buf,
                                   struct vt_egl_buffer_t  *egl_buf) {
+  (void)buf;
 
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
 
@@ -416,9 +426,6 @@ bool _egl_pick_config_from_format(struct vt_compositor_t     *c,
 bool _egl_pick_config(struct vt_compositor_t     *comp,
                       struct egl_backend_state_t *egl,
                       struct vt_backend_t        *backend) {
-  EGLint attribs[32];
-  int    i = 0;
-
   switch (backend->platform) {
   case VT_BACKEND_DRM_GBM: {
     // DRM/GBM backend: use DRM fourcc to pick config
@@ -483,7 +490,7 @@ bool _egl_buffer_use_is_ready(struct vt_renderer_t   *renderer,
   if (!renderer || !use)
     return false;
 
-  if (use->acquire_fence_fd < 0)
+  if (vt_buffer_use_acquire_fence(use) < 0)
     return true;
 
   struct egl_backend_state_t *egl =
@@ -492,6 +499,12 @@ bool _egl_buffer_use_is_ready(struct vt_renderer_t   *renderer,
   if (!renderer->comp->have_proto_dmabuf_explicit_sync ||
       !egl->has_explicit_sync_support)
     return true;
+
+  // a pending fence here makes the composite wait on the client's GPU work
+  struct pollfd pfd = {.fd = use->acquire_fence_fd, .events = POLLIN};
+  egl->fenced_draws++;
+  if (poll(&pfd, 1, 0) == 0)
+    egl->fence_pending_draws++;
 
   EGLint attribs[] = {
       EGL_SYNC_NATIVE_FENCE_FD_ANDROID,
@@ -638,7 +651,8 @@ bool _egl_gl_create_output_fbo(struct vt_output_t *output, uint32_t w,
 
   if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE) {
     VT_ERROR(output->backend->comp->log,
-             "FBO creation for output %p (%u%u) failed.\n", output, w, h);
+             "FBO creation for output %p (%u%u) failed.\n", (void *)output, w,
+             h);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
     return false;
   }
@@ -718,8 +732,8 @@ bool _egl_create_renderer(struct vt_renderer_t      *renderer,
   return true;
 }
 
-static void _egl_buffer_attachment_destroy(struct vt_buffer_t *buf, void *owner,
-                                           void *data) {
+static void _egl_buffer_attachment_destroy(struct vt_buffer_t *buf,
+                                           const void *owner, void *data) {
   (void)owner;
   (void)buf;
 
@@ -743,7 +757,7 @@ static void _egl_buffer_attachment_destroy(struct vt_buffer_t *buf, void *owner,
   if (egl_buf->tex.id)
     glDeleteTextures(1, &egl_buf->tex.id);
 
-  VT_TRACE(r->comp->log, "Deleted OpenGL texture for buffer %p", buf);
+  VT_TRACE(r->comp->log, "Deleted OpenGL texture for buffer %p", (void *)buf);
 
   if (egl_buf->egl_img != EGL_NO_IMAGE_KHR) {
     eglDestroyImageKHR_ptr(egl->egl_dsp, (EGLImageKHR)egl_buf->egl_img);
@@ -754,7 +768,8 @@ static void _egl_buffer_attachment_destroy(struct vt_buffer_t *buf, void *owner,
   egl_buf->tex.width = 0;
   egl_buf->tex.height = 0;
 
-  VT_TRACE(r->comp->log, "Destroyed EGL Image handle for buffer %p", buf);
+  VT_TRACE(r->comp->log, "Destroyed EGL Image handle for buffer %p",
+           (void *)buf);
 }
 
 static bool _egl_track_rendered_buffer_use(struct vt_output_t     *output,
@@ -924,10 +939,12 @@ bool renderer_is_handle_renderable_egl(struct vt_renderer_t *renderer,
 static bool _egl_load_dmabuf_query_procs(void) {
   if (!eglQueryDmaBufFormatsEXT_ptr)
     eglQueryDmaBufFormatsEXT_ptr =
-        (void *)eglGetProcAddress("eglQueryDmaBufFormatsEXT");
+        (PFNEGLQUERYDMABUFFORMATSEXTPROC)eglGetProcAddress(
+            "eglQueryDmaBufFormatsEXT");
   if (!eglQueryDmaBufModifiersEXT_ptr)
     eglQueryDmaBufModifiersEXT_ptr =
-        (void *)eglGetProcAddress("eglQueryDmaBufModifiersEXT");
+        (PFNEGLQUERYDMABUFMODIFIERSEXTPROC)eglGetProcAddress(
+            "eglQueryDmaBufModifiersEXT");
 
   return eglQueryDmaBufFormatsEXT_ptr && eglQueryDmaBufModifiersEXT_ptr;
 }
@@ -942,7 +959,7 @@ static bool _egl_query_dmabuf_formats(struct vt_compositor_t *comp,
   // Query the available DMABUF formats
   EGLint n_formats = 0;
   /*
-    /* we set max_formats to 0 to count the formats without retrieving them:
+     we set max_formats to 0 to count the formats without retrieving them:
    *      If <max_formats> is 0, no formats are returned, but the total number
           of formats is returned in <num_formats>, and no error is generated.
     */
@@ -1176,7 +1193,7 @@ bool renderer_setup_renderable_output_egl(struct vt_renderer_t *r,
   vt_comp_schedule_repaint(r->comp, output);
 
   VT_TRACE(r->comp->log, "Created EGL render surface %p for output %p (%ux%u)",
-           egl_surf, output, output->width, output->height);
+           egl_surf, (void *)output, output->width, output->height);
   return true;
 }
 
@@ -1293,7 +1310,8 @@ static bool _egl_import_buffer_by_deduced_type(struct vt_renderer_t    *r,
     return _egl_gl_import_buffer_shm(r, &shm_attr, buf, egl_buf, damage);
   }
 
-  VT_WARN(r->comp->log, "Unknown buffer import type for buffer %p", buf);
+  VT_WARN(r->comp->log, "Unknown buffer import type for buffer %p",
+          (void *)buf);
   return false;
 }
 
@@ -1305,7 +1323,7 @@ bool renderer_import_buffer_egl(struct vt_renderer_t    *r,
 
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
 
-  VT_TRACE(r->comp->log, "Importing buffer to handle %p", buf);
+  VT_TRACE(r->comp->log, "Importing buffer to handle %p", (void *)buf);
 
   struct vt_egl_buffer_t *egl_buf = _egl_get_or_create_egl_buffer(r, buf);
 
@@ -1313,8 +1331,13 @@ bool renderer_import_buffer_egl(struct vt_renderer_t    *r,
                                             egl->has_dmabuf_support);
 }
 
-bool renderer_destroy_buffer_texture_egl(struct vt_renderer_t *r,
-                                         struct vt_buffer_t   *buf) {}
+bool renderer_supports_explicit_sync_egl(struct vt_renderer_t *r) {
+  if (!r || !r->user_data)
+    return false;
+  struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
+  return r->comp->have_proto_dmabuf_explicit_sync &&
+         egl->has_explicit_sync_support;
+}
 
 bool renderer_drop_context_egl(struct vt_renderer_t *r) {
   if (!r || !r->impl.drop_context || !r->user_data) {
@@ -1344,6 +1367,8 @@ void renderer_set_vsync_egl(struct vt_renderer_t *r, bool vsync) {
 
 void renderer_set_clear_color_egl(struct vt_renderer_t *r,
                                   struct vt_output_t *output, uint32_t col) {
+  (void)r;
+  (void)output;
   vec4s zto = rn_color_to_zto(rn_color_from_hex(col));
   glClearColor(zto.r, zto.g, zto.b, zto.a);
   glClear(GL_COLOR_BUFFER_BIT);
@@ -1353,9 +1378,6 @@ void renderer_stencil_damage_pass_egl(struct vt_renderer_t *r,
                                       struct vt_output_t   *output) {
   if (!r || !output || !output->user_data_render)
     return;
-
-  struct egl_output_state_t *egl_output =
-      (struct egl_output_state_t *)output->user_data_render;
 
   glEnable(GL_STENCIL_TEST);
 
@@ -1374,9 +1396,6 @@ void renderer_composite_pass_egl(struct vt_renderer_t *r,
   if (!r || !output || !output->user_data_render)
     return;
 
-  struct egl_output_state_t *egl_output =
-      (struct egl_output_state_t *)output->user_data_render;
-
   // ========== PASS 2: SCENE ==========
   glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
   glStencilMask(0x00);
@@ -1387,7 +1406,7 @@ void renderer_composite_pass_egl(struct vt_renderer_t *r,
 void renderer_begin_scene_egl(struct vt_renderer_t *r,
                               struct vt_output_t   *output) {
   if (!output)
-    ;
+    return;
   if (!r || !r->impl.begin_scene || !r->user_data) {
     VT_ERROR(r->comp->log,
              "Renderer backend not initialized before beginning frame.");
@@ -1443,7 +1462,7 @@ void renderer_draw_surface_egl(struct vt_renderer_t *r,
                                struct vt_box_t      *dst_box) {
   VT_TRACE(r->comp->log,
            "DRAW ENTER: surf=%p current_use=%p mapped=%d effective_mapped=%d",
-           surface, surface ? surface->current_buf_use : NULL,
+           (void *)surface, (void *)(surface ? surface->current_buf_use : NULL),
            surface ? surface->mapped : 0,
            surface ? vt_surface_effectively_mapped(surface) : 0);
 
@@ -1453,7 +1472,7 @@ void renderer_draw_surface_egl(struct vt_renderer_t *r,
   if (!surface->current_buf_use) {
     VT_TRACE(r->comp->log,
              "Not rendering surface %p, no active buffer use on surface.",
-             surface);
+             (void *)surface);
     return;
   }
 
@@ -1473,7 +1492,7 @@ void renderer_draw_surface_egl(struct vt_renderer_t *r,
 
   if (!renderer_import_buffer_egl(r, use->buf, &surface->applied.damage)) {
     VT_ERROR(r->comp->log, "Failed to import buffer %p for surface %p.",
-             use->buf, surface);
+             (void *)use->buf, (void *)surface);
     return;
   }
 
@@ -1500,24 +1519,26 @@ void renderer_draw_surface_egl(struct vt_renderer_t *r,
     return;
 
   vec4s uv_rect = (vec4s){
-      (float)src_box->x / (float)surface->applied.width,
-      (float)src_box->y / (float)surface->applied.height,
-      (float)(src_box->x + src_box->width) / (float)surface->applied.width,
-      (float)(src_box->y + src_box->height) / (float)surface->applied.height,
+      .x = (float)src_box->x / (float)surface->applied.width,
+      .y = (float)src_box->y / (float)surface->applied.height,
+      .z = (float)(src_box->x + src_box->width) / (float)surface->applied.width,
+      .w = (float)(src_box->y + src_box->height) /
+           (float)surface->applied.height,
   };
 
-  rn_image_render_adv(egl->render, (vec2s){dst_box->x, dst_box->y},
-                      (vec2s){dst_box->width, dst_box->height}, 0.0f, RN_WHITE,
-                      egl_buf->tex, uv_rect, false, RN_NO_COLOR, 0.0f, 0.0f);
+  rn_image_render_adv(egl->render, (vec2s){.x = dst_box->x, .y = dst_box->y},
+                      (vec2s){.x = dst_box->width, .y = dst_box->height}, 0.0f,
+                      RN_WHITE, egl_buf->tex, uv_rect, false, RN_NO_COLOR, 0.0f,
+                      0.0f);
 
   if (!vt_output_track_presented_surface(output, surface)) {
     VT_ERROR(r->comp->log, "Failed to track presented surface %p on output %p.",
-             surface, output);
+             (void *)surface, (void *)output);
   }
 
   if (!_egl_track_rendered_buffer_use(output, use)) {
     VT_ERROR(r->comp->log, "Failed to track EGL buffer use %p (buffer: %p).",
-             use, buf);
+             (void *)use, (void *)buf);
   }
 
   surface->damaged = false;
@@ -1526,8 +1547,9 @@ void renderer_draw_surface_egl(struct vt_renderer_t *r,
            "Presented surface %p "
            "src=[x:%d y:%d w:%u h:%u] "
            "dst=[x:%d y:%d w:%u h:%u].",
-           surface, src_box->x, src_box->y, src_box->width, src_box->height,
-           dst_box->x, dst_box->y, dst_box->width, dst_box->height);
+           (void *)surface, src_box->x, src_box->y, src_box->width,
+           src_box->height, dst_box->x, dst_box->y, dst_box->width,
+           dst_box->height);
 }
 
 void renderer_draw_surface_simple_egl(struct vt_renderer_t *r,
@@ -1551,9 +1573,10 @@ void renderer_draw_image_egl(struct vt_renderer_t *r,
                              struct vt_output_t *output, uint32_t tex_id,
                              uint32_t width, uint32_t height, float x,
                              float y) {
+  (void)output;
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
 
-  rn_image_render(egl->render, (vec2s){x, y}, RN_WHITE,
+  rn_image_render(egl->render, (vec2s){.x = x, .y = y}, RN_WHITE,
                   (RnTexture){.id = tex_id, .width = width, .height = height});
 }
 void renderer_draw_rect_egl(struct vt_renderer_t *r, float x, float y, float w,
@@ -1565,12 +1588,13 @@ void renderer_draw_rect_egl(struct vt_renderer_t *r, float x, float y, float w,
   }
 
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
-  rn_rect_render(egl->render, (vec2s){x, y}, (vec2s){w, h},
+  rn_rect_render(egl->render, (vec2s){.x = x, .y = y}, (vec2s){.x = w, .y = h},
                  rn_color_from_hex(col));
 }
 
 void renderer_end_scene_egl(struct vt_renderer_t *r,
                             struct vt_output_t   *output) {
+  (void)output;
   if (!r || !r->impl.end_scene || !r->user_data) {
     VT_ERROR(r->comp->log,
              "Renderer backend not initialized before ending frame.");
@@ -1613,21 +1637,21 @@ void renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,
   GLenum gl_err = glGetError();
   if (gl_err != GL_NO_ERROR) {
     VT_ERROR(r->comp->log,
-             "glBlitFramebuffer failed for output %p: GL error 0x%x", output,
-             gl_err);
+             "glBlitFramebuffer failed for output %p: GL error 0x%x",
+             (void *)output, gl_err);
     return;
   }
 
   if (!_egl_record_surface_release_fences(r, output)) {
     VT_ERROR(r->comp->log,
              "Cannot record surface release fences after render for output %p.",
-             output);
+             (void *)output);
   }
 
   if (!eglSwapBuffers(egl->egl_dsp, output->render_surface)) {
     VT_ERROR(r->comp->log,
-             "eglSwapBuffers failed for output %p: EGL error 0x%x", output,
-             eglGetError());
+             "eglSwapBuffers failed for output %p: EGL error 0x%x",
+             (void *)output, eglGetError());
     return;
   }
 
@@ -1643,6 +1667,11 @@ bool renderer_destroy_egl(struct vt_renderer_t *r) {
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
 
   vt_drm_format_array_free(&egl->formats);
+
+  VT_INFO(r->comp->log,
+          "%" PRIu64 " draws waited on an acquire fence, %" PRIu64
+          " of them not yet signaled.",
+          egl->fenced_draws, egl->fence_pending_draws);
 
   rn_terminate(egl->render);
 

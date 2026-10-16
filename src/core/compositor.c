@@ -130,7 +130,8 @@ void _vt_comp_commit_handler(void *data) {
       return;
     }
 
-    VT_TRACE(c->log, "Pending repaint on output %p got satisfied.", output);
+    VT_TRACE(c->log, "Pending repaint on output %p got satisfied.",
+             (void *)output);
   }
 
   if (output->cursor_dirty) {
@@ -160,7 +161,7 @@ void vt_comp_frame_done(struct vt_compositor_t *c, struct vt_output_t *output,
     free(entry);
   }
 
-  VT_TRACE(c->log, "Sent frame callbacks for output %p.", output);
+  VT_TRACE(c->log, "Sent frame callbacks for output %p.", (void *)output);
 }
 
 void vt_comp_frame_done_all(struct vt_compositor_t *c, uint32_t t) {
@@ -262,9 +263,12 @@ const char *_vt_comp_handle_cmd_flags(struct vt_compositor_t *c, int argc,
       if (!flag)
         continue;
       if (_flag_cmp(flag, "--logfile", "-lf")) {
-        c->log.stream = fopen(vt_util_log_get_filepath(), "a");
-        if (c->log.stream) {
-          setvbuf(c->log.stream, NULL, _IONBF, 0);
+        // keep the current stream on failure, log macros never check NULL
+        const char *logpath = vt_util_log_get_filepath();
+        FILE       *stream = logpath ? fopen(logpath, "a") : NULL;
+        if (stream) {
+          setvbuf(stream, NULL, _IONBF, 0);
+          c->log.stream = stream;
         } else {
           perror("log fopen");
         }
@@ -458,7 +462,9 @@ void _vt_comp_load_backend(struct vt_compositor_t *c, const char *backend_name,
     VT_ERROR(c->log, "Backend name is too long.");
     return;
   }
-  backend_implement_func_t sym_ptr = dlsym(_vt_comp_dl_handle, sym);
+  // POSIX-sanctioned way to turn dlsym's void * into a function pointer
+  backend_implement_func_t sym_ptr;
+  *(void **)&sym_ptr = dlsym(_vt_comp_dl_handle, sym);
 
   if (!sym_ptr) {
     dlclose(_vt_comp_dl_handle);
@@ -522,7 +528,8 @@ void _vt_comp_wl_region_handle_resource_destroy(struct wl_resource *resource) {
   if (!r)
     return;
 
-  VT_TRACE(r->comp->log, "region.destroy_resoure: destroying region %p", r);
+  VT_TRACE(r->comp->log, "region.destroy_resoure: destroying region %p",
+           (void *)r);
   pixman_region32_fini(&r->region);
   free(r);
 }
@@ -563,17 +570,20 @@ void _vt_comp_wl_surface_create_region(struct wl_client   *client,
   wl_resource_set_implementation(res, &region_impl, region,
                                  _vt_comp_wl_region_handle_resource_destroy);
 
-  VT_TRACE(comp->log, "compositor.create_region: created region %p", region);
+  VT_TRACE(comp->log, "compositor.create_region: created region %p",
+           (void *)region);
 }
 
 void _vt_comp_wl_region_destroy(struct wl_client   *client,
                                 struct wl_resource *resource) {
+  (void)client;
   wl_resource_destroy(resource);
 }
 
 void _vt_comp_wl_region_add(struct wl_client   *client,
                             struct wl_resource *resource, int32_t x, int32_t y,
                             int32_t width, int32_t height) {
+  (void)client;
   struct vt_region_t *r = resource ? wl_resource_get_user_data(resource) : NULL;
   if (!r)
     return;
@@ -585,6 +595,7 @@ void _vt_comp_wl_region_add(struct wl_client   *client,
 void _vt_comp_wl_region_subtract(struct wl_client   *client,
                                  struct wl_resource *resource, int32_t x,
                                  int32_t y, int32_t width, int32_t height) {
+  (void)client;
   struct vt_region_t *r = resource ? wl_resource_get_user_data(resource) : NULL;
   if (!r)
     return;
@@ -607,38 +618,6 @@ static void _vt_comp_schedule_output_commit(struct vt_compositor_t *comp,
       wl_event_loop_add_idle(comp->wl.evloop, _vt_comp_commit_handler, output);
 }
 
-static void _wl_region_add(struct wl_client   *client,
-                           struct wl_resource *resource, int32_t x, int32_t y,
-                           int32_t width, int32_t height) {
-  struct vt_region_t *r = resource ? wl_resource_get_user_data(resource) : NULL;
-  if (!r)
-    return;
-  if (width <= 0 || height <= 0)
-    return;
-  pixman_region32_union_rect(&r->region, &r->region, x, y, width, height);
-}
-
-static void _wl_region_subtract(struct wl_client   *client,
-                                struct wl_resource *resource, int32_t x,
-                                int32_t y, int32_t width, int32_t height) {
-  struct vt_region_t *r = resource ? wl_resource_get_user_data(resource) : NULL;
-  if (!r)
-    return;
-  if (width <= 0 || height <= 0)
-    return;
-  pixman_region32_t rect;
-  pixman_region32_init_rect(&rect, x, y, width, height);
-  pixman_region32_subtract(&r->region, &r->region, &rect);
-  pixman_region32_fini(&rect);
-}
-
-static void _wl_region_handle_destroy(struct wl_resource *resource) {
-  struct vt_region_t *r = resource ? wl_resource_get_user_data(resource) : NULL;
-  if (!r)
-    return;
-  pixman_region32_fini(&r->region);
-  free(r);
-}
 bool _vt_comp_wl_init(struct vt_compositor_t *c) {
   if (!c)
     return false;
@@ -838,6 +817,9 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
   case VT_BACKEND_WAYLAND:
     input_backend = VT_INPUT_WAYLAND;
     break;
+  case VT_BACKEND_SURFACELESS:
+    // headless: no input devices to drive
+    break;
   }
   vt_input_implement(c->input_backend, input_backend);
 
@@ -893,9 +875,23 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
   return true;
 }
 
+static int _vt_comp_handle_quit_signal(int sig, void *data) {
+  struct vt_compositor_t *c = data;
+  VT_TRACE(c->log, "Caught signal %d (%s), shutting down.", sig,
+           strsignal(sig));
+  c->running = false;
+  return 0;
+}
+
 void vt_comp_run(struct vt_compositor_t *c) {
   if (!c || !c->wl.evloop || !c->wl.dsp)
     return;
+
+  // leave through vt_comp_terminate so the socket and lock get removed
+  struct wl_event_source *sig_term = wl_event_loop_add_signal(
+      c->wl.evloop, SIGTERM, _vt_comp_handle_quit_signal, c);
+  struct wl_event_source *sig_int = wl_event_loop_add_signal(
+      c->wl.evloop, SIGINT, _vt_comp_handle_quit_signal, c);
 
   c->running = true;
   VT_TRACE(c->log, "Entering main event loop...");
@@ -908,6 +904,11 @@ void vt_comp_run(struct vt_compositor_t *c) {
     }
     wl_display_flush_clients(c->wl.dsp);
   }
+
+  if (sig_term)
+    wl_event_source_remove(sig_term);
+  if (sig_int)
+    wl_event_source_remove(sig_int);
 }
 
 bool vt_comp_terminate(struct vt_compositor_t *c) {
@@ -964,9 +965,9 @@ void vt_comp_schedule_repaint(struct vt_compositor_t *c,
   if (!c || !output || !c->backend || !c->wl.evloop)
     return;
 
+  // clients keep committing while switched away, resume repaints everything
   if (c->suspended) {
-    VT_WARN(c->log,
-            "Trying to schedule repaint while compositor is suspended.");
+    VT_TRACE(c->log, "Dropping repaint request while suspended.");
     return;
   }
 
@@ -976,7 +977,7 @@ void vt_comp_schedule_repaint(struct vt_compositor_t *c,
   _vt_comp_schedule_output_commit(c, output);
 
   if (output->needs_repaint != old)
-    VT_TRACE(c->log, "Scheduling repaint on output %p.", output);
+    VT_TRACE(c->log, "Scheduling repaint on output %p.", (void *)output);
 }
 
 void vt_comp_schedule_cursor_commit(struct vt_compositor_t *c,
@@ -990,7 +991,7 @@ void vt_comp_schedule_cursor_commit(struct vt_compositor_t *c,
   _vt_comp_schedule_output_commit(c, output);
 
   if (output->cursor_dirty != old)
-    VT_TRACE(c->log, "Scheduling cursor commit on output %p.", output);
+    VT_TRACE(c->log, "Scheduling cursor commit on output %p.", (void *)output);
 }
 
 void vt_comp_repaint_scene(struct vt_compositor_t *c,

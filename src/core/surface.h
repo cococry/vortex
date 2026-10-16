@@ -120,7 +120,7 @@ struct vt_surface_role_impl_t {
 };
 
 struct vt_surface_role_t {
-  struct vt_surface_role_impl_t *impl;
+  const struct vt_surface_role_impl_t *impl;
   void                          *data;
 };
 
@@ -140,6 +140,9 @@ struct vt_surface_t {
 
   struct vt_buffer_use_t *current_buf_use;
 
+  // frames to stay composited after a late acquire fence
+  uint32_t scanout_backoff;
+
   struct wl_list content_updates;
 
   struct vt_scene_node_t *scene_node;
@@ -149,6 +152,7 @@ struct vt_surface_t {
   struct {
     struct vt_linux_dmabuf_v1_surface_state_t        *linux_dmabuf_v1;
     struct vt_linux_explicit_sync_v1_surface_state_t *linux_explicit_sync_v1;
+    struct vt_linux_drm_syncobj_v1_surface_state_t   *linux_drm_syncobj_v1;
   } proto_state;
 
   struct wl_list link, link_focus;
@@ -206,8 +210,8 @@ void vt_surface_frame_done(struct vt_surface_t *surf, uint32_t frame_time_msec);
 
 bool vt_surface_compute_final_size(const struct vt_surface_t *surf,
                                    uint32_t                   buffer_scale,
-                                   uint32_t buffer_transform, uint32_t *o_w,
-                                   uint32_t *o_h);
+                                   uint32_t buffer_transform, int32_t *o_w,
+                                   int32_t *o_h);
 
 bool vt_surface_set_role(struct vt_surface_t                 *surf,
                          const struct vt_surface_role_impl_t *impl, void *data);
@@ -215,4 +219,4 @@ bool vt_surface_set_role(struct vt_surface_t                 *surf,
 bool vt_surface_has_role(struct vt_surface_t        *surf,
                          enum vt_surface_role_type_t type);
 
-struct vt_buffer_t *vt_surface_get_buffer(struct vt_surface_t *surf);
+struct vt_buffer_t *vt_surface_get_buffer(const struct vt_surface_t *surf);

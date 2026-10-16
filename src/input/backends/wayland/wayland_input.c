@@ -20,7 +20,6 @@
  * SOFTWARE.
  */
 
-#pragma once
 #include "src/core/output.h"
 #include "src/input/input.h"
 #include "src/input/wl_seat.h"
@@ -33,12 +32,6 @@
 #include <xkbcommon/xkbcommon.h>
 
 #define _SUBSYS_NAME "INPUT/WL"
-
-#define _VT_XKB_GET_MOD_MASK(keymap, name)                                     \
-  ({                                                                           \
-    int idx = xkb_keymap_mod_get_index((keymap), (name));                      \
-    idx == XKB_MOD_INVALID ? 0 : (1u << idx);                                  \
-  })
 
 struct vt_input_backend_wl_t {
   struct wl_seat         *wl_seat;
@@ -111,6 +104,7 @@ static void _wl_pointer_axis_relative_direction(void              *data,
 
 void _wl_keyboard_keymap(void *data, struct wl_keyboard *wl_keyboard,
                          uint32_t format, int fd, uint32_t size) {
+  (void)wl_keyboard;
   struct vt_input_backend_wl_t *wl = data;
   if (format != WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1)
     return;
@@ -144,16 +138,15 @@ void _wl_keyboard_keymap(void *data, struct wl_keyboard *wl_keyboard,
   ibackend->kb_state = state;
 
   ibackend->mods.shift =
-      _VT_XKB_GET_MOD_MASK(ibackend->keymap, XKB_MOD_NAME_SHIFT);
+      vt_input_xkb_mod_mask(ibackend->keymap, XKB_MOD_NAME_SHIFT);
   ibackend->mods.ctrl =
-      _VT_XKB_GET_MOD_MASK(ibackend->keymap, XKB_MOD_NAME_CTRL);
-  ibackend->mods.alt = _VT_XKB_GET_MOD_MASK(ibackend->keymap, XKB_MOD_NAME_ALT);
+      vt_input_xkb_mod_mask(ibackend->keymap, XKB_MOD_NAME_CTRL);
+  ibackend->mods.alt =
+      vt_input_xkb_mod_mask(ibackend->keymap, XKB_MOD_NAME_ALT);
   ibackend->mods.super =
-      _VT_XKB_GET_MOD_MASK(ibackend->keymap, XKB_MOD_NAME_LOGO);
+      vt_input_xkb_mod_mask(ibackend->keymap, XKB_MOD_NAME_LOGO);
   ibackend->mods.caps =
-      _VT_XKB_GET_MOD_MASK(ibackend->keymap, XKB_MOD_NAME_CAPS);
-
-  vt_seat_bind_global_keybinds(wl->comp->seat);
+      vt_input_xkb_mod_mask(ibackend->keymap, XKB_MOD_NAME_CAPS);
 }
 
 void _wl_keyboard_enter(void *data, struct wl_keyboard *wl_keyboard,
@@ -177,6 +170,8 @@ void _wl_keyboard_leave(void *data, struct wl_keyboard *wl_keyboard,
 void _wl_keyboard_key(void *data, struct wl_keyboard *wl_keyboard,
                       uint32_t serial, uint32_t time, uint32_t key,
                       uint32_t state) {
+  (void)wl_keyboard;
+  (void)serial;
   struct vt_input_backend_wl_t *wl = data;
 
   uint32_t                  key_xkb = key + 8;
@@ -191,6 +186,8 @@ void _wl_keyboard_modifiers(void *data, struct wl_keyboard *wl_keyboard,
                             uint32_t serial, uint32_t mods_depressed,
                             uint32_t mods_latched, uint32_t mods_locked,
                             uint32_t group) {
+  (void)wl_keyboard;
+  (void)serial;
   struct vt_input_backend_wl_t *wl = data;
   struct vt_input_backend_t    *ibackend = wl->comp->input_backend;
   if (!ibackend->kb_state)
@@ -388,6 +385,15 @@ bool input_backend_init_wl(struct vt_input_backend_t *backend,
   wl_keyboard_add_listener(wl->wl_keyboard, &keyboard_listener, wl);
   wl_pointer_add_listener(wl->wl_pointer, &pointer_listener, wl);
 
+  // keymap arrives async from the parent, clients binding wl_keyboard
+  // before it lands would get a NULL keymap
+  struct wl_display *parent =
+      wl_proxy_get_display((struct wl_proxy *)wl->wl_seat);
+  if (wl_display_roundtrip(parent) < 0 || !backend->keymap) {
+    VT_ERROR(backend->comp->log, "No keymap received from parent seat.");
+    return false;
+  }
+
   VT_TRACE(backend->comp->log, "Initialized Wayland nested keyboard backend.");
   return true;
 }
@@ -395,7 +401,6 @@ bool input_backend_init_wl(struct vt_input_backend_t *backend,
 bool input_backend_terminate_wl(struct vt_input_backend_t *backend) {
   if (!backend || !backend->user_data)
     return false;
-  struct vt_input_backend_wl_t *wl = backend->user_data;
   VT_TRACE(backend->comp->log, "Terminated Wayland nested backend.");
   return true;
 }

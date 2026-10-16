@@ -105,6 +105,7 @@ _wl_kb_get_mod_states(struct xkb_state *state);
 
 static void _wl_seat_release(struct wl_client   *client,
                              struct wl_resource *resource) {
+  (void)client;
   wl_resource_destroy(resource);
 }
 
@@ -148,7 +149,6 @@ void _wl_seat_bind(struct wl_client *client, void *data, uint32_t version,
 
 int _wl_create_keymap_fd(struct vt_keyboard_t *kbd) {
   struct xkb_keymap *keymap = kbd->seat->comp->input_backend->keymap;
-  xkb_keymap_ref(keymap);
 
   char *keymap_str =
       xkb_keymap_get_as_string(keymap, XKB_KEYMAP_FORMAT_TEXT_V1);
@@ -176,7 +176,9 @@ void _wl_keyboard_send_initial_state(struct vt_keyboard_t *kbd) {
   uint32_t group =
       xkb_state_serialize_layout(state, XKB_STATE_LAYOUT_EFFECTIVE);
 
-  wl_keyboard_send_modifiers(kbd->res, 0, depressed, latched, locked, group);
+  wl_keyboard_send_modifiers(kbd->res,
+                             wl_display_next_serial(kbd->seat->comp->wl.dsp),
+                             depressed, latched, locked, group);
 }
 
 bool _wl_handle_global_keybind(struct vt_seat_t *seat, uint32_t keycode,
@@ -203,6 +205,7 @@ void _wl_handle_keybind_exit(struct vt_compositor_t *comp, void *user_data) {
   vt_comp_terminate(comp);
 }
 void _wl_handle_keybind_term(struct vt_compositor_t *comp, void *user_data) {
+  (void)user_data;
   char buf[128];
   // env scoped to the child: our own WAYLAND_DISPLAY may point at a parent
   snprintf(buf, sizeof(buf),
@@ -272,6 +275,7 @@ static void _wl_seat_pointer_set_cursor(struct wl_client   *client,
                                         uint32_t            serial,
                                         struct wl_resource *surface,
                                         int32_t hotspot_x, int32_t hotspot_y) {
+  (void)serial;
   struct vt_pointer_t *ptr = wl_resource_get_user_data(resource);
 
   if (!ptr || !ptr->seat)
@@ -294,7 +298,7 @@ static void _wl_seat_pointer_set_cursor(struct wl_client   *client,
       wl_resource_post_error(resource, WL_POINTER_ERROR_ROLE,
                              "wl_surface already has another role");
       VT_ERROR(surf->comp->log, "Failed to set cursor role for surface %p",
-               surf);
+               (void *)surf);
       return;
     }
   }
@@ -347,16 +351,21 @@ void _wl_seat_get_keyboard(struct wl_client   *client,
     wl_keyboard_send_enter(kbd->res, serial, surf->res, &keys);
 
     wl_array_release(&keys);
+
+    // protocol: modifiers must follow enter
+    _wl_keyboard_send_initial_state(kbd);
   }
 }
 
 void _wl_seat_release_kb(struct wl_client   *client,
                          struct wl_resource *resource) {
+  (void)client;
   wl_resource_destroy(resource);
 }
 
 void _wl_seat_release_pointer(struct wl_client   *client,
                               struct wl_resource *resource) {
+  (void)client;
   wl_resource_destroy(resource);
 }
 
@@ -482,10 +491,10 @@ bool vt_seat_init(struct vt_seat_t *seat) {
   if (first) {
     seat->pointer_x += seat->cursor.root_hotspot_x < (int32_t)first->width
                            ? seat->cursor.root_hotspot_x
-                           : first->width - 1;
+                           : (int32_t)first->width - 1;
     seat->pointer_y += seat->cursor.root_hotspot_y < (int32_t)first->height
                            ? seat->cursor.root_hotspot_y
-                           : first->height - 1;
+                           : (int32_t)first->height - 1;
   }
 
   /* Outputs already exist when the seat is initialized. */
@@ -499,9 +508,8 @@ bool vt_seat_init(struct vt_seat_t *seat) {
     return false;
   }
 
-  if (seat->comp->input_backend->platform == VT_INPUT_LIBINPUT) {
-    vt_seat_bind_global_keybinds(seat);
-  }
+  // every input backend has its keymap (and mod masks) by now
+  vt_seat_bind_global_keybinds(seat);
 
   return true;
 }
@@ -893,8 +901,9 @@ void vt_seat_handle_pointer_button(struct vt_seat_t *seat, uint32_t button,
   uint32_t serial = wl_display_next_serial(seat->comp->wl.dsp);
 
   VT_TRACE(seat->comp->log, "BUTTON: ptr_focus=%p picked=%p button=%u",
-           seat->ptr_focus.surf,
-           vt_comp_pick_surface(seat->comp, seat->pointer_x, seat->pointer_y),
+           (void *)seat->ptr_focus.surf,
+           (void *)(vt_comp_pick_surface(seat->comp, seat->pointer_x,
+                                         seat->pointer_y)),
            button);
 
   if (pressed && surf) {
@@ -1170,8 +1179,6 @@ void vt_seat_set_pointer_focus(struct vt_seat_t    *seat,
   }
 
   if (surf && surf->res && new_client) {
-    uint32_t serial = wl_display_next_serial(seat->comp->wl.dsp);
-
     struct vt_pointer_t *ptr;
     wl_list_for_each(ptr, &seat->pointers, link) {
       if (!ptr->res)

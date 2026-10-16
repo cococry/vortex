@@ -31,17 +31,10 @@
 #include "src/core/util.h"
 #include "src/protocols/wl_subcompositor.h"
 #include <wayland-server-protocol.h>
+#include <string.h>
 #include <wayland-util.h>
 
 #define _SUBSYS_NAME "SURFACE"
-
-static void _surface_update_mapping(struct vt_surface_t *surf);
-
-static void _surface_update_mapping(struct vt_surface_t *surf) {
-  bool mapped = surf->current_buf_use != NULL;
-
-  vt_surface_set_mapped(surf, mapped);
-}
 
 bool vt_surface_init(struct vt_surface_t *surf) {
   if (!surf)
@@ -422,6 +415,10 @@ bool vt_surface_emit_content_update(struct vt_surface_t *surf) {
   if (cu->type == VT_CU_SYNC)
     return true;
 
+  // stays queued, resolving the constraint applies it in order
+  if (vt_content_update_waits(cu))
+    return true;
+
   if (!vt_content_update_apply_dag(cu))
     goto fail;
 
@@ -463,7 +460,7 @@ void vt_surface_frame_done(struct vt_surface_t *surf,
     wl_callback_send_done(cb->res, frame_time_msec);
 
     VT_TRACE(surf->comp->log, "Sent wl_callback done for surf=%p callback=%p",
-             surf, cb);
+             (void *)surf, (void *)cb);
 
     wl_resource_destroy(cb->res);
   }
@@ -471,8 +468,8 @@ void vt_surface_frame_done(struct vt_surface_t *surf,
 
 bool vt_surface_compute_final_size(const struct vt_surface_t *surf,
                                    uint32_t                   buffer_scale,
-                                   uint32_t buffer_transform, uint32_t *o_w,
-                                   uint32_t *o_h) {
+                                   uint32_t buffer_transform, int32_t *o_w,
+                                   int32_t *o_h) {
   if (!surf || !o_w || !o_h)
     return false;
 
@@ -544,7 +541,7 @@ bool vt_surface_has_role(struct vt_surface_t        *surf,
   return surf->role.impl && surf->role.impl->type == type;
 }
 
-struct vt_buffer_t *vt_surface_get_buffer(struct vt_surface_t *surf) {
+struct vt_buffer_t *vt_surface_get_buffer(const struct vt_surface_t *surf) {
   if (!surf)
     return NULL;
   return surf->current_buf_use ? surf->current_buf_use->buf : NULL;

@@ -113,6 +113,7 @@ void _vt_session_seat_log_func(enum libseat_log_level level, const char *format,
 }
 
 void _vt_session_seat_enable(struct libseat *seat, void *userdata) {
+  (void)seat;
   if (!userdata)
     return;
   struct vt_session_t     *session = (struct vt_session_t *)userdata;
@@ -146,6 +147,8 @@ void _vt_session_seat_disable(struct libseat *seat, void *userdata) {
 }
 
 int32_t _vt_session_seat_dispatch(int fd, uint32_t mask, void *data) {
+  (void)fd;
+  (void)mask;
   if (!data)
     return 0;
   struct vt_session_t     *session = data;
@@ -224,6 +227,8 @@ _vt_session_drm_open_device_if_kms(struct vt_session_t *session,
 }
 
 int32_t _vt_session_drm_udev_dispatch(int fd, uint32_t mask, void *data) {
+  (void)fd;
+  (void)mask;
   if (!data)
     return 1;
   struct vt_session_t     *session = data;
@@ -241,7 +246,7 @@ int32_t _vt_session_drm_udev_dispatch(int fd, uint32_t mask, void *data) {
   VT_TRACE(session->comp->log, "Received udev event for device %s (%s)", name,
            action);
 
-  if (!_vt_session_drm_card_valid(name) || !action || !action) {
+  if (!_vt_session_drm_card_valid(name) || !node || !action) {
     udev_device_unref(udev_dev);
     return 1;
   }
@@ -283,6 +288,7 @@ int32_t _vt_session_drm_udev_dispatch(int fd, uint32_t mask, void *data) {
     VT_WARN(session->comp->log, "Got unknown udev action for device %s", name);
   }
 
+  udev_device_unref(udev_dev);
   return 0;
 }
 
@@ -440,8 +446,8 @@ bool vt_session_open_device_drm(struct vt_session_t *session,
   dev->device_id = device_id;
   dev->dev = st.st_rdev;
 
-  VT_TRACE(session->comp->log, "Opening device %s, device ID: %i", path,
-           dev->dev);
+  VT_TRACE(session->comp->log, "Opening device %s, device ID: %ju", path,
+           (uintmax_t)dev->dev);
 
   return true;
 }
@@ -480,8 +486,6 @@ bool vt_session_unmanage_device_drm(struct vt_session_t *session,
                                     struct vt_device_t  *dev) {
   if (!dev || !session || !session->user_data)
     return false;
-  struct vt_session_drm_t *session_drm =
-      BACKEND_DATA(session, struct vt_session_drm_t);
   wl_list_remove(&dev->link);
   return true;
 }
@@ -523,7 +527,7 @@ vt_session_get_native_handle_render_node(struct vt_session_t *session,
 }
 
 struct vt_device_t *vt_session_device_from_fd_drm(struct vt_session_t *session,
-                                                  uint32_t             fd) {
+                                                  int32_t              fd) {
   if (!session || !session->user_data)
     return NULL;
   struct vt_session_drm_t *session_drm =
@@ -538,6 +542,7 @@ struct vt_device_t *vt_session_device_from_fd_drm(struct vt_session_t *session,
 }
 
 static void on_found_gpu(struct wl_listener *listener, void *data) {
+  (void)data;
   struct wait_for_gpu_handler_t *handler =
       wl_container_of(listener, handler, listener);
   handler->found = true;

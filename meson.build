@@ -26,6 +26,7 @@ dep_wayland_egl     = dependency('wayland-egl',       required: true)
 dep_wayland_protos  = dependency('wayland-protocols', required: true)
 dep_egl             = dependency('egl',               required: true)
 dep_udev            = dependency('libudev',           required: true)
+dep_libdrm          = dependency('libdrm',            required: true)
 dep_gl              = dependency('gl',                required: true)
 dep_pixman          = dependency('pixman-1',          required: true)
 dep_libinput        = dependency('libinput',          required: true)
@@ -37,6 +38,7 @@ protocols_dir     = dep_wayland_protos.get_variable(pkgconfig: 'pkgdatadir')
 xdg_shell_xml     = join_paths(protocols_dir, 'stable', 'xdg-shell', 'xdg-shell.xml')
 dma_buf_xml       = join_paths(protocols_dir, 'stable', 'linux-dmabuf', 'linux-dmabuf-v1.xml')
 explitic_sync_xml = join_paths(protocols_dir, 'unstable', 'linux-explicit-synchronization', 'linux-explicit-synchronization-unstable-v1.xml')
+drm_syncobj_xml   = join_paths(protocols_dir, 'staging', 'linux-drm-syncobj', 'linux-drm-syncobj-v1.xml')
 
 xdg_server_header = custom_target(
   'xdg-shell-server-header',
@@ -85,6 +87,22 @@ explitic_sync_code = custom_target(
   install: false
 )
 
+drm_syncobj_header = custom_target(
+  'linux-drm-syncobj-header',
+  input: drm_syncobj_xml,
+  output: 'linux-drm-syncobj-v1-server-protocol.h',
+  command: [wayland_scanner, 'server-header', '@INPUT@', '@OUTPUT@'],
+  install: false
+)
+
+drm_syncobj_code = custom_target(
+  'linux-drm-syncobj-code',
+  input: drm_syncobj_xml,
+  output: 'linux-drm-syncobj-v1-protocol.c',
+  command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'],
+  install: false
+)
+
 vortex_src = files('src/vortex.c',
 'src/vortex.c',
 'src/render/renderer.c',
@@ -101,6 +119,8 @@ vortex_src = files('src/vortex.c',
 'src/protocols/linux_dmabuf.h',
 'src/protocols/linux_explicit_sync.c',
 'src/protocols/linux_explicit_sync.h',
+'src/protocols/linux_drm_syncobj.c',
+'src/protocols/linux_drm_syncobj.h',
 'src/protocols/wl_surface.h',
 'src/protocols/wl_surface.c',
 'src/protocols/wl_output.c',
@@ -145,7 +165,7 @@ vortex_inc = include_directories('include', '/usr/include/pixman-1/')
 deps = [
   dep_wayland_server, dep_wayland_egl,
   dep_egl, dep_libinput, dep_xcursor, dep_udev, dep_gl,
-  runara_dep, dep_pixman,
+  runara_dep, dep_pixman, dep_libdrm,
 ]
 if dep_xkbcommon.found()
   deps += dep_xkbcommon
@@ -171,7 +191,9 @@ vortex_exe = executable(
     dma_buf_header,
     dma_buf_code,
     explitic_sync_header,
-    explitic_sync_code
+    explitic_sync_code,
+    drm_syncobj_header,
+    drm_syncobj_code
   ],
   include_directories: vortex_inc,
   link_args: ['-Wl,-E'],

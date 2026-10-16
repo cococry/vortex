@@ -27,6 +27,7 @@
 
 static void output_release(struct wl_client   *client,
                            struct wl_resource *resource) {
+  (void)client;
   wl_resource_destroy(resource);
 }
 
