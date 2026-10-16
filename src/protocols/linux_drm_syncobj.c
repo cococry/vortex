@@ -48,6 +48,9 @@ struct vt_drm_syncobj_timeline_t {
   int      drm_fd;
   uint32_t handle;
   uint32_t refcount;
+
+  // release points on this timeline not signaled yet
+  struct wl_list releases;
 };
 
 struct vt_drm_syncobj_release_t {
@@ -55,6 +58,7 @@ struct vt_drm_syncobj_release_t {
   struct vt_drm_syncobj_timeline_t *timeline;
   uint64_t                          point;
   bool                              signaled;
+  struct wl_list                    link;
 };
 
 struct vt_drm_syncobj_acquire_t {
@@ -79,6 +83,7 @@ static struct {
   struct {
     uint64_t commits, waited, exported, exported_pending;
     uint64_t release_imported, release_signaled;
+    uint64_t timelines, release_early;
   } stats;
 } _proto = {.drm_fd = -1};
 
@@ -172,11 +177,27 @@ static bool _release_needs_fence(struct vt_buffer_release_t *base) {
   return true;
 }
 
+/* Signaling a point signals every earlier one on its timeline. With a
+ * timeline shared between buffers, that frees buffers still being read. */
+static void _release_mark_signaled(struct vt_drm_syncobj_release_t *rel) {
+  struct vt_drm_syncobj_release_t *other;
+  wl_list_for_each(other, &rel->timeline->releases, link) {
+    if (other != rel && other->point < rel->point) {
+      _proto.stats.release_early++;
+      break;
+    }
+  }
+
+  rel->signaled = true;
+  wl_list_remove(&rel->link);
+  wl_list_init(&rel->link);
+}
+
 static void _release_finish(struct vt_buffer_release_t *base,
                             int                         release_fence_fd) {
   struct vt_drm_syncobj_release_t *rel = wl_container_of(base, rel, base);
 
-  rel->signaled = true;
+  _release_mark_signaled(rel);
 
   if (release_fence_fd < 0) {
     _timeline_signal(rel->timeline, rel->point);
@@ -200,8 +221,10 @@ static void _release_destroy(struct vt_buffer_release_t *base) {
   struct vt_drm_syncobj_release_t *rel = wl_container_of(base, rel, base);
 
   // dropped before ever being used, the buffer was never read
-  if (!rel->signaled)
+  if (!rel->signaled) {
+    _release_mark_signaled(rel);
     _timeline_signal(rel->timeline, rel->point);
+  }
 
   _timeline_unref(&rel->timeline);
   free(rel);
@@ -383,6 +406,7 @@ static bool _addon_commit(struct vt_surface_t        *surf,
   vt_buffer_release_init_and_ref(&rel->base, surf->comp, &_release_impl);
   rel->timeline = _timeline_ref(s->release_timeline);
   rel->point = s->release_point;
+  wl_list_insert(&rel->timeline->releases, &rel->link);
 
   if (cu->state.buffer_release)
     vt_buffer_release_unref(&cu->state.buffer_release);
@@ -557,6 +581,8 @@ static void _manager_import_timeline(struct wl_client   *client,
 
   tl->drm_fd = _proto.drm_fd;
   tl->refcount = 1;
+  wl_list_init(&tl->releases);
+  _proto.stats.timelines++;
   int ret = drmSyncobjFDToHandle(tl->drm_fd, fd, &tl->handle);
   close(fd);
 
@@ -635,8 +661,10 @@ void vt_proto_linux_drm_syncobj_v1_log_stats(void) {
   VT_INFO(_proto.comp->log,
           "syncobj: %" PRIu64 " commits, %" PRIu64 " held, %" PRIu64
           " acquire exports (%" PRIu64 " still pending), %" PRIu64
-          " release imports, %" PRIu64 " release signals.",
+          " release imports, %" PRIu64 " release signals, %" PRIu64
+          " timelines, %" PRIu64 " releases past a lower pending point.",
           _proto.stats.commits, _proto.stats.waited, _proto.stats.exported,
           _proto.stats.exported_pending, _proto.stats.release_imported,
-          _proto.stats.release_signaled);
+          _proto.stats.release_signaled, _proto.stats.timelines,
+          _proto.stats.release_early);
 }
