@@ -283,6 +283,7 @@ int32_t _vt_session_drm_udev_dispatch(int fd, uint32_t mask, void *data) {
     VT_WARN(session->comp->log, "Got unknown udev action for device %s", name);
   }
 
+  udev_device_unref(udev_dev);
   return 0;
 }
 
