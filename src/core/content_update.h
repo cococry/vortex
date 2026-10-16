@@ -46,6 +46,8 @@ struct vt_content_update_t {
 
   struct vt_buffer_use_t *buffer_use;
   int                     acquire_fence_fd;
+
+  struct vt_buffer_acquire_source_t *acquire_source;
 };
 
 /* Holds a content update back until resolved, e.g. while a client's GPU work

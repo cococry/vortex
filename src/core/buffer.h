@@ -80,6 +80,13 @@ struct vt_buffer_release_t {
   const struct vt_buffer_release_implementation_t *impl;
 };
 
+/* Deferred acquire fence: only built when the buffer is actually drawn or
+ * scanned out. A fast client replaces most buffers before either happens. */
+struct vt_buffer_acquire_source_t {
+  int (*export_fence)(struct vt_buffer_acquire_source_t *src);
+  void (*destroy)(struct vt_buffer_acquire_source_t *src);
+};
+
 struct vt_buffer_use_t {
   struct vt_compositor_t *comp;
 
@@ -92,6 +99,8 @@ struct vt_buffer_use_t {
 
   int acquire_fence_fd;
   int release_fence_fd;
+
+  struct vt_buffer_acquire_source_t *acquire_source;
 };
 
 struct vt_buffer_t *
@@ -140,6 +149,9 @@ void vt_buffer_use_unref(struct vt_buffer_use_t **use);
 struct vt_buffer_use_t *vt_buffer_use_create_take(
     struct vt_compositor_t *comp, const void *owner, struct vt_buffer_t **buf,
     struct vt_buffer_release_t **release, int *acquire_fence_fd);
+
+// borrowed fd, materialized from acquire_source on first call, -1 if none
+int vt_buffer_use_acquire_fence(struct vt_buffer_use_t *use);
 
 bool vt_buffer_use_set_release_fence_fd(struct vt_buffer_use_t *use,
                                         int                     release_fd);

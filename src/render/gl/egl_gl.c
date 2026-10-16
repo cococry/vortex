@@ -486,7 +486,7 @@ bool _egl_buffer_use_is_ready(struct vt_renderer_t   *renderer,
   if (!renderer || !use)
     return false;
 
-  if (use->acquire_fence_fd < 0)
+  if (vt_buffer_use_acquire_fence(use) < 0)
     return true;
 
   struct egl_backend_state_t *egl =

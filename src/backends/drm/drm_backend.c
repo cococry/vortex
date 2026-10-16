@@ -3439,7 +3439,7 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
     }
 
     if (!drm_liftoff_set_layer_props(test->liftoff_layer, layer, test->fb.id,
-                                     use->acquire_fence_fd, i)) {
+                                     vt_buffer_use_acquire_fence(use), i)) {
       VT_TRACE(backend->comp->log,
                "layer %zu surface=%p rejected from liftoff test: "
                "failed to set liftoff layer properties.",
@@ -3561,7 +3561,7 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
       if (!planned->use)
         goto fail_plan;
 
-      planned->acquire_fence_fd = test->use->acquire_fence_fd;
+      planned->acquire_fence_fd = vt_buffer_use_acquire_fence(test->use);
     } else {
       /*
        * the renderer is going to draw this surface into the compositor FB.

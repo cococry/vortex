@@ -352,6 +352,9 @@ bool vt_content_update_finish_create(struct vt_content_update_t *cu) {
 
     if (!cu->buffer_use)
       return false;
+
+    cu->buffer_use->acquire_source = cu->acquire_source;
+    cu->acquire_source = NULL;
   }
 
   VT_TRACE(cu->surf->comp->log,
@@ -393,6 +396,9 @@ void vt_content_update_destroy(struct vt_content_update_t *cu) {
     close(cu->acquire_fence_fd);
     cu->acquire_fence_fd = -1;
   }
+
+  if (cu->acquire_source)
+    cu->acquire_source->destroy(cu->acquire_source);
 
   if (cu->buffer_use)
     vt_buffer_use_unref(&cu->buffer_use);

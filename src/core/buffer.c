@@ -351,6 +351,9 @@ static void _buffer_use_destroy(struct vt_buffer_use_t *use) {
     use->acquire_fence_fd = -1;
   }
 
+  if (use->acquire_source)
+    use->acquire_source->destroy(use->acquire_source);
+
   vt_buffer_end_use(use->buf);
 
   if (use->release)
@@ -418,6 +421,20 @@ struct vt_buffer_use_t *vt_buffer_use_create_take(
            (void *)use, (void *)use->buf, (void *)use->release);
 
   return use;
+}
+
+int vt_buffer_use_acquire_fence(struct vt_buffer_use_t *use) {
+  if (!use)
+    return -1;
+
+  if (use->acquire_fence_fd < 0 && use->acquire_source) {
+    struct vt_buffer_acquire_source_t *src = use->acquire_source;
+    use->acquire_source = NULL;
+    use->acquire_fence_fd = src->export_fence(src);
+    src->destroy(src);
+  }
+
+  return use->acquire_fence_fd;
 }
 
 bool vt_buffer_use_set_release_fence_fd(struct vt_buffer_use_t *use, int fd) {
