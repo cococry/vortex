@@ -1903,7 +1903,7 @@ static void _drm_on_drm_change(struct wl_listener *listener, void *data) {
 
   struct vt_drm_backend_state_t *drm;
   wl_list_for_each(drm, &master->backends, link) {
-    if (!drm->dev || !drm->dev->path || !event->device_node_name)
+    if (!drm->dev || !drm->dev->path[0] || !event->device_node_name)
       continue;
 
     const char *node = strrchr(drm->dev->path, '/');
