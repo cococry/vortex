@@ -24,6 +24,7 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 
 /* Needs to be sorted according to strcmp() for bsearch() */
 enum vt_drm_connector_property_t {

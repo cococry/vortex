@@ -33,6 +33,7 @@
 #include <linux-dmabuf-v1-server-protocol.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>

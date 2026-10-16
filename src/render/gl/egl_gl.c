@@ -22,7 +22,9 @@
 
 #include <EGL/eglplatform.h>
 #include <cglm/types-struct.h>
+#include <assert.h>
 #include <stdbool.h>
+#include <string.h>
 #include <unistd.h>
 #include <wayland-util.h>
 

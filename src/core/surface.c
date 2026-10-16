@@ -31,6 +31,7 @@
 #include "src/core/util.h"
 #include "src/protocols/wl_subcompositor.h"
 #include <wayland-server-protocol.h>
+#include <string.h>
 #include <wayland-util.h>
 
 #define _SUBSYS_NAME "SURFACE"

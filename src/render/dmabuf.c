@@ -22,6 +22,8 @@
 
 #include "dmabuf.h"
 #include "src/render/drm_format.h"
+#include <assert.h>
+#include <string.h>
 #define _SUBSYS_NAME "DMABUF"
 
 struct vt_dmabuf_feedback_t *

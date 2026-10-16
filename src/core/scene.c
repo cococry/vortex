@@ -27,6 +27,7 @@
 #include "src/core/surface.h"
 #include "src/core/util.h"
 #include "src/render/renderer.h"
+#include <string.h>
 #include <wayland-util.h>
 
 #define _SCENE_CHILD_CAP_INIT 4
