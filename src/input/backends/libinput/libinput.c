@@ -38,12 +38,6 @@
 
 #define _SUBSYS_NAME "INPUT/LIBINPUT"
 
-#define _VT_XKB_GET_MOD_MASK(keymap, name)                                     \
-  ({                                                                           \
-    int idx = xkb_keymap_mod_get_index((keymap), (name));                      \
-    idx == XKB_MOD_INVALID ? 0 : (1u << idx);                                  \
-  })
-
 struct vt_input_backend_li_t {
   struct libinput        *input;
   struct vt_compositor_t *comp;
@@ -314,15 +308,15 @@ bool _vt_li_init_xkb(struct vt_input_backend_li_t *li) {
   }
 
   li->comp->input_backend->mods.shift =
-      _VT_XKB_GET_MOD_MASK(backend->keymap, XKB_MOD_NAME_SHIFT);
+      vt_input_xkb_mod_mask(backend->keymap, XKB_MOD_NAME_SHIFT);
   li->comp->input_backend->mods.ctrl =
-      _VT_XKB_GET_MOD_MASK(backend->keymap, XKB_MOD_NAME_CTRL);
+      vt_input_xkb_mod_mask(backend->keymap, XKB_MOD_NAME_CTRL);
   li->comp->input_backend->mods.alt =
-      _VT_XKB_GET_MOD_MASK(backend->keymap, XKB_MOD_NAME_ALT);
+      vt_input_xkb_mod_mask(backend->keymap, XKB_MOD_NAME_ALT);
   li->comp->input_backend->mods.super =
-      _VT_XKB_GET_MOD_MASK(backend->keymap, XKB_MOD_NAME_LOGO);
+      vt_input_xkb_mod_mask(backend->keymap, XKB_MOD_NAME_LOGO);
   li->comp->input_backend->mods.caps =
-      _VT_XKB_GET_MOD_MASK(backend->keymap, XKB_MOD_NAME_CAPS);
+      vt_input_xkb_mod_mask(backend->keymap, XKB_MOD_NAME_CAPS);
 
   return true;
 }
