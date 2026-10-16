@@ -875,9 +875,23 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
   return true;
 }
 
+static int _vt_comp_handle_quit_signal(int sig, void *data) {
+  struct vt_compositor_t *c = data;
+  VT_TRACE(c->log, "Caught signal %d (%s), shutting down.", sig,
+           strsignal(sig));
+  c->running = false;
+  return 0;
+}
+
 void vt_comp_run(struct vt_compositor_t *c) {
   if (!c || !c->wl.evloop || !c->wl.dsp)
     return;
+
+  // leave through vt_comp_terminate so the socket and lock get removed
+  struct wl_event_source *sig_term = wl_event_loop_add_signal(
+      c->wl.evloop, SIGTERM, _vt_comp_handle_quit_signal, c);
+  struct wl_event_source *sig_int = wl_event_loop_add_signal(
+      c->wl.evloop, SIGINT, _vt_comp_handle_quit_signal, c);
 
   c->running = true;
   VT_TRACE(c->log, "Entering main event loop...");
@@ -890,6 +904,11 @@ void vt_comp_run(struct vt_compositor_t *c) {
     }
     wl_display_flush_clients(c->wl.dsp);
   }
+
+  if (sig_term)
+    wl_event_source_remove(sig_term);
+  if (sig_int)
+    wl_event_source_remove(sig_int);
 }
 
 bool vt_comp_terminate(struct vt_compositor_t *c) {
