@@ -183,6 +183,7 @@ bool _egl_gl_import_buffer_shm(struct vt_renderer_t *r, struct vt_shm_attr_t *a,
                                struct vt_buffer_t      *buf,
                                struct vt_egl_buffer_t  *egl_buf,
                                const pixman_region32_t *damage) {
+  (void)damage;
   if (!buf || !a || !r || !egl_buf || !a->data)
     return false;
 
@@ -251,6 +252,7 @@ bool _egl_gl_import_buffer_dmabuf(struct vt_renderer_t    *r,
                                   struct vt_dmabuf_attr_t *a,
                                   struct vt_buffer_t      *buf,
                                   struct vt_egl_buffer_t  *egl_buf) {
+  (void)buf;
 
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
 
@@ -1347,6 +1349,8 @@ void renderer_set_vsync_egl(struct vt_renderer_t *r, bool vsync) {
 
 void renderer_set_clear_color_egl(struct vt_renderer_t *r,
                                   struct vt_output_t *output, uint32_t col) {
+  (void)r;
+  (void)output;
   vec4s zto = rn_color_to_zto(rn_color_from_hex(col));
   glClearColor(zto.r, zto.g, zto.b, zto.a);
   glClear(GL_COLOR_BUFFER_BIT);
@@ -1575,6 +1579,7 @@ void renderer_draw_rect_egl(struct vt_renderer_t *r, float x, float y, float w,
 
 void renderer_end_scene_egl(struct vt_renderer_t *r,
                             struct vt_output_t   *output) {
+  (void)output;
   if (!r || !r->impl.end_scene || !r->user_data) {
     VT_ERROR(r->comp->log,
              "Renderer backend not initialized before ending frame.");

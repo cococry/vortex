@@ -352,6 +352,7 @@ void _proto_linux_dmabuf_v1_destroy(struct vt_proto_linux_dmabuf_v1_t *dmabuf) {
 
 void _proto_linux_dmabuf_v1_handle_dsp_destroy(struct wl_listener *listener,
                                                void               *data) {
+  (void)data;
   /* 1. Retrieve protocol handle from listener */
   struct vt_proto_linux_dmabuf_v1_t *dmabuf =
       wl_container_of(listener, dmabuf, dsp_destroy);
@@ -369,6 +370,7 @@ void _proto_linux_dmabuf_v1_handle_dsp_destroy(struct wl_listener *listener,
 
 void _linux_dmabuf_v1_destroy(struct wl_client   *client,
                               struct wl_resource *resource) {
+  (void)client;
   /* Destroy the linux-dmabuf global resource */
   wl_resource_destroy(resource);
 }
@@ -505,6 +507,7 @@ void _linux_dmabuf_v1_get_surface_feedback(struct wl_client   *client,
 
 void _linux_dmabuf_v1_params_destroy(struct wl_client   *client,
                                      struct wl_resource *resource) {
+  (void)client;
   /* Destroy the linux_dmabuf buffer params resource */
   wl_resource_destroy(resource);
 }
@@ -514,6 +517,7 @@ void _linux_dmabuf_v1_params_add(struct wl_client   *client,
                                  uint32_t plane_idx, uint32_t offset,
                                  uint32_t stride, uint32_t modifier_hi,
                                  uint32_t modifier_lo) {
+  (void)client;
   VT_TRACE(_proto->comp->log, "linux_dmabuf.params_add: request received.");
 
   /* 1. Retrieve internal params handle */
@@ -789,6 +793,7 @@ void _linux_dmabuf_v1_params_create(struct wl_client   *client,
                                     struct wl_resource *resource, int32_t width,
                                     int32_t height, uint32_t format,
                                     uint32_t flags) {
+  (void)client;
   VT_TRACE(_proto->comp->log, "_linux_dmabuf_v1_params_create");
   _linux_dmabuf_params_create(resource, 0, width, height, format, flags);
 }
@@ -798,6 +803,7 @@ void _linux_dmabuf_v1_params_create_immed(struct wl_client   *client,
                                           uint32_t buffer_id, int32_t width,
                                           int32_t height, uint32_t format,
                                           uint32_t flags) {
+  (void)client;
   VT_TRACE(_proto->comp->log, "_linux_dmabuf_v1_params_create_immed");
   _linux_dmabuf_params_create(resource, buffer_id, width, height, format,
                               flags);
@@ -850,6 +856,7 @@ void _linux_dmabuf_v1_feedback_destroy(struct wl_client   *client,
 
 void _linux_dmabuf_v1_buffer_destroy(struct wl_client   *client,
                                      struct wl_resource *resource) {
+  (void)client;
   VT_TRACE(_proto->comp->log, "_linux_dmabuf_v1_buffer_destroy()");
   wl_resource_destroy(resource);
 }

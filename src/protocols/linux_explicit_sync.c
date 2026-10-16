@@ -212,6 +212,7 @@ void _linux_explicit_sync_v1_get_synchronization(
 
 void _linux_explicit_sync_v1_destroy(struct wl_client   *client,
                                      struct wl_resource *resource) {
+  (void)client;
   /* Destroy the global explicit sync interface resource */
   wl_resource_destroy(resource);
 }
@@ -243,6 +244,7 @@ void _linux_surface_sync_v1_destroy(struct wl_client   *client,
 void _linux_surface_sync_v1_set_acquire_fence(struct wl_client   *client,
                                               struct wl_resource *resource,
                                               int32_t             fd) {
+  (void)client;
   struct vt_linux_explicit_sync_v1_surface_state_t *state =
       resource ? wl_resource_get_user_data(resource) : NULL;
   if (!state) {

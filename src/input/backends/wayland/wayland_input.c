@@ -111,6 +111,7 @@ static void _wl_pointer_axis_relative_direction(void              *data,
 
 void _wl_keyboard_keymap(void *data, struct wl_keyboard *wl_keyboard,
                          uint32_t format, int fd, uint32_t size) {
+  (void)wl_keyboard;
   struct vt_input_backend_wl_t *wl = data;
   if (format != WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1)
     return;
@@ -175,6 +176,8 @@ void _wl_keyboard_leave(void *data, struct wl_keyboard *wl_keyboard,
 void _wl_keyboard_key(void *data, struct wl_keyboard *wl_keyboard,
                       uint32_t serial, uint32_t time, uint32_t key,
                       uint32_t state) {
+  (void)wl_keyboard;
+  (void)serial;
   struct vt_input_backend_wl_t *wl = data;
 
   uint32_t                  key_xkb = key + 8;
@@ -189,6 +192,8 @@ void _wl_keyboard_modifiers(void *data, struct wl_keyboard *wl_keyboard,
                             uint32_t serial, uint32_t mods_depressed,
                             uint32_t mods_latched, uint32_t mods_locked,
                             uint32_t group) {
+  (void)wl_keyboard;
+  (void)serial;
   struct vt_input_backend_wl_t *wl = data;
   struct vt_input_backend_t    *ibackend = wl->comp->input_backend;
   if (!ibackend->kb_state)

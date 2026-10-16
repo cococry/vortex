@@ -362,6 +362,7 @@ struct vt_scene_node_t *vt_scene_node_create(struct vt_compositor_t *c,
 
 bool vt_scene_node_destroy(struct vt_compositor_t *c,
                            struct vt_scene_node_t *node) {
+  (void)c;
   if (node->parent) {
     return vt_scene_node_remove_child(node->parent, node);
   }

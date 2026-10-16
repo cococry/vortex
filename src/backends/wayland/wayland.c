@@ -201,6 +201,7 @@ static const struct wl_output_listener output_listener = {
 
 static void output_sync_callback(void *data, struct wl_callback *callback,
                                  uint32_t unused) {
+  (void)unused;
   parent_physical_output_t *output = data;
 
   assert(output->sync_cb == callback);
@@ -292,6 +293,8 @@ static void _output_handle_render_resize(struct vt_output_t *output, int32_t w,
 void _wl_parent_xdg_toplevel_configure(void                *data,
                                        struct xdg_toplevel *toplevel, int32_t w,
                                        int32_t h, struct wl_array *states) {
+  (void)toplevel;
+  (void)states;
   struct vt_output_t *output = data;
   if (!output || !output->user_data)
     return;
@@ -548,6 +551,7 @@ static void _wl_parent_output_mode(void             *data,
                                    struct wl_output *wl_output_proxy,
                                    uint32_t flags, int32_t width,
                                    int32_t height, int32_t refresh) {
+  (void)wl_output_proxy;
   parent_physical_output_t *output = data;
 
   struct vt_output_mode_t *mode =
@@ -560,6 +564,7 @@ static void _wl_parent_output_mode(void             *data,
 
 bool _wl_backend_create_output(struct vt_backend_t *backend,
                                struct vt_output_t *output, void *data) {
+  (void)data;
   if (!backend || !output)
     return false;
 
@@ -969,6 +974,7 @@ bool backend_terminate_wl(struct vt_backend_t *backend) {
 }
 bool backend_prepare_output_frame_wl(struct vt_backend_t *backend,
                                      struct vt_output_t  *output) {
+  (void)backend;
   wayland_output_state_t *wl_output =
       BACKEND_DATA(output, wayland_output_state_t);
 

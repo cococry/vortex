@@ -574,12 +574,14 @@ void _vt_comp_wl_surface_create_region(struct wl_client   *client,
 
 void _vt_comp_wl_region_destroy(struct wl_client   *client,
                                 struct wl_resource *resource) {
+  (void)client;
   wl_resource_destroy(resource);
 }
 
 void _vt_comp_wl_region_add(struct wl_client   *client,
                             struct wl_resource *resource, int32_t x, int32_t y,
                             int32_t width, int32_t height) {
+  (void)client;
   struct vt_region_t *r = resource ? wl_resource_get_user_data(resource) : NULL;
   if (!r)
     return;
@@ -591,6 +593,7 @@ void _vt_comp_wl_region_add(struct wl_client   *client,
 void _vt_comp_wl_region_subtract(struct wl_client   *client,
                                  struct wl_resource *resource, int32_t x,
                                  int32_t y, int32_t width, int32_t height) {
+  (void)client;
   struct vt_region_t *r = resource ? wl_resource_get_user_data(resource) : NULL;
   if (!r)
     return;

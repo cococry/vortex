@@ -105,6 +105,7 @@ _wl_kb_get_mod_states(struct xkb_state *state);
 
 static void _wl_seat_release(struct wl_client   *client,
                              struct wl_resource *resource) {
+  (void)client;
   wl_resource_destroy(resource);
 }
 
@@ -204,6 +205,7 @@ void _wl_handle_keybind_exit(struct vt_compositor_t *comp, void *user_data) {
   vt_comp_terminate(comp);
 }
 void _wl_handle_keybind_term(struct vt_compositor_t *comp, void *user_data) {
+  (void)user_data;
   char buf[128];
   // env scoped to the child: our own WAYLAND_DISPLAY may point at a parent
   snprintf(buf, sizeof(buf),
@@ -273,6 +275,7 @@ static void _wl_seat_pointer_set_cursor(struct wl_client   *client,
                                         uint32_t            serial,
                                         struct wl_resource *surface,
                                         int32_t hotspot_x, int32_t hotspot_y) {
+  (void)serial;
   struct vt_pointer_t *ptr = wl_resource_get_user_data(resource);
 
   if (!ptr || !ptr->seat)
@@ -356,11 +359,13 @@ void _wl_seat_get_keyboard(struct wl_client   *client,
 
 void _wl_seat_release_kb(struct wl_client   *client,
                          struct wl_resource *resource) {
+  (void)client;
   wl_resource_destroy(resource);
 }
 
 void _wl_seat_release_pointer(struct wl_client   *client,
                               struct wl_resource *resource) {
+  (void)client;
   wl_resource_destroy(resource);
 }
 

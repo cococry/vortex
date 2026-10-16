@@ -74,6 +74,7 @@ static const struct libinput_interface input_interface = {
 
 int32_t _vt_li_open_restricted(const char *path, int32_t flags,
                                void *user_data) {
+  (void)flags;
   struct vt_session_t *session = (struct vt_session_t *)user_data;
 
   struct vt_device_t *dev = VT_ALLOC(session->comp, sizeof(*dev));
@@ -101,6 +102,8 @@ void _vt_li_close_restricted(int32_t fd, void *user_data) {
 }
 
 int32_t _vt_li_input_dispatch(int fd, uint32_t mask, void *data) {
+  (void)fd;
+  (void)mask;
   struct vt_input_backend_li_t *li = (struct vt_input_backend_li_t *)data;
   libinput_dispatch(li->input);
 

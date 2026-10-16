@@ -186,6 +186,7 @@ void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
 
 void _wl_surface_commit(struct wl_client   *client,
                         struct wl_resource *resource) {
+  (void)client;
   struct vt_surface_t *surf = wl_resource_get_user_data(resource);
   if (!surf) {
     VT_PARAM_CHECK_FAIL(_proto.comp);
@@ -260,6 +261,7 @@ void _wl_surface_frame(struct wl_client *client, struct wl_resource *resource,
 }
 void _wl_surface_damage(struct wl_client *client, struct wl_resource *resource,
                         int32_t x, int32_t y, int32_t width, int32_t height) {
+  (void)client;
   struct vt_surface_t *surf =
       resource ? wl_resource_get_user_data(resource) : NULL;
 
@@ -283,6 +285,7 @@ void _wl_surface_damage(struct wl_client *client, struct wl_resource *resource,
 void _wl_surface_damage_buffer(struct wl_client   *client,
                                struct wl_resource *resource, int32_t x,
                                int32_t y, int32_t width, int32_t height) {
+  (void)client;
   struct vt_surface_t *surf =
       resource ? wl_resource_get_user_data(resource) : NULL;
 
@@ -305,6 +308,7 @@ void _wl_surface_damage_buffer(struct wl_client   *client,
 void _wl_surface_set_opaque_region(struct wl_client   *client,
                                    struct wl_resource *resource,
                                    struct wl_resource *region) {
+  (void)client;
   struct vt_surface_t *surf = wl_resource_get_user_data(resource);
   if (!surf) {
     VT_PARAM_CHECK_FAIL(_proto.comp);
@@ -336,6 +340,7 @@ void _wl_surface_set_opaque_region(struct wl_client   *client,
 void _wl_surface_set_input_region(struct wl_client   *client,
                                   struct wl_resource *resource,
                                   struct wl_resource *region) {
+  (void)client;
   struct vt_surface_t *surf = wl_resource_get_user_data(resource);
   if (!surf) {
     VT_PARAM_CHECK_FAIL(_proto.comp);
@@ -368,6 +373,7 @@ void _wl_surface_set_input_region(struct wl_client   *client,
 void _wl_surface_set_buffer_transform(struct wl_client   *client,
                                       struct wl_resource *resource,
                                       int32_t             transform) {
+  (void)client;
   struct vt_surface_t *surf =
       resource ? wl_resource_get_user_data(resource) : NULL;
   if (!surf) {
@@ -395,6 +401,7 @@ void _wl_surface_set_buffer_transform(struct wl_client   *client,
 
 void _wl_surface_set_buffer_scale(struct wl_client   *client,
                                   struct wl_resource *resource, int32_t scale) {
+  (void)client;
   /* [0]: Sets buffer scale for HiDPi displays. This needs to be
    * applied when rendering. */
   struct vt_surface_t *surf =
@@ -423,6 +430,7 @@ void _wl_surface_set_buffer_scale(struct wl_client   *client,
 
 void _wl_surface_offset(struct wl_client *client, struct wl_resource *resource,
                         int32_t x, int32_t y) {
+  (void)client;
   struct vt_surface_t *surf = wl_resource_get_user_data(resource);
   if (!surf) {
     VT_PARAM_CHECK_FAIL(_proto.comp);
@@ -440,6 +448,7 @@ void _wl_surface_offset(struct wl_client *client, struct wl_resource *resource,
 
 void _wl_surface_destroy(struct wl_client   *client,
                          struct wl_resource *resource) {
+  (void)client;
   struct vt_surface_t *surf =
       ((struct vt_surface_t *)wl_resource_get_user_data(resource));
 

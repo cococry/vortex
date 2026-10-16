@@ -113,6 +113,7 @@ void _vt_session_seat_log_func(enum libseat_log_level level, const char *format,
 }
 
 void _vt_session_seat_enable(struct libseat *seat, void *userdata) {
+  (void)seat;
   if (!userdata)
     return;
   struct vt_session_t     *session = (struct vt_session_t *)userdata;
@@ -146,6 +147,8 @@ void _vt_session_seat_disable(struct libseat *seat, void *userdata) {
 }
 
 int32_t _vt_session_seat_dispatch(int fd, uint32_t mask, void *data) {
+  (void)fd;
+  (void)mask;
   if (!data)
     return 0;
   struct vt_session_t     *session = data;
@@ -224,6 +227,8 @@ _vt_session_drm_open_device_if_kms(struct vt_session_t *session,
 }
 
 int32_t _vt_session_drm_udev_dispatch(int fd, uint32_t mask, void *data) {
+  (void)fd;
+  (void)mask;
   if (!data)
     return 1;
   struct vt_session_t     *session = data;
@@ -539,6 +544,7 @@ struct vt_device_t *vt_session_device_from_fd_drm(struct vt_session_t *session,
 }
 
 static void on_found_gpu(struct wl_listener *listener, void *data) {
+  (void)data;
   struct wait_for_gpu_handler_t *handler =
       wl_container_of(listener, handler, listener);
   handler->found = true;
