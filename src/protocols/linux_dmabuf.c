@@ -1243,12 +1243,13 @@ void _linux_dmabuf_free_feedback(
   for (uint32_t i = 0; i < packed->n_tranches; i++)
     wl_array_release(&packed->tranches[i].indices);
 
+  VT_TRACE(_proto->comp->log,
+           "linux_dmabuf.free_feedback: freeing packed feedback %p.",
+           (void *)packed);
+
   /* 3. Close FD and free structure */
   close(packed->entries_fd);
   free(packed);
-
-  VT_TRACE(_proto->comp->log,
-           "linux_dmabuf.free_feedback: freed packed feedback %p.", packed);
 }
 
 static struct vt_linux_dmabuf_v1_output_feedback_t *
