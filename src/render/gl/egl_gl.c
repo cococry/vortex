@@ -23,6 +23,7 @@
 #include <EGL/eglplatform.h>
 #include <cglm/types-struct.h>
 #include <assert.h>
+#include <poll.h>
 #include <stdbool.h>
 #include <string.h>
 #include <unistd.h>
@@ -101,6 +102,9 @@ struct egl_backend_state_t {
 
   bool has_swap_buffers_with_damage_khr;
   bool has_swap_buffers_with_damage_ext;
+
+  // acquire fences seen at draw time, and how many had not signaled yet
+  uint64_t fenced_draws, fence_pending_draws;
 
   RnState *render;
 
@@ -495,6 +499,12 @@ bool _egl_buffer_use_is_ready(struct vt_renderer_t   *renderer,
   if (!renderer->comp->have_proto_dmabuf_explicit_sync ||
       !egl->has_explicit_sync_support)
     return true;
+
+  // a pending fence here makes the composite wait on the client's GPU work
+  struct pollfd pfd = {.fd = use->acquire_fence_fd, .events = POLLIN};
+  egl->fenced_draws++;
+  if (poll(&pfd, 1, 0) == 0)
+    egl->fence_pending_draws++;
 
   EGLint attribs[] = {
       EGL_SYNC_NATIVE_FENCE_FD_ANDROID,
@@ -1657,6 +1667,11 @@ bool renderer_destroy_egl(struct vt_renderer_t *r) {
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
 
   vt_drm_format_array_free(&egl->formats);
+
+  VT_INFO(r->comp->log,
+          "%" PRIu64 " draws waited on an acquire fence, %" PRIu64
+          " of them not yet signaled.",
+          egl->fenced_draws, egl->fence_pending_draws);
 
   rn_terminate(egl->render);
 
