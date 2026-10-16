@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
-# stupid helper to compile versionned
+# stupid helper to compile versionned, then bench with glmark2-wayland
+# usage: compbench.sh [wl|drm] [glmark2 args...]
 
 set -euo pipefail
+
+MODE="${1:-wl}"
+shift || true
 
 # git rev parse branch
 BRANCH="$(git rev-parse --abbrev-ref HEAD)"
@@ -14,9 +18,17 @@ meson setup --reconfigure "$BUILD"
 # meson comp
 meson compile -C "$BUILD"
 
-# run nested smoke test
-# -b only scans installed backends, build tree needs explicit path
-# wl is picked from WAYLAND_DISPLAY
-WL_BACKEND="$BUILD/src/backends/wayland/libwl-backend.so"
-timeout 5 "$BUILD/vortex" --verbose --backend-path "$WL_BACKEND" \
-	|| [[ $? -eq 124 ]]
+# -b only scans installed backends, scripts pass the build tree .so
+case "$MODE" in
+wl)
+	scripts/bench-run.sh "$BUILD" wl "$@"
+	;;
+drm)
+	# build stays user-owned, only the VT session needs root
+	sudo scripts/bench-drm.sh "$BUILD" "$@"
+	;;
+*)
+	echo "unknown mode '$MODE' (wl|drm)" >&2
+	exit 1
+	;;
+esac
