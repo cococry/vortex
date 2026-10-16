@@ -175,7 +175,9 @@ void _wl_keyboard_send_initial_state(struct vt_keyboard_t *kbd) {
   uint32_t group =
       xkb_state_serialize_layout(state, XKB_STATE_LAYOUT_EFFECTIVE);
 
-  wl_keyboard_send_modifiers(kbd->res, 0, depressed, latched, locked, group);
+  wl_keyboard_send_modifiers(kbd->res,
+                             wl_display_next_serial(kbd->seat->comp->wl.dsp),
+                             depressed, latched, locked, group);
 }
 
 bool _wl_handle_global_keybind(struct vt_seat_t *seat, uint32_t keycode,
@@ -346,6 +348,9 @@ void _wl_seat_get_keyboard(struct wl_client   *client,
     wl_keyboard_send_enter(kbd->res, serial, surf->res, &keys);
 
     wl_array_release(&keys);
+
+    // protocol: modifiers must follow enter
+    _wl_keyboard_send_initial_state(kbd);
   }
 }
 
