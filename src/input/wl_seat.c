@@ -148,7 +148,6 @@ void _wl_seat_bind(struct wl_client *client, void *data, uint32_t version,
 
 int _wl_create_keymap_fd(struct vt_keyboard_t *kbd) {
   struct xkb_keymap *keymap = kbd->seat->comp->input_backend->keymap;
-  xkb_keymap_ref(keymap);
 
   char *keymap_str =
       xkb_keymap_get_as_string(keymap, XKB_KEYMAP_FORMAT_TEXT_V1);
