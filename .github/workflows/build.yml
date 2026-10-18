@@ -13,19 +13,30 @@ jobs:
     runs-on: ubuntu-latest
     container: archlinux:latest
     steps:
-      - name: Install dependencies
+      - name: Install build tools
         run: |
           pacman -Syu --noconfirm --needed \
-            base-devel meson ninja \
+            base-devel git meson ninja
+
+      # gl, vulkan + shader compiler for the 'all' backends (cglm comes via wrap)
+      - name: Install runara dependencies
+        run: |
+          pacman -S --noconfirm --needed \
+            mesa libglvnd \
+            vulkan-headers vulkan-icd-loader glslang python
+
+      - name: Install vortex dependencies
+        run: |
+          pacman -S --noconfirm --needed \
             wayland wayland-protocols libxkbcommon pixman \
             mesa libglvnd libdrm libinput systemd-libs seatd \
-            glfw freetype2 harfbuzz libliftoff libxcursor
+            libliftoff libxcursor
 
       - uses: actions/checkout@v4
 
-      # vortex must stay warning-free, vendored runara still has upstream ones
+      # fail on errors
       - name: Configure
-        run: meson setup build -Dwerror=true -Drunara:werror=false
+        run: meson setup build -Dwerror=true
 
       - name: Compile
         run: meson compile -C build
