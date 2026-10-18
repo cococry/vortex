@@ -19,7 +19,8 @@ jobs:
             base-devel git meson ninja \
             wayland wayland-protocols libxkbcommon pixman \
             mesa libglvnd libdrm libinput systemd-libs seatd \
-            glfw freetype2 harfbuzz libliftoff libxcursor
+            glfw freetype2 harfbuzz libliftoff libxcursor \
+            vulkan-headers vulkan-icd-loader glslang python
 
       - uses: actions/checkout@v4
 
