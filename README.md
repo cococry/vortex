@@ -17,7 +17,7 @@ while components like the desktop shell are intentionally abstracted away from i
 
 Make sure you have the required dependencies installed (debian packages shown):
 ```
-meson ninja-build libwayland-dev libdrm-dev libgbm-dev libegl1-mesa-dev libinput-dev libudev-dev libxcursor-dev xcursor-themes libxkbcommon-dev libglfw3-dev libcglm-dev libfreetype-dev libharfbuzz-dev
+meson ninja-build libwayland-dev libdrm-dev libgbm-dev libegl1-mesa-dev libinput-dev libudev-dev libxcursor-dev xcursor-themes libxkbcommon-dev libglfw3-dev libcglm-dev
 ```
 
 Clone & build:
@@ -102,7 +102,5 @@ Vortex handles the following environment variables:
 | `VT_DRM_NO_ATOMIC` | Force legacy DRM/KMS implementation |
 | `VT_DRM_NO_HARDWARE_CURSOR` | Force cursor compositing |
 | `VT_DRM_NO_DIRECT_SCANOUT` | Composite every surface, never try to put client buffers on hardware planes. |
-## Notes
-- [`runara`](https://github.com/cococry/runara) is currently vendored into `subprojects/` but might not be in the future.
 
 ---
