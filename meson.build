@@ -13,8 +13,19 @@ project(
 
 add_project_arguments('-Ddefault_library=static', language: 'c')
 
-# backends include core headers that pull in runara.h, so resolve it first
-runara_sp  = subproject('runara')
+backend_option = get_option('vt_render_backends')
+
+build_opengl = backend_option == 'opengl' or backend_option == 'all'
+build_vulkan = backend_option == 'vulkan' or backend_option == 'all'
+
+runara_sp = subproject(
+  'runara',
+  default_options: [
+    'backends=' + backend_option,
+    'examples=false',
+  ]
+)
+
 runara_dep = runara_sp.get_variable('runara_dep')
 
 subdir('src')
@@ -163,10 +174,27 @@ vortex_src = files('src/vortex.c',
 vortex_inc = include_directories('include', '/usr/include/pixman-1/')
 
 deps = [
-  dep_wayland_server, dep_wayland_egl,
-  dep_egl, dep_libinput, dep_xcursor, dep_udev, dep_gl,
-  runara_dep, dep_pixman, dep_libdrm,
+  dep_wayland_server,
+  dep_libinput,
+  dep_xcursor,
+  dep_udev,
+  dep_pixman,
+  dep_libdrm,
+  runara_dep,
 ]
+
+if build_opengl
+  dep_gl = dependency('gl', required: true)
+  dep_egl = dependency('egl', required: true)
+  dep_wayland_egl = dependency('wayland-egl', required: true)
+
+  deps += [
+    dep_gl,
+    dep_egl,
+    dep_wayland_egl,
+  ]
+endif
+
 if dep_xkbcommon.found()
   deps += dep_xkbcommon
 endif

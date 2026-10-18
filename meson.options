@@ -8,3 +8,11 @@ option('vt_backend_wl',
   value: true,
   description: 'Enable Wayland backend')
 
+
+option(
+  'vt_render_backends',
+  type: 'combo',
+  choices: ['opengl', 'vulkan', 'all'],
+  value: 'all',
+  description: 'Rendering backends to build'
+)

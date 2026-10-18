@@ -1,3 +1,4 @@
+#!/usr/bin/env bash
 # Copyright (c) 2026 Luca Machiedo
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -18,4 +19,14 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-stb_inc = include_directories('.')
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SRC="$ROOT/src"
+
+find "$SRC" \
+  \( -name '*.c' -o -name '*.h' \) \
+  -print0 |
+  xargs -0 clang-format -i
+
+echo "Formatted C files successfully."

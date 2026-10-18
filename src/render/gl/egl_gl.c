@@ -44,14 +44,12 @@
 #include <wayland-egl.h>
 #include <wayland-server.h>
 
-#include <runara/runara.h>
+#include "subprojects/runara/include/runara/runara.h"
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <GLES2/gl2.h>
 #include <GLES2/gl2ext.h>
-
-#include <glad.h>
 
 #include "egl_gl.h"
 

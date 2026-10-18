@@ -1,27 +1,7 @@
-# Copyright (c) 2026 Luca Machiedo
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
 project(
   'runara',
   'c',
-  version: '0.1.0',
+  version: '2.0.0',
   meson_version: '>= 1.2.0',
   default_options: [
     'c_std=c11',
@@ -33,83 +13,139 @@ project(
 
 cc = meson.get_compiler('c')
 
-dep_glfw3      = dependency('glfw3', required: true)
-dep_cglm       = dependency('cglm', required: true)
-dep_freetype   = dependency('freetype2', required: true)
-dep_harfbuzz   = dependency('harfbuzz', required: true)
-dep_m          = cc.find_library('m', required: true)
-dep_gl         = cc.find_library('GL', required: true)
 
-subdir('vendor/glad')
-subdir('vendor/stb_image')
-subdir('vendor/linesky')
+dep_cglm = dependency('cglm', required: true)
+dep_m = cc.find_library('m', required: true)
+
+backend_option = get_option('backends')
+
+build_opengl = backend_option == 'opengl' or backend_option == 'all'
+build_vulkan = backend_option == 'vulkan' or backend_option == 'all'
+
+runara_sources = [
+  'src/runara.c',
+  'src/log.c',
+  'src/backend.c',
+  'src/renderer.c',
+]
 
 runara_inc = include_directories('include')
-runara_sources = [
-  'runara.c',
-  glad_c, 
+
+runara_includes = [
+  runara_inc,
+]
+
+runara_deps = [
+  dep_cglm,
+  dep_m,
 ]
 
 runara_cflags = [
   '-march=native',
   '-ffast-math',
-  '-Wno-stringop-overflow',
-  '-Wno-missing-braces',
-  '-Wno-int-conversion',
-  '-Wno-unused-variable',
-  '-Wno-unused-but-set-variable',
 ]
+
+if build_opengl
+  dep_gl = dependency('gl', required: true)
+
+  subdir('vendor/glad')
+
+  runara_sources += [
+    'src/opengl/backend.c',
+    glad_c,
+  ]
+
+  runara_includes += [
+    glad_inc,
+  ]
+
+  runara_deps += [
+    dep_gl,
+  ]
+
+  runara_cflags += [
+    '-DRN_HAS_OPENGL=1',
+  ]
+endif
+
+if build_vulkan
+  add_languages('cpp')
+  dep_vulkan = dependency('vulkan', required: true)
+  glslang = find_program('glslangValidator', required: true)
+  python = find_program('python3', required: true)
+
+  vulkan_shaders = custom_target(
+    'runara-vulkan-shaders',
+    input: ['shaders/ui.vert', 'shaders/atlas.frag', 'shaders/dedicated.frag'],
+    output: 'runara-vulkan-shaders.c',
+    command: [python, files('tools/make_vk_shaders.py'), glslang,
+              '@OUTPUT@', '@INPUT@'],
+  )
+
+  runara_sources += [
+    'src/vulkan/backend.c',
+    'src/vulkan/vma.cpp',
+    vulkan_shaders,
+  ]
+
+  runara_includes += [include_directories('vendor/vma/include')]
+  runara_deps += [dep_vulkan]
+  runara_cflags += ['-DRN_HAS_VULKAN=1']
+endif
 
 runara_lib = static_library(
   'runara',
   sources: runara_sources,
-  include_directories: [
-    runara_inc,
-    glad_inc,
-    stb_inc,
-  ],
-  dependencies: [
-    dep_glfw3,
-    dep_cglm,
-    dep_freetype,
-    dep_harfbuzz,
-    dep_gl,
-    dep_m,
-  ],
+  include_directories: runara_includes,
+  dependencies: runara_deps,
   c_args: runara_cflags,
-  install: true
-)
-
-install_subdir('include/runara', install_dir: get_option('includedir'))
-
-runara_pc = import('pkgconfig')
-runara_pc.generate(
-  name: 'runara',
-  filebase: 'runara',
-  description: 'Runara rendering library (GL abstraction for Vortex compositor)',
-  version: meson.project_version(),
-  libraries: runara_lib,
-  subdirs: 'runara',
-  requires: ['glfw3', 'cglm', 'freetype2', 'harfbuzz'],
-)
-
-run_target('build-runara',
-  command: ['meson', 'compile', '-C', meson.current_build_dir()]
+  install: true,
 )
 
 runara_dep = declare_dependency(
   link_with: runara_lib,
-  include_directories: [
-    runara_inc,
-    glad_inc,
-    stb_inc,
-  ],
-  dependencies: [
-    dep_glfw3,
-    dep_cglm,
-    dep_freetype,
-    dep_harfbuzz,
-    dep_gl,
-    dep_m,
-  ]
+  include_directories: runara_includes,
+  dependencies: runara_deps,
 )
+
+install_subdir(
+  'include/runara',
+  install_dir: get_option('includedir'),
+)
+
+runara_pc = import('pkgconfig')
+
+runara_pc.generate(
+  name: 'runara',
+  filebase: 'runara',
+  description: 'Runara backend-independent 2D rendering library',
+  version: meson.project_version(),
+  libraries: runara_lib,
+  subdirs: 'runara',
+  requires: ['cglm'],
+)
+
+if get_option('examples')
+  subdir('examples')
+endif
+
+run_target(
+  'build-runara',
+  command: [
+    'meson',
+    'compile',
+    '-C',
+    meson.current_build_dir(),
+  ],
+)
+
+summary(
+  {
+    'OpenGL backend': build_opengl,
+    'Vulkan backend': build_vulkan,
+    'Examples': get_option('examples'),
+  },
+  section: 'Runara configuration',
+  bool_yn: true,
+)
+
