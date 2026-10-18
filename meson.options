@@ -13,6 +13,6 @@ option(
   'vt_render_backends',
   type: 'combo',
   choices: ['opengl', 'vulkan', 'all'],
-  value: 'all',
+  value: 'opengl',
   description: 'Rendering backends to build'
 )

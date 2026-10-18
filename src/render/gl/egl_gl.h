@@ -25,14 +25,23 @@
 #include "../../core/core_types.h"
 #include "../renderer.h"
 #include "src/core/surface.h"
+#include "subprojects/runara/include/runara/runara.h"
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
+#include <GL/glcorearb.h>
+
+struct vt_egl_texture_t {
+  uint32_t width, height;
+  GLuint id;
+};
 
 struct vt_egl_buffer_t {
-  RnTexture             tex;
-  EGLImageKHR           egl_img;
-  struct vt_renderer_t *renderer;
+  struct vt_egl_texture_t tex;
+  struct rn_image_t       rn_img;
+  bool                    rn_img_registered;
+  EGLImageKHR             egl_img;
+  struct vt_renderer_t   *renderer;
 };
 
 bool renderer_init_egl(struct vt_backend_t *backend, struct vt_renderer_t *r,
@@ -93,10 +102,6 @@ void renderer_draw_surface_simple_egl(struct vt_renderer_t *r,
                                       struct vt_output_t   *output,
                                       struct vt_surface_t *surface, float x,
                                       float y);
-
-void renderer_draw_image_egl(struct vt_renderer_t *r,
-                             struct vt_output_t *output, uint32_t tex_id,
-                             uint32_t width, uint32_t height, float x, float y);
 
 void renderer_draw_rect_egl(struct vt_renderer_t *r, float x, float y, float w,
                             float h, uint32_t col);

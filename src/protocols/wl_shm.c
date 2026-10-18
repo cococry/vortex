@@ -515,7 +515,8 @@ struct vt_buffer_t *vt_proto_wl_shm_get_buffer(struct wl_resource *res) {
       return NULL;
 
     struct vt_buffer_attachment_t *attachment = vt_buffer_add_attachment(
-        shm->buf, shm, shm, &_shm_buffer_attachment_impl);
+        shm->buf, NULL, shm, &_shm_buffer_attachment_impl);
+
     if (!attachment) {
       vt_buffer_unref(&shm->buf);
       return NULL;

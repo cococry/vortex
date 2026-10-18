@@ -1601,6 +1601,7 @@ bool vt_proto_linux_dmabuf_v1_init(
     VT_ERROR(comp->log,
              "Failed to create wl_global for zwp_linux_dmabuf_v1_interface.");
     free(_proto);
+    _proto = NULL;
     return false;
   }
 
@@ -1609,6 +1610,8 @@ bool vt_proto_linux_dmabuf_v1_init(
     VT_TRACE(comp->log, "linux_dmabuf.init: failed to set default feedback.");
     wl_global_destroy(_proto->global);
     free(_proto);
+    _proto = NULL;
+
     return false;
   }
 
@@ -1627,6 +1630,7 @@ bool vt_proto_linux_dmabuf_v1_init(
 
 struct vt_linux_dmabuf_v1_buffer_t *
 vt_proto_linux_dmabuf_v1_from_buffer_res(struct wl_resource *res) {
+  if(!_proto) return NULL;
   /* 1. Validate wl_buffer instance */
   if (!res ||
       !wl_resource_instance_of(res, &wl_buffer_interface,

@@ -48,7 +48,6 @@ void vt_renderer_implement(struct vt_renderer_t       *renderer,
         .draw_surface = renderer_draw_surface_egl,
         .draw_surface_simple = renderer_draw_surface_simple_egl,
         .draw_rect = renderer_draw_rect_egl,
-        .draw_image = renderer_draw_image_egl,
         .end_frame = renderer_end_frame_egl,
         .end_scene = renderer_end_scene_egl,
         .destroy = renderer_destroy_egl};

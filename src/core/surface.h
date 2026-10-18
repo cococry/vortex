@@ -30,7 +30,6 @@
 #define VT_MAX_FRAME_CBS 8
 
 #include "core_types.h"
-#include <runara/runara.h>
 #include <stdint.h>
 
 struct vt_frame_cb_pool {

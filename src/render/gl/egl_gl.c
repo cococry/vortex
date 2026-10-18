@@ -21,8 +21,9 @@
  */
 
 #include <EGL/eglplatform.h>
-#include <cglm/types-struct.h>
 #include <assert.h>
+#include <cglm/types-struct.h>
+#include <limits.h>
 #include <poll.h>
 #include <stdbool.h>
 #include <string.h>
@@ -44,12 +45,12 @@
 #include <wayland-egl.h>
 #include <wayland-server.h>
 
+#include "subprojects/runara/include/runara/opengl.h"
 #include "subprojects/runara/include/runara/runara.h"
+#include "subprojects/runara/vendor/glad/include/glad/glad.h"
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
-#include <GLES2/gl2.h>
-#include <GLES2/gl2ext.h>
 
 #include "egl_gl.h"
 
@@ -76,8 +77,15 @@ static PFNEGLSWAPBUFFERSWITHDAMAGEKHRPROC eglSwapBuffersWithDamageKHR_ptr =
     NULL;
 
 // DMABUFs
-static PFNGLEGLIMAGETARGETTEXTURE2DOESPROC glEGLImageTargetTexture2DOES_ptr =
+typedef void(APIENTRYP vt_gl_egl_image_target_texture_2d_proc)(GLenum target,
+                                                               void  *image);
+typedef void(APIENTRYP vt_gl_egl_image_target_tex_storage_proc)(
+    GLenum target, void *image, const GLint *attribs);
+static vt_gl_egl_image_target_texture_2d_proc glEGLImageTargetTexture2DOES_ptr =
     NULL;
+static vt_gl_egl_image_target_tex_storage_proc
+    glEGLImageTargetTexStorageEXT_ptr = NULL;
+
 static PFNEGLCREATEIMAGEKHRPROC          eglCreateImageKHR_ptr = NULL;
 static PFNEGLDESTROYIMAGEKHRPROC         eglDestroyImageKHR_ptr = NULL;
 static PFNEGLQUERYDMABUFFORMATSEXTPROC   eglQueryDmaBufFormatsEXT_ptr = NULL;
@@ -97,6 +105,7 @@ struct egl_backend_state_t {
 
   bool has_dmabuf_modifiers_support, has_dmabuf_support,
       has_explicit_sync_support;
+  bool has_gl_image_import_support;
 
   bool has_swap_buffers_with_damage_khr;
   bool has_swap_buffers_with_damage_ext;
@@ -104,7 +113,7 @@ struct egl_backend_state_t {
   // acquire fences seen at draw time, and how many had not signaled yet
   uint64_t fenced_draws, fence_pending_draws;
 
-  RnState *render;
+  struct rn_state_t *runara;
 
   struct wl_array formats;
 };
@@ -143,6 +152,11 @@ static void _egl_buffer_attachment_destroy(struct vt_buffer_t *buf,
 static bool _egl_track_rendered_buffer_use(struct vt_output_t     *output,
                                            struct vt_buffer_use_t *use);
 
+static bool _egl_gl_has_extension(const char *name);
+
+static bool _egl_has_extension(const char *exts, const char *name);
+
+static inline rn_color_t                     _hex_to_rn_color(uint32_t col);
 struct vt_buffer_attachment_implementation_t egl_buffer_attachment_impl = {
     .destroy = _egl_buffer_attachment_destroy};
 
@@ -187,8 +201,15 @@ bool _egl_gl_import_buffer_shm(struct vt_renderer_t *r, struct vt_shm_attr_t *a,
                                struct vt_buffer_t      *buf,
                                struct vt_egl_buffer_t  *egl_buf,
                                const pixman_region32_t *damage) {
+  // TODO: damage
   (void)damage;
+
   if (!buf || !a || !r || !egl_buf || !a->data)
+    return false;
+
+  struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
+
+  if (!egl)
     return false;
 
   int      width = a->width;
@@ -209,21 +230,35 @@ bool _egl_gl_import_buffer_shm(struct vt_renderer_t *r, struct vt_shm_attr_t *a,
     return false;
   }
 
-  if (width <= 0 || height <= 0 || stride < width * 4 || (stride % 4) != 0)
+  if (width <= 0 || height <= 0 || stride <= 0 ||
+      (uint64_t)stride < (uint64_t)width * 4 || (stride % 4) != 0)
     return false;
 
   void *data = a->data;
 
-  // width/height checked positive above
   bool need_buf_regen = egl_buf->tex.id == 0 ||
                         egl_buf->tex.width != (uint32_t)width ||
                         egl_buf->tex.height != (uint32_t)height;
 
-  if (egl_buf->tex.id == 0)
+  if (egl_buf->tex.id == 0) {
+    VT_TRACE(r->comp->log,
+             "Regenerating OpenGL texture for SHM-backend EGL buffer %p. Old "
+             "dimensions: "
+             "[%i,%i], new dimensions: [%i, %i]",
+             (void *)egl_buf, egl_buf->tex.width, egl_buf->tex.height, width,
+             height);
     glGenTextures(1, &egl_buf->tex.id);
+    if (!egl_buf->tex.id)
+      return false;
+  }
 
+  GLint old_texture = 0;
+  glGetIntegerv(GL_TEXTURE_BINDING_2D, &old_texture);
   glBindTexture(GL_TEXTURE_2D, egl_buf->tex.id);
 
+  GLint old_unpack_alignment = 4, old_unpack_row_length = 0;
+  glGetIntegerv(GL_UNPACK_ALIGNMENT, &old_unpack_alignment);
+  glGetIntegerv(GL_UNPACK_ROW_LENGTH, &old_unpack_row_length);
   glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
   glPixelStorei(GL_UNPACK_ROW_LENGTH, stride / 4);
 
@@ -234,9 +269,6 @@ bool _egl_gl_import_buffer_shm(struct vt_renderer_t *r, struct vt_shm_attr_t *a,
     glTexImage2D(GL_TEXTURE_2D, 0, internal_format, width, height, 0, format,
                  type, data);
 
-    egl_buf->tex.width = width;
-    egl_buf->tex.height = height;
-
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -245,8 +277,34 @@ bool _egl_gl_import_buffer_shm(struct vt_renderer_t *r, struct vt_shm_attr_t *a,
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, format, type, data);
   }
 
-  glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
-  glBindTexture(GL_TEXTURE_2D, 0);
+  GLenum upload_error = glGetError();
+  glPixelStorei(GL_UNPACK_ROW_LENGTH, old_unpack_row_length);
+  glPixelStorei(GL_UNPACK_ALIGNMENT, old_unpack_alignment);
+  glBindTexture(GL_TEXTURE_2D, (GLuint)old_texture);
+  if (upload_error != GL_NO_ERROR) {
+    VT_ERROR(r->comp->log, "SHM texture upload failed: GL 0x%x", upload_error);
+    return false;
+  }
+
+  egl_buf->tex.width = (uint32_t)width;
+  egl_buf->tex.height = (uint32_t)height;
+
+  if (!egl_buf->rn_img_registered) {
+    rn_result_t result = rn_image_from_gl_texture(
+        egl->runara, egl_buf->tex.id, egl_buf->tex.width, egl_buf->tex.height,
+        &egl_buf->rn_img);
+
+    if (result != RN_OK) {
+      VT_ERROR(r->comp->log,
+               "Failed to create Runara image from GL texture (ID: %i): %s",
+               egl_buf->tex.id, rn_result_to_str(result));
+      return false;
+    }
+
+    egl_buf->rn_img_registered = true;
+  }
+  egl_buf->rn_img.width = (uint32_t)width;
+  egl_buf->rn_img.height = (uint32_t)height;
 
   return true;
 }
@@ -259,13 +317,22 @@ bool _egl_gl_import_buffer_dmabuf(struct vt_renderer_t    *r,
                                   struct vt_buffer_t      *buf,
                                   struct vt_egl_buffer_t  *egl_buf) {
   (void)buf;
+  if (!r || !r->user_data || !a || !egl_buf)
+    return false;
 
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
 
-  if (!a->num_planes || a->width <= 0 || a->height <= 0) {
+  if (!a->num_planes || a->num_planes > VT_DMABUF_PLANES_CAP || a->width <= 0 ||
+      a->height <= 0) {
     VT_ERROR(r->comp->log, "Invalid dmabuf attributes for import.");
     return false;
   }
+  if (!egl->has_dmabuf_support || !egl->has_gl_image_import_support ||
+      !eglCreateImageKHR_ptr || !eglDestroyImageKHR_ptr) {
+    VT_WARN(r->comp->log, "Desktop GL EGLImage dma-buf import unavailable.");
+    return false;
+  }
+
   if (a->mod != _VT_DRM_FORMAT_MOD_INVALID &&
       a->mod != _VT_DRM_FORMAT_MOD_LINEAR &&
       !egl->has_dmabuf_modifiers_support) {
@@ -273,11 +340,47 @@ bool _egl_gl_import_buffer_dmabuf(struct vt_renderer_t    *r,
     return false;
   }
 
-  if (egl_buf->egl_img != EGL_NO_IMAGE_KHR) {
-    eglDestroyImageKHR_ptr(egl->egl_dsp, egl_buf->egl_img);
+  /* Reuse the EGLImage and Runara registration for a buffer of the same
+   * dimensions */
+  if (egl_buf->egl_img != EGL_NO_IMAGE_KHR && egl_buf->tex.id != 0 &&
+      egl_buf->rn_img_registered && egl_buf->tex.width == (uint32_t)a->width &&
+      egl_buf->tex.height == (uint32_t)a->height)
+    return true;
 
-    egl_buf->egl_img = EGL_NO_IMAGE_KHR;
+  bool                    found_format = false;
+  bool                    found_modifier = false;
+  bool                    is_external_only = false;
+  struct vt_drm_format_t *fmt;
+  wl_array_for_each(fmt, &egl->formats) {
+    if (fmt->format != a->format)
+      continue;
+    found_format = true;
+    struct vt_drm_format_modifier_t *mod = vt_drm_format_get_mod(fmt, a->mod);
+    if (!mod)
+      continue;
+    found_modifier = true;
+    is_external_only = mod->_egl_ext_only;
+    break;
   }
+
+  /* External only modifiers require GLES external texture sampling.
+   * Runara samples GL_TEXTURE_2D instead, so we reject those */
+  if (is_external_only) {
+    VT_WARN(r->comp->log, "DMA-BUF modifier requires GLES external textures; "
+                          "rejecting for desktop OpenGL 3.3.");
+    return false;
+  }
+
+  /* If the queried capabilities are available, do not accept unadvertised
+   * format/mod combinations. */
+  if (egl->formats.size && a->mod != _VT_DRM_FORMAT_MOD_INVALID &&
+      (!found_format || !found_modifier)) {
+    VT_WARN(r->comp->log, "DMA-BUF format/modifier not advertised for import.");
+    return false;
+  }
+
+  /* Prepare a complete replacement before releasing previously imported
+   * texture and its Runara registration. */
 
   // https://gitlab.freedesktop.org/wlroots/wlroots/-/blob/master/render/egl.c#L750
   unsigned int atti = 0;
@@ -330,10 +433,9 @@ bool _egl_gl_import_buffer_dmabuf(struct vt_renderer_t    *r,
   attribs[atti++] = EGL_NONE;
   assert(atti <= sizeof(attribs) / sizeof(attribs[0]));
 
-  egl_buf->egl_img = eglCreateImageKHR_ptr(
+  EGLImageKHR new_image = eglCreateImageKHR_ptr(
       egl->egl_dsp, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, attribs);
-
-  if (egl_buf->egl_img == EGL_NO_IMAGE_KHR) {
+  if (new_image == EGL_NO_IMAGE_KHR) {
     EGLint err = eglGetError();
     VT_ERROR(r->comp->log,
              "Failed to import dmabuf into EGLImage: error=0x%x "
@@ -342,42 +444,86 @@ bool _egl_gl_import_buffer_dmabuf(struct vt_renderer_t    *r,
     return false;
   }
 
-  bool                    is_external_only = false;
-  struct vt_drm_format_t *fmt;
-  wl_array_for_each(fmt, &egl->formats) {
-    if (fmt->format != a->format)
-      continue;
+  GLenum target = GL_TEXTURE_2D;
+  GLuint new_texture = 0;
+  GLint  old_texture = 0;
+  glGetIntegerv(GL_TEXTURE_BINDING_2D, &old_texture);
 
-    struct vt_drm_format_modifier_t *mod = vt_drm_format_get_mod(fmt, a->mod);
-    if (!mod)
-      continue;
+  VT_TRACE(r->comp->log,
+           "Regenerating OpenGL texture for DMABUF-backend EGL buffer %p. Old "
+           "dimensions: "
+           "[%i,%i], new dimensions: [%i, %i]",
+           (void *)egl_buf, egl_buf->tex.width, egl_buf->tex.height,
+           (uint32_t)a->width, (uint32_t)a->height);
 
-    is_external_only = mod->_egl_ext_only;
-    break;
+  glGenTextures(1, &new_texture);
+  if (!new_texture) {
+    eglDestroyImageKHR_ptr(egl->egl_dsp, new_image);
+    return false;
   }
 
-  GLenum target = is_external_only ? GL_TEXTURE_EXTERNAL_OES : GL_TEXTURE_2D;
+  glBindTexture(target, new_texture);
+  /* Prefer immutable EGLImage backed storage where supported, with the
+   * legacy OES path as fallback. */
+  if (glEGLImageTargetTexStorageEXT_ptr)
+    glEGLImageTargetTexStorageEXT_ptr(target, (void *)new_image, NULL);
+  else if (glEGLImageTargetTexture2DOES_ptr)
+    glEGLImageTargetTexture2DOES_ptr(target, (void *)new_image);
+  else {
+    glBindTexture(target, (GLuint)old_texture);
+    glDeleteTextures(1, &new_texture);
+    eglDestroyImageKHR_ptr(egl->egl_dsp, new_image);
+    return false;
+  }
 
-  if (egl_buf->tex.id == 0)
-    glGenTextures(1, &egl_buf->tex.id);
+  GLenum image_error = glGetError();
+  if (image_error == GL_NO_ERROR) {
+    glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    image_error = glGetError();
+  }
+  glBindTexture(target, (GLuint)old_texture);
+  if (image_error != GL_NO_ERROR) {
+    VT_ERROR(r->comp->log, "Desktop GL EGLImage texture import failed: 0x%x",
+             image_error);
+    glDeleteTextures(1, &new_texture);
+    eglDestroyImageKHR_ptr(egl->egl_dsp, new_image);
+    return false;
+  }
 
-  glBindTexture(target, egl_buf->tex.id);
-  glEGLImageTargetTexture2DOES_ptr(target, egl_buf->egl_img);
+  struct rn_image_t new_rn_image = {0};
+  rn_result_t       result =
+      rn_image_from_gl_texture(egl->runara, new_texture, (uint32_t)a->width,
+                               (uint32_t)a->height, &new_rn_image);
+  if (result != RN_OK) {
+    VT_ERROR(r->comp->log,
+             "Failed to create Runara image from GL texture (ID: %u): %s",
+             new_texture, rn_result_to_str(result));
+    glDeleteTextures(1, &new_texture);
+    eglDestroyImageKHR_ptr(egl->egl_dsp, new_image);
+    return false;
+  }
 
-  glTexParameteri(target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-  glTexParameteri(target, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-  glTexParameteri(target, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+  /* we commit only after the EGLImage, texture and Runara handle all exist. */
+  if (egl_buf->rn_img_registered)
+    rn_texture_release(egl->runara, &egl_buf->rn_img);
+  if (egl_buf->tex.id)
+    glDeleteTextures(1, &egl_buf->tex.id);
+  if (egl_buf->egl_img != EGL_NO_IMAGE_KHR)
+    eglDestroyImageKHR_ptr(egl->egl_dsp, egl_buf->egl_img);
 
-  egl_buf->tex.width = a->width;
-  egl_buf->tex.height = a->height;
+  egl_buf->egl_img = new_image;
+  egl_buf->tex.id = new_texture;
+  egl_buf->tex.width = (uint32_t)a->width;
+  egl_buf->tex.height = (uint32_t)a->height;
+  egl_buf->rn_img = new_rn_image;
+  egl_buf->rn_img_registered = true;
 
   VT_TRACE(r->comp->log,
            "Imported dmabuf %ux%u fmt=0x%x mod=0x%016" PRIx64 " (%s)", a->width,
            a->height, a->format, a->mod, is_external_only ? "external" : "2D");
-
-  glBindTexture(target, 0);
-
   return true;
 }
 
@@ -752,8 +898,15 @@ static void _egl_buffer_attachment_destroy(struct vt_buffer_t *buf,
   struct egl_backend_state_t *egl =
       BACKEND_DATA(egl_buf->renderer, struct egl_backend_state_t);
 
-  if (egl_buf->tex.id)
+  if (egl_buf->rn_img_registered) {
+    rn_texture_release(egl->runara, &egl_buf->rn_img);
+    egl_buf->rn_img_registered = false;
+  }
+
+  if (egl_buf->tex.id) {
     glDeleteTextures(1, &egl_buf->tex.id);
+    egl_buf->tex.id = 0;
+  }
 
   VT_TRACE(r->comp->log, "Deleted OpenGL texture for buffer %p", (void *)buf);
 
@@ -788,6 +941,37 @@ static bool _egl_track_rendered_buffer_use(struct vt_output_t     *output,
   wl_list_insert(egl_output->rendered_buffer_uses.prev, &egl_use->link);
 
   return true;
+}
+
+static bool _egl_gl_has_extension(const char *name) {
+  GLint count = 0;
+  glGetIntegerv(GL_NUM_EXTENSIONS, &count);
+  for (GLint i = 0; i < count; ++i) {
+    const char *ext = (const char *)glGetStringi(GL_EXTENSIONS, (GLuint)i);
+    if (ext && strcmp(ext, name) == 0)
+      return true;
+  }
+  return false;
+}
+
+static bool _egl_has_extension(const char *exts, const char *name) {
+  if (!exts || !name || !*name)
+    return false;
+  size_t len = strlen(name);
+  for (const char *p = exts; (p = strstr(p, name)); p += len) {
+    if ((p == exts || p[-1] == ' ') && (p[len] == ' ' || p[len] == '\0'))
+      return true;
+  }
+  return false;
+}
+
+static inline rn_color_t _hex_to_rn_color(uint32_t col) {
+  return (rn_color_t){
+      .r = ((col >> 24) & 0xFF) / 255.0f,
+      .g = ((col >> 16) & 0xFF) / 255.0f,
+      .b = ((col >> 8) & 0xFF) / 255.0f,
+      .a = (col & 0xFF) / 255.0f,
+  };
 }
 
 // ===================================================
@@ -861,22 +1045,19 @@ bool renderer_init_egl(struct vt_backend_t *backend, struct vt_renderer_t *r,
     egl->has_swap_buffers_with_damage_khr = true;
   }
 
-  egl->has_dmabuf_support = true;
-  egl->has_dmabuf_modifiers_support = true;
+  egl->has_dmabuf_support =
+      _egl_has_extension(exts, "EGL_EXT_image_dma_buf_import");
+  egl->has_dmabuf_modifiers_support =
+      _egl_has_extension(exts, "EGL_EXT_image_dma_buf_import_modifiers");
   egl->has_explicit_sync_support = true;
+  /* GL extensions cannot be checked until EGL is current and Runara has
+   * initialized its GLAD. See renderer_setup_renderable_output_egl(). */
+  egl->has_gl_image_import_support = false;
+  if (!egl->has_dmabuf_support)
+    VT_WARN(backend->comp->log, "EGL_EXT_image_dma_buf_import unavailable.");
 
-  glEGLImageTargetTexture2DOES_ptr =
-      (PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)eglGetProcAddress(
-          "glEGLImageTargetTexture2DOES");
-
-  if (!glEGLImageTargetTexture2DOES_ptr) {
-    VT_ERROR(backend->comp->log,
-             "Failed to load glEGLImageTargetTexture2DOES (GL_OES_EGL_image), "
-             "DMABUF imports will not be supported.");
-    egl->has_dmabuf_support = false;
-  }
-
-  if (strstr(exts, "EGL_KHR_image_base")) {
+  if (_egl_has_extension(exts, "EGL_KHR_image_base") ||
+      _egl_has_extension(exts, "EGL_KHR_image")) {
     eglCreateImageKHR_ptr =
         (PFNEGLCREATEIMAGEKHRPROC)eglGetProcAddress("eglCreateImageKHR");
     eglDestroyImageKHR_ptr =
@@ -893,8 +1074,9 @@ bool renderer_init_egl(struct vt_backend_t *backend, struct vt_renderer_t *r,
     egl->has_dmabuf_support = false;
   }
 
-  if (egl->has_explicit_sync_support && strstr(exts, "EGL_KHR_fence_sync") &&
-      strstr(exts, "EGL_ANDROID_native_fence_sync")) {
+  if (egl->has_explicit_sync_support &&
+      _egl_has_extension(exts, "EGL_KHR_fence_sync") &&
+      _egl_has_extension(exts, "EGL_ANDROID_native_fence_sync")) {
     eglCreateSyncKHR_ptr =
         (PFNEGLCREATESYNCKHRPROC)eglGetProcAddress("eglCreateSyncKHR");
     eglDestroySyncKHR_ptr =
@@ -906,7 +1088,7 @@ bool renderer_init_egl(struct vt_backend_t *backend, struct vt_renderer_t *r,
             "eglDupNativeFenceFDANDROID");
 
     if (!eglCreateSyncKHR_ptr || !eglDestroySyncKHR_ptr ||
-        !eglDupNativeFenceFDANDROID_ptr) {
+        !eglWaitSyncKHR_ptr || !eglDupNativeFenceFDANDROID_ptr) {
       VT_ERROR(backend->comp->log, "Failed to load explicit sync procs, "
                                    "explicit sync will not be used.");
       egl->has_explicit_sync_support = false;
@@ -1023,6 +1205,9 @@ static bool _egl_query_dmabuf_formats(struct vt_compositor_t *comp,
     }
 
     for (EGLint j = 0; j < returned_mods; j++) {
+      // Desktop OpenGL Core cannot sample GL_TEXTURE_EXTERNAL_OES.
+      if (egl_ext_only[j])
+        continue;
       struct vt_drm_format_modifier_t *mod = wl_array_add(&mods, sizeof(*mod));
 
       if (!mod) {
@@ -1040,6 +1225,11 @@ static bool _egl_query_dmabuf_formats(struct vt_compositor_t *comp,
 
     free(egl_mods);
     free(egl_ext_only);
+
+    if (mods.size == 0) {
+      wl_array_release(&mods);
+      continue;
+    }
 
     struct vt_drm_format_t fmt = {0};
     vt_drm_format_init(&fmt, dmabuf_formats[i]);
@@ -1067,7 +1257,15 @@ bool renderer_query_dmabuf_formats_egl(struct vt_compositor_t *comp,
   if (!comp || !native_handle || !formats)
     return false;
 
-  if (!_egl_load_dmabuf_query_procs())
+  /* A separate display query cannot establish desktop GL interoperability.
+   * Do not advertise DMA-BUFs unless the live renderer verified it. */
+  struct vt_renderer_t *active = comp->renderer;
+  if (!active || !active->user_data)
+    return false;
+  struct egl_backend_state_t *live =
+      BACKEND_DATA(active, struct egl_backend_state_t);
+  if (!live->has_dmabuf_support || !live->has_gl_image_import_support ||
+      !live->has_dmabuf_modifiers_support || !_egl_load_dmabuf_query_procs())
     return false;
 
   EGLDisplay egl_dsp;
@@ -1091,7 +1289,8 @@ bool renderer_query_dmabuf_formats_with_renderer_egl(
   struct egl_backend_state_t *egl =
       BACKEND_DATA(renderer, struct egl_backend_state_t);
 
-  if (!_egl_load_dmabuf_query_procs()) {
+  if (!egl->has_dmabuf_support || !egl->has_gl_image_import_support ||
+      !egl->has_dmabuf_modifiers_support || !_egl_load_dmabuf_query_procs()) {
     VT_ERROR(renderer->comp->log,
              "DMABUF extensions not supported, falling back to SHM.\n");
     egl->has_dmabuf_modifiers_support = false;
@@ -1169,14 +1368,40 @@ bool renderer_setup_renderable_output_egl(struct vt_renderer_t *r,
     return false;
   }
 
-  if (!egl->render) {
-    egl->render = rn_init(0, 0, (RnGLLoader)eglGetProcAddress);
-    if (!egl->render) {
-      VT_ERROR(r->comp->log, "Failed to initialize runara rendering backend.");
+  if (!egl->runara) {
+    struct rn_init_options_t opts = {
+        .gl_load_proc = (rn_gl_load_proc)eglGetProcAddress,
+        .log = {.verbose = r->comp->log.verbose,
+                .logfile = r->comp->log.stream != stdout}};
+    egl->runara = rn_state_init(&opts, 0, 0);
+
+    if (!egl->runara) {
+      VT_ERROR(r->comp->log, "Failed to initialize Runara rendering engine.");
       return false;
     } else {
-      VT_TRACE(r->comp->log, "Initialized runara rendering backend.");
+      VT_TRACE(r->comp->log, "Initialized Runara rendering engine.");
     }
+  }
+
+  // Check for EGLimage -> GL texture import funcs
+  if (egl->has_dmabuf_support && !egl->has_gl_image_import_support) {
+    bool has_storage = _egl_gl_has_extension("GL_EXT_EGL_image_storage");
+    bool has_oes = _egl_gl_has_extension("GL_OES_EGL_image");
+    if (has_storage) {
+      glEGLImageTargetTexStorageEXT_ptr =
+          (vt_gl_egl_image_target_tex_storage_proc)eglGetProcAddress(
+              "glEGLImageTargetTexStorageEXT");
+    }
+    if (has_oes) {
+      glEGLImageTargetTexture2DOES_ptr =
+          (vt_gl_egl_image_target_texture_2d_proc)eglGetProcAddress(
+              "glEGLImageTargetTexture2DOES");
+    }
+    egl->has_gl_image_import_support =
+        glEGLImageTargetTexStorageEXT_ptr || glEGLImageTargetTexture2DOES_ptr;
+    if (!egl->has_gl_image_import_support)
+      VT_WARN(r->comp->log, "No supported desktop GL EGLImage texture import "
+                            "extension. DMABUF textures cannot be imported.");
   }
 
   output->render_surface = (void *)egl_surf;
@@ -1324,6 +1549,8 @@ bool renderer_import_buffer_egl(struct vt_renderer_t    *r,
   VT_TRACE(r->comp->log, "Importing buffer to handle %p", (void *)buf);
 
   struct vt_egl_buffer_t *egl_buf = _egl_get_or_create_egl_buffer(r, buf);
+  if (!egl_buf)
+    return false;
 
   return _egl_import_buffer_by_deduced_type(r, buf, egl_buf, damage,
                                             egl->has_dmabuf_support);
@@ -1367,9 +1594,9 @@ void renderer_set_clear_color_egl(struct vt_renderer_t *r,
                                   struct vt_output_t *output, uint32_t col) {
   (void)r;
   (void)output;
-  vec4s zto = rn_color_to_zto(rn_color_from_hex(col));
-  glClearColor(zto.r, zto.g, zto.b, zto.a);
-  glClear(GL_COLOR_BUFFER_BIT);
+
+  struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
+  rn_clear_color(egl->runara, _hex_to_rn_color(col));
 }
 
 void renderer_stencil_damage_pass_egl(struct vt_renderer_t *r,
@@ -1418,7 +1645,12 @@ void renderer_begin_scene_egl(struct vt_renderer_t *r,
 
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
 
-  rn_begin(egl->render);
+  rn_result_t res = rn_begin(egl->runara);
+  if (res != RN_OK) {
+    VT_ERROR(r->comp->log,
+             "Failed to begin rendering with Runara: rn_begin(): %s",
+             rn_result_to_str(res));
+  }
 }
 
 void renderer_begin_frame_egl(struct vt_renderer_t *r,
@@ -1434,9 +1666,11 @@ void renderer_begin_frame_egl(struct vt_renderer_t *r,
   struct egl_output_state_t  *egl_output =
       (struct egl_output_state_t *)output->user_data_render;
 
-  EGLSurface        surface = (EGLSurface)output->render_surface;
-  static EGLSurface last_surface = EGL_NO_SURFACE;
-  if (surface != last_surface) {
+  EGLSurface surface = (EGLSurface)output->render_surface;
+  if (eglGetCurrentContext() != egl->egl_ctx ||
+      eglGetCurrentDisplay() != egl->egl_dsp ||
+      eglGetCurrentSurface(EGL_DRAW) != surface ||
+      eglGetCurrentSurface(EGL_READ) != surface) {
     if (!eglMakeCurrent(egl->egl_dsp, surface, surface, egl->egl_ctx)) {
       EGLint err = eglGetError();
       VT_ERROR(
@@ -1445,10 +1679,11 @@ void renderer_begin_frame_egl(struct vt_renderer_t *r,
           err, _egl_err_str(err));
       return;
     }
-    last_surface = surface;
   }
 
-  rn_resize_display_ex(egl->render, output->width, output->height, 0, 0);
+  const struct rn_box_u32_t canvas = {
+      .x = 0, .y = 0, .width = output->width, .height = output->height};
+  rn_canvas_set_bounds(egl->runara, &canvas);
 
   glBindFramebuffer(GL_FRAMEBUFFER, egl_output->fbo_id);
 }
@@ -1488,6 +1723,10 @@ void renderer_draw_surface_egl(struct vt_renderer_t *r,
     return;
   }
 
+  /* Install the client's acquire wait before touching its GPU storage. */
+  if (!_egl_buffer_use_is_ready(r, use))
+    return;
+
   if (!renderer_import_buffer_egl(r, use->buf, &surface->applied.damage)) {
     VT_ERROR(r->comp->log, "Failed to import buffer %p for surface %p.",
              (void *)use->buf, (void *)surface);
@@ -1513,21 +1752,19 @@ void renderer_draw_surface_egl(struct vt_renderer_t *r,
 
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
 
-  if (!_egl_buffer_use_is_ready(r, use))
-    return;
+  egl_buf->rn_img.uv[0] = (float)src_box->x / (float)surface->applied.width;
+  egl_buf->rn_img.uv[1] = (float)src_box->y / (float)surface->applied.height;
+  egl_buf->rn_img.uv[2] =
+      (float)(src_box->x + src_box->width) / (float)surface->applied.width,
+  egl_buf->rn_img.uv[3] =
+      (float)(src_box->y + src_box->height) / (float)surface->applied.height;
 
-  vec4s uv_rect = (vec4s){
-      .x = (float)src_box->x / (float)surface->applied.width,
-      .y = (float)src_box->y / (float)surface->applied.height,
-      .z = (float)(src_box->x + src_box->width) / (float)surface->applied.width,
-      .w = (float)(src_box->y + src_box->height) /
-           (float)surface->applied.height,
-  };
-
-  rn_image_render_adv(egl->render, (vec2s){.x = dst_box->x, .y = dst_box->y},
-                      (vec2s){.x = dst_box->width, .y = dst_box->height}, 0.0f,
-                      RN_WHITE, egl_buf->tex, uv_rect, false, RN_NO_COLOR, 0.0f,
-                      0.0f);
+  rn_draw_texture(egl->runara, &egl_buf->rn_img,
+                  (struct rn_rect_t){.x = dst_box->x,
+                                     .y = dst_box->y,
+                                     .width = dst_box->width,
+                                     .height = dst_box->height},
+                  (rn_color_t){1.0f, 1.0f, 1.0f, 1.0f});
 
   if (!vt_output_track_presented_surface(output, surface)) {
     VT_ERROR(r->comp->log, "Failed to track presented surface %p on output %p.",
@@ -1567,16 +1804,6 @@ void renderer_draw_surface_simple_egl(struct vt_renderer_t *r,
   renderer_draw_surface_egl(r, output, surface, &src, &dst);
 }
 
-void renderer_draw_image_egl(struct vt_renderer_t *r,
-                             struct vt_output_t *output, uint32_t tex_id,
-                             uint32_t width, uint32_t height, float x,
-                             float y) {
-  (void)output;
-  struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
-
-  rn_image_render(egl->render, (vec2s){.x = x, .y = y}, RN_WHITE,
-                  (RnTexture){.id = tex_id, .width = width, .height = height});
-}
 void renderer_draw_rect_egl(struct vt_renderer_t *r, float x, float y, float w,
                             float h, uint32_t col) {
   if (!r || !r->impl.draw_rect || !r->user_data) {
@@ -1586,8 +1813,9 @@ void renderer_draw_rect_egl(struct vt_renderer_t *r, float x, float y, float w,
   }
 
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
-  rn_rect_render(egl->render, (vec2s){.x = x, .y = y}, (vec2s){.x = w, .y = h},
-                 rn_color_from_hex(col));
+  rn_draw_rect(egl->runara,
+               (struct rn_rect_t){.x = x, .y = y, .width = w, .height = h},
+               _hex_to_rn_color(col));
 }
 
 void renderer_end_scene_egl(struct vt_renderer_t *r,
@@ -1601,7 +1829,11 @@ void renderer_end_scene_egl(struct vt_renderer_t *r,
 
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
 
-  rn_end(egl->render);
+  rn_result_t res = rn_end(egl->runara);
+  if (res != RN_OK) {
+    VT_ERROR(r->comp->log, "Failed to end rendering with Runara: rn_end(): %s",
+             rn_result_to_str(res));
+  }
 }
 
 void renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,
@@ -1652,8 +1884,6 @@ void renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,
              (void *)output, eglGetError());
     return;
   }
-
-  egl->render->drawcalls = 0;
 }
 
 bool renderer_destroy_egl(struct vt_renderer_t *r) {
@@ -1671,7 +1901,14 @@ bool renderer_destroy_egl(struct vt_renderer_t *r) {
           " of them not yet signaled.",
           egl->fenced_draws, egl->fence_pending_draws);
 
-  rn_terminate(egl->render);
+  /* GL resources must be destroyed while the renderer's context is current. */
+  if (eglGetCurrentContext() != egl->egl_ctx) {
+    VT_ERROR(r->comp->log,
+             "Cannot tear down Runara without current EGL context.");
+    return false;
+  }
+  if (egl->runara)
+    rn_state_fini(egl->runara);
 
   eglMakeCurrent(egl->egl_dsp, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
   if (egl->egl_ctx != EGL_NO_CONTEXT) {
