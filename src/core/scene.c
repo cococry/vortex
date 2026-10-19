@@ -265,7 +265,7 @@ static void _composite_pass(struct vt_scene_t  *scene,
 
   r->impl.begin_scene(r, output);
 
-  r->impl.set_clear_color(r, output, 0x000000);
+  r->impl.clear_color_buffer(r, output); 
 
   _scene_render_layers(scene, output);
 

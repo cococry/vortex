@@ -80,6 +80,9 @@ void renderer_set_vsync_egl(struct vt_renderer_t *r, bool vsync);
 void renderer_set_clear_color_egl(struct vt_renderer_t *r,
                                   struct vt_output_t *output, uint32_t col);
 
+void renderer_clear_color_buffer_egl(struct vt_renderer_t *r,
+                                  struct vt_output_t *output);
+
 void renderer_stencil_damage_pass_egl(struct vt_renderer_t *r,
                                       struct vt_output_t   *output);
 

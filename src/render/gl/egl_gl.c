@@ -1593,11 +1593,17 @@ void renderer_set_vsync_egl(struct vt_renderer_t *r, bool vsync) {
 
 void renderer_set_clear_color_egl(struct vt_renderer_t *r,
                                   struct vt_output_t *output, uint32_t col) {
-  (void)r;
   (void)output;
 
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
   rn_clear_color(egl->runara, _hex_to_rn_color(col));
+}
+void renderer_clear_color_buffer_egl(struct vt_renderer_t *r,
+                                  struct vt_output_t *output) {
+  (void)output;
+
+  struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
+  rn_clear_color_buffer(egl->runara); 
 }
 
 void renderer_stencil_damage_pass_egl(struct vt_renderer_t *r,

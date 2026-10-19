@@ -56,6 +56,7 @@ struct vt_renderer_interface_t {
   void (*set_vsync)(struct vt_renderer_t *r, bool vsync);
   void (*set_clear_color)(struct vt_renderer_t *r, struct vt_output_t *output,
                           uint32_t col);
+  void (*clear_color_buffer)(struct vt_renderer_t *r, struct vt_output_t *output);
   void (*stencil_damage_pass)(struct vt_renderer_t *r,
                               struct vt_output_t   *output);
   void (*composite_pass)(struct vt_renderer_t *r, struct vt_output_t *output);
