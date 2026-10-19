@@ -367,7 +367,7 @@ static void _wl_shm_pool_create_buffer(struct wl_client   *client,
     return;
 
   if (!_format_is_advertised(format)) {
-    wl_resource_post_error(resource, WL_SHM_POOL_ERROR_INVALID_FORMAT,
+    wl_resource_post_error(resource, WL_SHM_ERROR_INVALID_FORMAT,
                            "wl_shm format 0x%08x was not advertised", format);
     return;
   }
@@ -375,7 +375,7 @@ static void _wl_shm_pool_create_buffer(struct wl_client   *client,
   size_t byte_size = 0;
   if (!_validate_buffer_layout(pool, offset, width, height, stride, format,
                                &byte_size)) {
-    wl_resource_post_error(resource, WL_SHM_POOL_ERROR_INVALID_STRIDE,
+    wl_resource_post_error(resource, WL_SHM_ERROR_INVALID_FORMAT,
                            "invalid wl_shm buffer layout: offset=%d size=%dx%d "
                            "stride=%d pool=%zu",
                            offset, width, height, stride, pool->size);
@@ -424,7 +424,7 @@ static void _wl_shm_pool_resize(struct wl_client   *client,
     return;
 
   if (size <= 0 || (size_t)size <= pool->size) {
-    wl_resource_post_error(resource, WL_SHM_POOL_ERROR_INVALID_STRIDE,
+    wl_resource_post_error(resource, WL_SHM_ERROR_INVALID_STRIDE,
                            "wl_shm_pool.resize may only grow the pool "
                            "(old=%zu new=%d)",
                            pool->size, size);
@@ -432,7 +432,7 @@ static void _wl_shm_pool_resize(struct wl_client   *client,
   }
 
   if (!_fd_is_large_enough(pool->fd, (size_t)size)) {
-    wl_resource_post_error(resource, WL_SHM_POOL_ERROR_INVALID_STRIDE,
+    wl_resource_post_error(resource, WL_SHM_ERROR_INVALID_STRIDE,
                            "wl_shm pool backing file is smaller than resize "
                            "request (%d bytes)",
                            size);
