@@ -20,9 +20,14 @@
  * SOFTWARE.
  */
 
+#include "config.h"
 #include "input.h"
+#if VT_HAS_LIBINPUT
 #include "src/input/backends/libinput/libinput.h"
+#endif
+#if VT_HAS_WAYLAND_INPUT
 #include "src/input/backends/wayland/wayland_input.h"
+#endif
 
 #define _SUBSYS_NAME "INPUT"
 
@@ -32,19 +37,23 @@ void vt_input_implement(struct vt_input_backend_t       *backend,
     return;
   backend->platform = platform;
 
+#if VT_HAS_LIBINPUT
   if (platform == VT_INPUT_LIBINPUT) {
     backend->impl = (struct vt_input_backend_interface_t){
         .init = input_backend_init_li,
         .terminate = input_backend_terminate_li,
         .resume = input_backend_resume_li,
         .suspend = input_backend_suspend_li};
-  } else if (platform == VT_INPUT_WAYLAND) {
+  } 
+#elif VT_HAS_WAYLAND_INPUT 
+  if (platform == VT_INPUT_WAYLAND) {
     backend->impl = (struct vt_input_backend_interface_t){
         .init = input_backend_init_wl,
         .terminate = input_backend_terminate_wl,
         .resume = input_backend_resume_wl,
         .suspend = input_backend_suspend_wl};
-  } else {
-    VT_ERROR(backend->comp->log, "Invalid input backend.");
   }
+#else 
+#error "You are not building any input backend."
+#endif
 }

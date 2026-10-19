@@ -20,12 +20,16 @@
  * SOFTWARE.
  */
 
+#include "config.h"
 #include "renderer.h"
 
+#if VT_HAS_OPENGL
 #include "gl/egl_gl.h"
+#endif
 
 void vt_renderer_implement(struct vt_renderer_t       *renderer,
                            enum vt_rendering_backend_t backend) {
+#if VT_HAS_OPENGL
   if (backend == VT_RENDERING_BACKEND_EGL_OPENGL) {
     renderer->impl = (struct vt_renderer_interface_t){
         .init = renderer_init_egl,
@@ -52,4 +56,7 @@ void vt_renderer_implement(struct vt_renderer_t       *renderer,
         .end_scene = renderer_end_scene_egl,
         .destroy = renderer_destroy_egl};
   }
+#else
+#error "You are not building any renderer, or you use Vulkan which is currently unsupported."
+#endif
 }

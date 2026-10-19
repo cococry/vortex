@@ -1372,7 +1372,8 @@ bool renderer_setup_renderable_output_egl(struct vt_renderer_t *r,
     struct rn_init_options_t opts = {
         .gl_load_proc = (rn_gl_load_proc)eglGetProcAddress,
         .log = {.verbose = r->comp->log.verbose,
-                .logfile = r->comp->log.stream != stdout}};
+                .log_stream = r->comp->log.stream
+        }};
     egl->runara = rn_state_init(&opts, 0, 0);
 
     if (!egl->runara) {

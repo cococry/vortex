@@ -64,7 +64,7 @@ static void _vt_comp_commit_handler(void *data);
 static bool _vt_comp_render_output(struct vt_compositor_t *c,
                                    struct vt_output_t     *output);
 
-static void _vt_comp_log_help();
+static void _vt_comp_log_help(void);
 
 static bool _vt_comp_wl_init(struct vt_compositor_t *c);
 
@@ -372,7 +372,7 @@ const char *_vt_comp_handle_cmd_flags(struct vt_compositor_t *c, int argc,
   return selected_backend;
 }
 
-void _vt_comp_log_help() {
+void _vt_comp_log_help(void) {
   printf("Usage: vortex [option:s] (value:s)\n");
   printf("Options: \n");
   printf("%-35s %s\n", "-h, --help", "Show this help message and exit");

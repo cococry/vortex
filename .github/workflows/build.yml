@@ -1,4 +1,5 @@
-name: build
+
+name: Build
 
 on:
   push:
@@ -12,31 +13,39 @@ jobs:
   arch:
     runs-on: ubuntu-latest
     container: archlinux:latest
+
     steps:
       - name: Install build tools
         run: |
           pacman -Syu --noconfirm --needed \
-            base-devel git meson ninja
+            base-devel git meson ninja pkgconf
 
-      # gl, vulkan + shader compiler for the 'all' backends (cglm comes via wrap)
       - name: Install runara dependencies
         run: |
           pacman -S --noconfirm --needed \
             mesa libglvnd \
-            vulkan-headers vulkan-icd-loader glslang python
+            vulkan-headers vulkan-icd-loader \
+            glslang python
 
       - name: Install vortex dependencies
         run: |
           pacman -S --noconfirm --needed \
-            wayland wayland-protocols libxkbcommon pixman \
-            mesa libglvnd libdrm libinput systemd-libs seatd \
+            wayland wayland-protocols \
+            libxkbcommon pixman \
+            mesa libglvnd libdrm \
+            libinput systemd-libs seatd \
             libliftoff libxcursor
 
       - uses: actions/checkout@v4
 
-      # fail on errors
       - name: Configure
-        run: meson setup build -Dwerror=true
+        run: |
+          meson setup build \
+            -Dbackends=all \
+            -Drenderers=all \
+            -Dwerror=true \
+            --buildtype=debug
 
       - name: Compile
         run: meson compile -C build
+

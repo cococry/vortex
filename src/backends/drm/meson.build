@@ -18,32 +18,68 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-drm_opt             = get_option('vt_backend_drm')
-dep_gbm             = dependency('gbm',           required: drm_opt)
-dep_drm             = dependency('libdrm',        required: drm_opt)
-dep_seat            = dependency('libseat',       required: drm_opt)
+dep_gbm = dependency(
+  'gbm',
+  required: true,
+)
 
-# auto: skip the DRM backend when its deps are missing (e.g. no seatd)
-if not (dep_gbm.found() and dep_drm.found() and dep_seat.found())
-  subdir_done()
-endif
-vt_build_drm = true
+dep_drm = dependency(
+  'libdrm',
+  required: true,
+)
 
-dep_wayland_server  = dependency('wayland-server', required: true)
-dep_udev            = dependency('libudev', required: true)
-dep_libinput        = dependency('libinput', required: true)
-dep_libliftoff = dependency('libliftoff',version: '>=0.5.0', fallback: 'libliftoff')
+dep_seat = dependency(
+  'libseat',
+  required: true,
+)
 
-vortex_inc = include_directories('../../', '/usr/include/pixman-1/')
+dep_udev = dependency(
+  'libudev',
+  required: true,
+)
+
+dep_libinput = dependency(
+  'libinput',
+  required: true,
+)
+
+dep_libliftoff = dependency(
+  'libliftoff',
+  version: '>=0.5.0',
+  fallback: 'libliftoff',
+  required: true,
+)
 
 shared_module(
   'drm-backend',
-  ['drm_backend.c', 'session_drm.c', 'props.c', 'prime.c', 'fb.c', 'atomic.c', 'legacy.c', 'cursor.c', 'kms.c', 'liftoff_log.c'],
-  dependencies: [dep_gbm, dep_drm, dep_wayland_server, dep_seat, dep_udev, dep_libinput,
-    dep_runara_headers, dep_libliftoff],
-  install: true,
+  files(
+    'drm_backend.c',
+    'session_drm.c',
+    'props.c',
+    'prime.c',
+    'fb.c',
+    'atomic.c',
+    'legacy.c',
+    'cursor.c',
+    'kms.c',
+    'liftoff_log.c',
+  ),
+  dependencies: [
+    dep_gbm,
+    dep_drm,
+    dep_seat,
+    dep_udev,
+    dep_libinput,
+    dep_libliftoff,
+    dep_wayland_server,
+    dep_pixman,
+    dep_runara_headers,
+  ],
   include_directories: vortex_inc,
-  install_dir: join_paths(get_option('libdir'), 'vortex/backends'),
+  install: true,
+  install_dir: join_paths(
+    get_option('libdir'),
+    'vortex',
+    'backends',
+  ),
 )
-
-

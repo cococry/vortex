@@ -2,206 +2,232 @@ project(
   'vortex',
   'c',
   version: '0.1.0',
+  meson_version: '>=1.1',
   default_options: [
     'c_std=c11',
     'warning_level=3',
     'default_library=static',
     'werror=false',
   ],
-  meson_version: '>=1.1'
 )
 
-add_project_arguments('-Ddefault_library=static', language: 'c')
+# ============================================================
+# Build options
+# ============================================================
 
-backend_option = get_option('vt_render_backends')
+sink_backends = get_option('backends')
+renderers = get_option('renderers')
 
-build_opengl = backend_option == 'opengl' or backend_option == 'all'
-build_vulkan = backend_option == 'vulkan' or backend_option == 'all'
+build_drm = sink_backends in ['drm', 'all']
+build_wayland = sink_backends in ['wayland', 'all']
+
+build_opengl = renderers in ['opengl', 'all']
+build_vulkan = renderers in ['vulkan', 'all']
+
+# ============================================================
+# Runara
+# ============================================================
 
 runara_sp = subproject(
   'runara',
   default_options: [
-    'backends=' + backend_option,
+    'backends=' + renderers,
     'examples=false',
-  ]
+    'default_library=static',
+  ],
 )
 
 runara_dep = runara_sp.get_variable('runara_dep')
 
-subdir('src')
+# ============================================================
+# Core dependencies
+# ============================================================
 
-cc = meson.get_compiler('c')
-
-dep_wayland_server  = dependency('wayland-server',    required: true)
-dep_wayland_egl     = dependency('wayland-egl',       required: true)
-dep_wayland_protos  = dependency('wayland-protocols', required: true)
-dep_egl             = dependency('egl',               required: true)
-dep_udev            = dependency('libudev',           required: true)
-dep_libdrm          = dependency('libdrm',            required: true)
-dep_gl              = dependency('gl',                required: true)
-dep_pixman          = dependency('pixman-1',          required: true)
-dep_libinput        = dependency('libinput',          required: true)
-dep_xcursor         = dependency('xcursor',           required: true)
-dep_xkbcommon       = dependency('xkbcommon',         required: false)
-
-wayland_scanner   = find_program('wayland-scanner', required: true)
-protocols_dir     = dep_wayland_protos.get_variable(pkgconfig: 'pkgdatadir')
-xdg_shell_xml     = join_paths(protocols_dir, 'stable', 'xdg-shell', 'xdg-shell.xml')
-dma_buf_xml       = join_paths(protocols_dir, 'stable', 'linux-dmabuf', 'linux-dmabuf-v1.xml')
-explitic_sync_xml = join_paths(protocols_dir, 'unstable', 'linux-explicit-synchronization', 'linux-explicit-synchronization-unstable-v1.xml')
-drm_syncobj_xml   = join_paths(protocols_dir, 'staging', 'linux-drm-syncobj', 'linux-drm-syncobj-v1.xml')
-
-xdg_server_header = custom_target(
-  'xdg-shell-server-header',
-  input: xdg_shell_xml,
-  output: 'xdg-shell-protocol.h',
-  command: [wayland_scanner, 'server-header', '@INPUT@', '@OUTPUT@'],
-  install: false
+dep_wayland_server = dependency(
+  'wayland-server',
+  required: true,
 )
 
-xdg_server_code = custom_target(
-  'xdg-shell-server-code',
-  input: xdg_shell_xml,
-  output: 'xdg-shell-protocol.c',
-  command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'],
-  install: false
-)
-dma_buf_header = custom_target(
-  'linux-dmabuf-header',
-  input: dma_buf_xml,
-  output: 'linux-dmabuf-v1-server-protocol.h',
-  command: [wayland_scanner, 'server-header', '@INPUT@', '@OUTPUT@'],
-  install: false
+dep_wayland_protos = dependency(
+  'wayland-protocols',
+  required: true,
 )
 
-dma_buf_code = custom_target(
-  'linux-dmabuf-code',
-  input: dma_buf_xml,
-  output: 'linux-dmabuf-v1-protocol.c',
-  command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'],
-  install: false
+dep_pixman = dependency(
+  'pixman-1',
+  required: true,
 )
 
-explitic_sync_header = custom_target(
-  'linux-explicit-synchronization-header',
-  input: explitic_sync_xml,
-  output: 'linux-explicit-synchronization-v1-server-protocol.h',
-  command: [wayland_scanner, 'server-header', '@INPUT@', '@OUTPUT@'],
-  install: false
+dep_xcursor = dependency(
+  'xcursor',
+  required: true,
 )
 
-explitic_sync_code = custom_target(
-  'linux-explicit-synchronization-code',
-  input: explitic_sync_xml,
-  output: 'linux-explicit-synchronization-v1-protocol.c',
-  command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'],
-  install: false
+dep_xkbcommon = dependency(
+  'xkbcommon',
+  required: false,
 )
 
-drm_syncobj_header = custom_target(
-  'linux-drm-syncobj-header',
-  input: drm_syncobj_xml,
-  output: 'linux-drm-syncobj-v1-server-protocol.h',
-  command: [wayland_scanner, 'server-header', '@INPUT@', '@OUTPUT@'],
-  install: false
+# Needed by the shared DRM format code
+dep_libdrm = dependency(
+  'libdrm',
+  required: true,
 )
-
-drm_syncobj_code = custom_target(
-  'linux-drm-syncobj-code',
-  input: drm_syncobj_xml,
-  output: 'linux-drm-syncobj-v1-protocol.c',
-  command: [wayland_scanner, 'private-code', '@INPUT@', '@OUTPUT@'],
-  install: false
-)
-
-vortex_src = files('src/vortex.c',
-'src/vortex.c',
-'src/render/renderer.c',
-'src/render/renderer.h',
-'src/render/dmabuf.h',
-'src/render/dmabuf.c',
-'src/render/drm_format.c',
-'src/render/drm_format.h',
-'src/render/gl/egl_gl.c',
-'src/render/gl/egl_gl.h',
-'src/protocols/xdg_shell.c',
-'src/protocols/xdg_shell.h',
-'src/protocols/linux_dmabuf.c',
-'src/protocols/linux_dmabuf.h',
-'src/protocols/linux_explicit_sync.c',
-'src/protocols/linux_explicit_sync.h',
-'src/protocols/linux_drm_syncobj.c',
-'src/protocols/linux_drm_syncobj.h',
-'src/protocols/wl_surface.h',
-'src/protocols/wl_surface.c',
-'src/protocols/wl_output.c',
-'src/protocols/wl_data_device.c',
-'src/protocols/wl_subcompositor.c',
-'src/protocols/wl_shm.h',
-'src/protocols/wl_shm.c',
-'src/input/input.c',
-'src/input/input.h',
-'src/input/wl_seat.c',
-'src/input/wl_seat.h',
-'src/input/root_cursor.c',
-'src/input/root_cursor.h',
-'src/input/backends/libinput/libinput.c',
-'src/input/backends/libinput/libinput.h',
-'src/input/backends/wayland/wayland_input.c',
-'src/input/backends/wayland/wayland_input.h',
-'src/input/input.h',
-'src/core/compositor.c',
-'src/core/compositor.h',
-'src/core/content_update.c',
-'src/core/content_update.h',
-'src/core/util.c',
-'src/core/util.h',
-'src/core/surface.c',
-'src/core/surface.h',
-'src/core/surface_addon.c',
-'src/core/surface_addon.h',
-'src/core/output.c',
-'src/core/output.h',
-'src/core/focus_policy.c',
-'src/core/focus_policy.h',
-'src/core/buffer.c',
-'src/core/buffer.h',
-'src/core/buffer_orchestrator.c',
-'src/core/buffer_orchestrator.h',
-'src/core/scene.c',
-'src/core/scene.h',
-)
-vortex_inc = include_directories('include', '/usr/include/pixman-1/')
 
 deps = [
   dep_wayland_server,
-  dep_libinput,
-  dep_xcursor,
-  dep_udev,
   dep_pixman,
+  dep_xcursor,
   dep_libdrm,
   runara_dep,
 ]
-
-if build_opengl
-  dep_gl = dependency('gl', required: true)
-  dep_egl = dependency('egl', required: true)
-  dep_wayland_egl = dependency('wayland-egl', required: true)
-
-  deps += [
-    dep_gl,
-    dep_egl,
-    dep_wayland_egl,
-  ]
-endif
 
 if dep_xkbcommon.found()
   deps += dep_xkbcommon
 endif
 
+# ============================================================
+# Renderer dependencies
+# ============================================================
+
+if build_opengl
+  deps += [
+    dependency('gl'),
+    dependency('egl'),
+    dependency('wayland-egl'),
+  ]
+endif
+
+if build_vulkan
+  deps += dependency('vulkan')
+endif
+
+# ============================================================
+# Wayland protocol generation
+# ============================================================
+
+wayland_scanner = find_program(
+  'wayland-scanner',
+  required: true,
+)
+
+protocols_dir = dep_wayland_protos.get_variable(
+  pkgconfig: 'pkgdatadir',
+)
+
+xdg_shell_xml = join_paths(
+  protocols_dir,
+  'stable',
+  'xdg-shell',
+  'xdg-shell.xml',
+)
+
+dmabuf_xml = join_paths(
+  protocols_dir,
+  'stable',
+  'linux-dmabuf',
+  'linux-dmabuf-v1.xml',
+)
+
+explicit_sync_xml = join_paths(
+  protocols_dir,
+  'unstable',
+  'linux-explicit-synchronization',
+  'linux-explicit-synchronization-unstable-v1.xml',
+)
+
+drm_syncobj_xml = join_paths(
+  protocols_dir,
+  'staging',
+  'linux-drm-syncobj',
+  'linux-drm-syncobj-v1.xml',
+)
+
+protocol_sources = []
+
+protocols = {
+  'xdg-shell': [
+    xdg_shell_xml,
+    'xdg-shell-protocol.h',
+    'xdg-shell-protocol.c',
+  ],
+  'linux-dmabuf': [
+    dmabuf_xml,
+    'linux-dmabuf-v1-server-protocol.h',
+    'linux-dmabuf-v1-protocol.c',
+  ],
+  'linux-explicit-sync': [
+    explicit_sync_xml,
+    'linux-explicit-synchronization-v1-server-protocol.h',
+    'linux-explicit-synchronization-v1-protocol.c',
+  ],
+  'linux-drm-syncobj': [
+    drm_syncobj_xml,
+    'linux-drm-syncobj-v1-server-protocol.h',
+    'linux-drm-syncobj-v1-protocol.c',
+  ],
+}
+
+foreach name, protocol : protocols
+  protocol_sources += custom_target(
+    name + '-server-header',
+    input: protocol[0],
+    output: protocol[1],
+    command: [
+      wayland_scanner,
+      'server-header',
+      '@INPUT@',
+      '@OUTPUT@',
+    ],
+  )
+
+  protocol_sources += custom_target(
+    name + '-server-code',
+    input: protocol[0],
+    output: protocol[2],
+    command: [
+      wayland_scanner,
+      'private-code',
+      '@INPUT@',
+      '@OUTPUT@',
+    ],
+  )
+endforeach
+
+# ============================================================
+# Configuration
+# ============================================================
+
 conf_data = configuration_data()
-conf_data.set('prefix', get_option('prefix'))
-conf_data.set('libdir', get_option('libdir'))
+
+conf_data.set(
+  'prefix',
+  get_option('prefix'),
+)
+
+conf_data.set(
+  'libdir',
+  get_option('libdir'),
+)
+
+conf_data.set_quoted(
+  'VORTEX_PREFIX',
+  get_option('prefix'),
+)
+
+conf_data.set_quoted(
+  'VORTEX_BACKEND_DIR',
+  join_paths(
+    get_option('libdir'),
+    'vortex',
+    'backends',
+  ),
+)
+
+conf_data.set10('VT_HAS_OPENGL', build_opengl)
+conf_data.set10('VT_HAS_VULKAN', build_vulkan)
+conf_data.set10('VT_HAS_LIBINPUT', build_drm)
+conf_data.set10('VT_HAS_WAYLAND_INPUT', build_wayland)
 
 configure_file(
   input: 'gen/config.h.in',
@@ -209,26 +235,124 @@ configure_file(
   configuration: conf_data,
 )
 
-# --- Executable ---
+# ============================================================
+# Include directories
+# ============================================================
+
+vortex_inc = include_directories(
+  'include',
+  'src',
+)
+
+# ============================================================
+# Compositor sources
+# ============================================================
+
+vortex_src = files(
+  'src/vortex.c',
+
+  'src/render/renderer.c',
+  'src/render/dmabuf.c',
+  'src/render/drm_format.c',
+
+  'src/protocols/xdg_shell.c',
+  'src/protocols/linux_dmabuf.c',
+  'src/protocols/linux_explicit_sync.c',
+  'src/protocols/linux_drm_syncobj.c',
+  'src/protocols/wl_surface.c',
+  'src/protocols/wl_output.c',
+  'src/protocols/wl_data_device.c',
+  'src/protocols/wl_subcompositor.c',
+  'src/protocols/wl_shm.c',
+
+  'src/input/input.c',
+  'src/input/wl_seat.c',
+  'src/input/root_cursor.c',
+
+  'src/core/compositor.c',
+  'src/core/content_update.c',
+  'src/core/util.c',
+  'src/core/surface.c',
+  'src/core/surface_addon.c',
+  'src/core/output.c',
+  'src/core/focus_policy.c',
+  'src/core/buffer.c',
+  'src/core/buffer_orchestrator.c',
+  'src/core/scene.c',
+)
+
+# ============================================================
+# Renderer-specific sources
+# ============================================================
+
+if build_opengl
+  vortex_src += files(
+    'src/render/gl/egl_gl.c',
+  )
+endif
+
+# TODO: Vulkan
+#
+# ============================================================
+# Input backend implementations
+# ============================================================
+
+if build_drm
+  vortex_src += files(
+    'src/input/backends/libinput/libinput.c',
+  )
+
+  deps += [
+    dependency('libinput'),
+    dependency('libudev'),
+  ]
+endif
+
+if build_wayland
+  vortex_src += files(
+    'src/input/backends/wayland/wayland_input.c',
+  )
+
+  deps += [
+    dependency('wayland-client'),
+  ]
+endif
+
+# ============================================================
+# Compositor executable
+# ============================================================
+
 vortex_exe = executable(
   'vortex',
   [
     vortex_src,
-    xdg_server_header,
-    xdg_server_code,
-    dma_buf_header,
-    dma_buf_code,
-    explitic_sync_header,
-    explitic_sync_code,
-    drm_syncobj_header,
-    drm_syncobj_code
+    protocol_sources,
   ],
   include_directories: vortex_inc,
-  link_args: ['-Wl,-E'],
   dependencies: deps,
-  install: true
+
+  export_dynamic: true,
+
+  install: true,
 )
 
-# --- Simple sanity test ---
-test('binary-exists', vortex_exe)
+# ============================================================
+# Dynamic sink backends
+# ============================================================
 
+subdir('src/backends')
+
+# ============================================================
+# Build summary
+# ============================================================
+
+summary(
+  {
+    'Sink backends': sink_backends,
+    'GPU renderers': renderers,
+    'OpenGL': build_opengl,
+    'Vulkan': build_vulkan,
+  },
+  section: 'Vortex',
+  bool_yn: true,
+)

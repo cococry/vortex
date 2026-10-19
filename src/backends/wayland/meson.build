@@ -18,17 +18,9 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-
-dep_wayland_client = dependency('wayland-client', required: true)
-dep_wayland_protos = dependency('wayland-protocols', required: true)
-wayland_scanner = find_program('wayland-scanner', required: true)
-
-protocols_dir = dep_wayland_protos.get_variable(pkgconfig: 'pkgdatadir')
-xdg_shell_xml = join_paths(
-  protocols_dir,
-  'stable',
-  'xdg-shell',
-  'xdg-shell.xml'
+dep_wayland_client = dependency(
+  'wayland-client',
+  required: true,
 )
 
 xdg_client_header = custom_target(
@@ -39,7 +31,7 @@ xdg_client_header = custom_target(
     wayland_scanner,
     'client-header',
     '@INPUT@',
-    '@OUTPUT@'
+    '@OUTPUT@',
   ],
 )
 
@@ -51,12 +43,9 @@ xdg_client_code = custom_target(
     wayland_scanner,
     'private-code',
     '@INPUT@',
-    '@OUTPUT@'
+    '@OUTPUT@',
   ],
 )
-
-vortex_inc = include_directories('/usr/include/pixman-1/')
-
 shared_module(
   'wl-backend',
   [
@@ -66,12 +55,14 @@ shared_module(
   ],
   dependencies: [
     dep_wayland_client,
+    dep_pixman,
     dep_runara_headers,
   ],
-  install: true,
   include_directories: vortex_inc,
+  install: true,
   install_dir: join_paths(
     get_option('libdir'),
-    'vortex/backends'
+    'vortex',
+    'backends',
   ),
 )
