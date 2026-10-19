@@ -585,10 +585,6 @@ _drm_build_dmabuf_feedback(struct vt_drm_backend_master_state_t *master,
 
   VT_TRACE(master->comp->log, "Building default DMABUF feedback...");
 
-  enum { max_shm_formats = 256 };
-  uint32_t n_shm_formats = 0;
-  uint32_t shm_formats[max_shm_formats];
-
   uint32_t      n_devs = 0;
   drmDevicePtr *devs = calloc(master->n_drm, sizeof(*devs));
   if (master->n_drm > 0 && !devs) {
@@ -672,17 +668,6 @@ _drm_build_dmabuf_feedback(struct vt_drm_backend_master_state_t *master,
       return false;
     }
 
-    struct vt_drm_format_t *fmt;
-    wl_array_for_each(fmt, &main_tranche->formats) {
-      if (!(n_shm_formats < max_shm_formats - 1)) {
-        VT_WARN(master->comp->log,
-                "Maximum number of SHM formats reached, not adding format %i.",
-                fmt->format);
-        break;
-      }
-
-      shm_formats[n_shm_formats++] = fmt->format;
-    }
 
     _log_dmabuf_tranche(master->comp, main_tranche, dev->path);
   }
@@ -714,10 +699,14 @@ _drm_build_dmabuf_feedback(struct vt_drm_backend_master_state_t *master,
   }
   free(devs);
 
-  shm_formats[n_shm_formats++] = DRM_FORMAT_XRGB8888;
+  static const uint32_t shm_formats[] = {
+      DRM_FORMAT_ARGB8888,
+      DRM_FORMAT_XRGB8888,
+  };
 
-  if (!vt_proto_wl_shm_init(master->comp, shm_formats, n_shm_formats)) {
-    VT_ERROR(master->comp->log, "Failed to initialize WL SHM protcol.\n");
+  if (!vt_proto_wl_shm_init(master->comp, shm_formats,
+                            sizeof(shm_formats) / sizeof(shm_formats[0]))) {
+    VT_ERROR(master->comp->log, "Failed to initialize wl_shm protocol");
     return false;
   }
 

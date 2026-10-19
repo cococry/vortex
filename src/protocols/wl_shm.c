@@ -603,8 +603,17 @@ bool vt_proto_wl_shm_init(struct vt_compositor_t *comp,
     return false;
   }
 
-  _proto.global = wl_global_create(comp->wl.dsp, &wl_shm_interface,
-                                   _WL_SHM_VERSION, &_proto, _wl_shm_bind);
+  if (_WL_SHM_VERSION > (uint32_t)wl_shm_interface.version) {
+    VT_ERROR(comp->log,
+             "wl_shm requested version=%u, "
+             "interface supported version=%d. Update your libwayland-server to "
+             ">= 1.26",
+             _WL_SHM_VERSION, wl_shm_interface.version);
+    return false;
+  }
+
+  _proto.global = wl_global_create(comp->wl.dsp, &wl_shm_interface, _WL_SHM_VERSION,
+                                   &_proto, _wl_shm_bind);
   if (!_proto.global) {
     wl_array_release(&_proto.formats);
     memset(&_proto, 0, sizeof(_proto));
