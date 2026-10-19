@@ -16,8 +16,15 @@ while components like the desktop shell are intentionally abstracted away from i
 ## Build & Run
 
 Make sure you have the required dependencies installed (debian packages shown):
+
+```bash
+sudo apt install meson ninja-build libwayland-dev wayland-protocols libdrm-dev libgbm-dev libegl-dev libgl-dev libwayland-egl-backend-dev libinput-dev libudev-dev libxcursor-dev xcursor-themes libxkbcommon-dev libpixman-1-dev libseat-dev libliftoff-dev libcglm-dev
 ```
-meson ninja-build libwayland-dev libdrm-dev libgbm-dev libegl1-mesa-dev libinput-dev libudev-dev libxcursor-dev xcursor-themes libxkbcommon-dev libglfw3-dev libcglm-dev
+
+For Vulkan rendering support, additionally install:
+
+```bash
+sudo apt install libvulkan-dev
 ```
 
 Clone & build:
@@ -31,6 +38,48 @@ meson compile -C build
 meson install -C build
 ```
 
+### Build Options
+
+Vortex supports configuring which sink backends and rendering backends are built through Meson options.
+
+| Option | Values | Default | Description |
+|--------|--------|---------|-------------|
+| `-Dbackends` | `drm`, `wayland`, `all` | `all` | Specify which sink backends to build |
+| `-Drenderers` | `opengl`, `vulkan`, `all` | `opengl` | Specify which rendering backends to build |
+
+The `backends` option controls which sink backend `.so` modules are compiled and installed.
+
+The `renderers` option controls which GPU rendering backends are compiled, including the corresponding backends in Runara.
+
+For example, build only the DRM sink backend with OpenGL rendering:
+
+```bash
+meson setup build --prefix="$HOME/.local" -Dbackends=drm -Drenderers=opengl
+```
+
+Build only the Wayland sink backend with Vulkan rendering:
+
+```bash
+meson setup build --prefix="$HOME/.local" -Dbackends=wayland -Drenderers=vulkan
+```
+
+Build all sink backends and rendering backends:
+
+```bash
+meson setup build --prefix="$HOME/.local" -Dbackends=all -Drenderers=all
+```
+
+To change the options of an existing build:
+
+```bash
+meson configure build -Dbackends=wayland -Drenderers=opengl
+meson compile -C build
+meson install -C build
+```
+
+> [!IMPORTANT]
+> Vulkan rendering is TODO and not yet supported 
+
 Simple test of vortex:
 ```bash
 ./build/vortex &
@@ -38,11 +87,14 @@ sleep 1
 WAYLAND_DISPLAY=wayland-1 weston-simple-shm
 ```
 
-Note: Use the wayland display that is logged by the output of **./vortex --verbose** as the WAYLAND_DISPLAY variable
-when starting clients.
+### Running 
+> [!NOTE]
+> Use the wayland display that is logged by the output of **./vortex --verbose** as the WAYLAND_DISPLAY variable
+> when starting clients.
 
 
-Note: The sink backend is automatically chosen at runtime, depending on context.
+> [!NOTE]
+>  The sink backend is automatically chosen at runtime, depending on context.
 
 Supported sink backends are:
 - *DRM/KMS* (hardware scanout)
@@ -80,7 +132,7 @@ The compositor supports **pluggable sink backends** that can be discovered at ru
 
 Valid options for backends are:
   - drm
-  -  wl
+  - wl
 
 You can specify one directly:
 
