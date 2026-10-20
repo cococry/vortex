@@ -23,6 +23,7 @@
 #include "output.h"
 
 #include "core_types.h"
+#include "src/core/buffer.h"
 
 static int32_t output_x_ptr = 0;
 
@@ -40,8 +41,30 @@ struct vt_output_t *vt_output_init(struct vt_backend_t               *backend,
   return output;
 }
 
+bool _init_output_bg(struct vt_compositor_t* c, struct vt_output_background_t* bg, uint32_t width, uint32_t height) {
+  assert(bg);
+  if(!bg) return false;
+
+  struct vt_scene_node_t* bg_node = vt_scene_node_create(c, NULL);
+
+  if (!bg_node)
+    return false;
+
+  bg_node->type = VT_SCENE_NODE_BACKGROUND;
+
+  bg->node = bg_node;
+
+  struct vt_buffer_t* bg_buf = vt_buffer_create(c, width, height, NULL);
+
+  if(!bg_buf) return false;
+
+  bg->buf = bg_buf;
+
+  return true;
+}
+
 bool vt_output_init_geom(struct vt_output_t* output, uint32_t width, uint32_t height) {
-  assert(output); 
+  assert(output && output->backend && output->backend->comp);
 
   output->width = width;
   output->height = height;
@@ -50,6 +73,9 @@ bool vt_output_init_geom(struct vt_output_t* output, uint32_t width, uint32_t he
   output->y = 0;
 
   output_x_ptr += width;
+
+  if (!_init_output_bg(output->backend->comp, output->bg, width, height))
+    return false;
 
   return true;
 }

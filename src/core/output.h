@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include "src/core/buffer.h"
+#include "src/core/scene.h"
 #include "util.h"
 #include <pixman.h>
 #include <stdbool.h>
@@ -42,6 +44,11 @@ struct vt_output_implementation_t {
   bool (*update_cursor_image)(struct vt_output_t     *output,
                               struct vt_buffer_use_t *use);
   void (*move_cursor)(struct vt_output_t *output, int32_t x, int32_t y);
+};
+
+struct vt_output_background_t {
+  struct vt_scene_node_t* node;
+  struct vt_buffer_t* buf;
 };
 
 struct vt_output_t {
@@ -100,6 +107,8 @@ struct vt_output_t {
   } physical;
 
   enum vt_cursor_mode_t cursor_mode;
+
+  struct vt_output_background_t *bg;
 };
 
 struct vt_output_layer_state_t {
