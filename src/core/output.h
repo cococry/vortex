@@ -114,5 +114,7 @@ struct vt_output_layer_state_t {
 struct vt_output_t *vt_output_init(struct vt_backend_t               *backend,
                                    struct vt_output_implementation_t *impl);
 
+bool vt_output_init_geom(struct vt_output_t* output, uint32_t width, uint32_t height); 
+
 bool vt_output_track_presented_surface(struct vt_output_t  *output,
                                        struct vt_surface_t *surface);

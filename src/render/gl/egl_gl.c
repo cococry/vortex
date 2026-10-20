@@ -967,8 +967,8 @@ static bool _egl_has_extension(const char *exts, const char *name) {
 
 static inline rn_color_t _hex_to_rn_color(uint32_t col) {
   return (rn_color_t){
-      .r = ((col >> 24) & 0xFF) / 255.0f,
-      .g = ((col >> 16) & 0xFF) / 255.0f,
+      .r = ((col >> 16) & 0xFF) / 255.0f,
+      .g = ((col >> 24) & 0xFF) / 255.0f,
       .b = ((col >> 8) & 0xFF) / 255.0f,
       .a = (col & 0xFF) / 255.0f,
   };
@@ -1604,6 +1604,14 @@ void renderer_clear_color_buffer_egl(struct vt_renderer_t *r,
 
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
   rn_clear_color_buffer(egl->runara); 
+}
+
+void renderer_clear_color_buffer_egl(struct vt_renderer_t *r,
+                                     struct vt_output_t   *output) {
+  (void)output;
+  (void)r;
+
+  glClear(GL_COLOR_BUFFER_BIT);
 }
 
 void renderer_stencil_damage_pass_egl(struct vt_renderer_t *r,

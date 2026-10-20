@@ -1758,12 +1758,12 @@ static bool _drm_create_output_for_device(struct vt_drm_backend_state_t *drm,
            drm_output->mode.vdisplay, drm_output->mode.vrefresh,
            (void *)output);
 
+  if (!vt_output_init_geom(output, (uint32_t)selected->width,
+                           (uint32_t)selected->height))
+    return false;
+
   output->needs_repaint = true;
-  output->width = (uint32_t)selected->width;
-  output->height = (uint32_t)selected->height;
   output->refresh_rate = selected->refresh;
-  output->x = drm_master->x_ptr;
-  output->y = 0;
   output->native_window = drm_output->gbm_surf;
   output->format = desired_format;
   output->id = drm_output->conn_id;
@@ -1813,9 +1813,6 @@ static bool _drm_create_output_for_device(struct vt_drm_backend_state_t *drm,
     liftoff_output_set_composition_layer(drm_output->liftoff_output,
                                          drm_output->liftoff_composition_layer);
   }
-
-  /* TODO: Monitor position system */
-  drm_master->x_ptr += output->width;
 
   if (output->backend->on_output_change)
     output->backend->on_output_change(output->backend, output);
@@ -1997,6 +1994,11 @@ static void _drm_on_drm_change(struct wl_listener *listener, void *data) {
       struct vt_surface_t *surface;
       wl_list_for_each(surface, &master->comp->surfaces, link) {
         vt_proto_linux_dmabuf_v1_update_surface_feedback(surface);
+      }
+      /* schedule fucking repaint */
+      struct vt_output_t *output_global;
+      wl_list_for_each(output_global, &drm->outputs, link_global) {
+        vt_comp_schedule_repaint(master->comp, output_global);
       }
     }
     break;

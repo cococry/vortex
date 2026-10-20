@@ -24,6 +24,8 @@
 
 #include "core_types.h"
 
+static int32_t output_x_ptr = 0;
+
 struct vt_output_t *vt_output_init(struct vt_backend_t               *backend,
                                    struct vt_output_implementation_t *impl) {
   assert(backend && backend->comp && impl);
@@ -36,6 +38,20 @@ struct vt_output_t *vt_output_init(struct vt_backend_t               *backend,
   output->impl = impl;
 
   return output;
+}
+
+bool vt_output_init_geom(struct vt_output_t* output, uint32_t width, uint32_t height) {
+  assert(output); 
+
+  output->width = width;
+  output->height = height;
+
+  output->x = output_x_ptr;
+  output->y = 0;
+
+  output_x_ptr += width;
+
+  return true;
 }
 
 bool vt_output_track_presented_surface(struct vt_output_t  *output,

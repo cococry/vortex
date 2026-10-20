@@ -613,17 +613,11 @@ bool _wl_backend_create_output(struct vt_backend_t *backend,
   output->id = wl_list_length(&backend->comp->outputs);
   output->refresh_rate = 60;
 
-  /* TODO: Output position system */
-  static int32_t x_ptr = 0;
+  if (!vt_output_init_geom(output, _WL_DEFAULT_OUTPUT_WIDTH,
+                           _WL_DEFAULT_OUTPUT_HEIGHT))
+    return false;
 
-  output->x = x_ptr;
-  output->y = 0;
-
-  output->width = _WL_DEFAULT_OUTPUT_WIDTH;
-  output->height = _WL_DEFAULT_OUTPUT_HEIGHT;
   output->resize_pending = true;
-
-  x_ptr += output->width;
 
   VT_TRACE(backend->comp->log,
            "Created virtual nested output %s. [x: %d, y: %d, w: %u, h: %u]",

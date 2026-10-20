@@ -184,7 +184,6 @@ struct vt_drm_backend_state_t {
 
 struct vt_drm_backend_master_state_t {
   struct wl_list          backends;
-  uint32_t                x_ptr;
   int32_t                 vt_fd;
   struct vt_compositor_t *comp;
 
