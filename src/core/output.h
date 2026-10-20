@@ -22,8 +22,8 @@
 
 #pragma once
 
-#include "src/core/buffer.h"
-#include "src/core/scene.h"
+#include "buffer.h"
+#include "scene.h"
 #include "util.h"
 #include <pixman.h>
 #include <stdbool.h>

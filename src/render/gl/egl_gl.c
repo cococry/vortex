@@ -1606,14 +1606,6 @@ void renderer_clear_color_buffer_egl(struct vt_renderer_t *r,
   rn_clear_color_buffer(egl->runara); 
 }
 
-void renderer_clear_color_buffer_egl(struct vt_renderer_t *r,
-                                     struct vt_output_t   *output) {
-  (void)output;
-  (void)r;
-
-  glClear(GL_COLOR_BUFFER_BIT);
-}
-
 void renderer_stencil_damage_pass_egl(struct vt_renderer_t *r,
                                       struct vt_output_t   *output) {
   if (!r || !output || !output->user_data_render)
