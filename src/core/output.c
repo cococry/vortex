@@ -22,8 +22,10 @@
 
 #include "output.h"
 
+#include "core/scene.h"
 #include "core_types.h"
 #include "src/core/buffer.h"
+#include <drm/drm_fourcc.h>
 
 static int32_t output_x_ptr = 0;
 
@@ -41,26 +43,65 @@ struct vt_output_t *vt_output_init(struct vt_backend_t               *backend,
   return output;
 }
 
-bool _init_output_bg(struct vt_compositor_t* c, struct vt_output_background_t* bg, uint32_t width, uint32_t height) {
-  assert(bg);
-  if(!bg) return false;
+void vt_output_fini(struct vt_output_t *output) {
+  assert(output && output->backend && output->backend->comp);
 
-  struct vt_scene_node_t* bg_node = vt_scene_node_create(c, NULL);
+  output->background.buf_fallback = NULL;
+  vt_scene_node_destroy(output->backend->comp, output->background.node);
+
+  output->user_data = NULL;
+
+  free(output->physical.make);
+  free(output->physical.model);
+  free(output->physical.name);
+  free(output->physical.serial_number);
+
+  struct vt_output_mode_t *mode, *tmp_mode;
+  wl_list_for_each_safe(mode, tmp_mode, &output->physical.modes, link) {
+    wl_list_remove(&mode->link);
+    free(mode);
+  }
+
+  pixman_region32_fini(&output->damage);
+
+  wl_list_remove(&output->link_global);
+  wl_list_remove(&output->link_local);
+}
+
+bool _init_output_bg(struct vt_output_t* output) {
+  assert(output && output->backend && output->backend->comp && 
+      output->backend->impl.allocate_buffer && output->backend->impl.clear_buffer);
+
+  struct vt_scene_node_t *bg_node = NULL;
+  struct vt_buffer_t     *fallback_buf = NULL;
+
+  /* initial reference owned by the allocation */
+  fallback_buf = output->backend->impl.allocate_buffer(
+      output->backend, output->width, output->height, DRM_FORMAT_XRGB8888);
+
+  if(!fallback_buf)
+    goto fail;
+
+  if (!output->backend->impl.clear_buffer(output->backend, fallback_buf, 0x0))
+    goto fail;
+
+  bg_node = vt_scene_node_create_buffer(output->backend->comp, fallback_buf);
 
   if (!bg_node)
-    return false;
+    goto fail;
 
-  bg_node->type = VT_SCENE_NODE_BACKGROUND;
-
-  bg->node = bg_node;
-
-  struct vt_buffer_t* bg_buf = vt_buffer_create(c, width, height, NULL);
-
-  if(!bg_buf) return false;
-
-  bg->buf = bg_buf;
+  output->background.node = bg_node;
 
   return true;
+fail:
+  if(bg_node)
+    vt_scene_node_destroy(output->backend->comp, bg_node);
+  if(fallback_buf) {
+    /* destroys the buffer */
+    vt_buffer_unref(&fallback_buf);
+  }
+
+  return false;
 }
 
 bool vt_output_init_geom(struct vt_output_t* output, uint32_t width, uint32_t height) {
@@ -74,7 +115,7 @@ bool vt_output_init_geom(struct vt_output_t* output, uint32_t width, uint32_t he
 
   output_x_ptr += width;
 
-  if (!_init_output_bg(output->backend->comp, output->bg, width, height))
+  if (!_init_output_bg(output))
     return false;
 
   return true;

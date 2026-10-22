@@ -63,6 +63,7 @@ shared_module(
     'cursor.c',
     'kms.c',
     'liftoff_log.c',
+    'gbm_allocator.c',
   ),
   dependencies: [
     dep_gbm,

@@ -47,7 +47,6 @@
 #include <sys/ioctl.h>
 #include <unistd.h>
 
-#include <glad.h>
 #include <wayland-server.h>
 
 #include "config.h"

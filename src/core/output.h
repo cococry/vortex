@@ -46,10 +46,25 @@ struct vt_output_implementation_t {
   void (*move_cursor)(struct vt_output_t *output, int32_t x, int32_t y);
 };
 
-struct vt_output_background_t {
-  struct vt_scene_node_t* node;
-  struct vt_buffer_t* buf;
+enum vt_output_mode_aspect_ratio_t {
+  VT_MODE_PIC_AR_NONE = 0,    /* DRM_MODE_PICTURE_ASPECT_NONE */
+  VT_MODE_PIC_AR_4_3 = 1,     /* DRM_MODE_PICTURE_ASPECT_4_3 */
+  VT_MODE_PIC_AR_16_9 = 2,    /* DRM_MODE_PICTURE_ASPECT_16_9 */
+  VT_MODE_PIC_AR_64_27 = 3,   /* DRM_MODE_PICTURE_ASPECT_64_27 */
+  VT_MODE_PIC_AR_256_135 = 4, /* DRM_MODE_PICTURE_ASPECT_256_135*/
 };
+
+struct vt_output_mode_t {
+  uint32_t flags;
+  /** Picture aspect ratio.*/
+  enum vt_output_mode_aspect_ratio_t aspect_ratio;
+  int32_t                            width;   /**< Width in pixels. */
+  int32_t                            height;  /**< Height in pixels. */
+  uint32_t                           refresh; /**< Refresh rate in mHz. */
+  struct wl_list                     link;
+};
+
+
 
 struct vt_output_t {
   struct vt_output_implementation_t *impl;
@@ -108,11 +123,23 @@ struct vt_output_t {
 
   enum vt_cursor_mode_t cursor_mode;
 
-  struct vt_output_background_t *bg;
+  struct {
+    struct vt_scene_node_t *node;
+    struct vt_buffer_t     *buf_fallback;
+  } background;
+};
+
+enum vt_output_layer_type_t{
+  VT_OUTPUT_LAYER_SURFACE = 0,
+  VT_OUTPUT_LAYER_BUFFER,
 };
 
 struct vt_output_layer_state_t {
-  struct vt_surface_t *surface;
+  union {
+    struct vt_surface_t *surface;
+    struct vt_buffer_t  *buf;
+  };
+  enum vt_output_layer_type_t type;
 
   struct vt_box_t src;
   struct vt_box_t dst;
@@ -122,6 +149,8 @@ struct vt_output_layer_state_t {
 
 struct vt_output_t *vt_output_init(struct vt_backend_t               *backend,
                                    struct vt_output_implementation_t *impl);
+
+void vt_output_fini(struct vt_output_t *output);
 
 bool vt_output_init_geom(struct vt_output_t* output, uint32_t width, uint32_t height); 
 

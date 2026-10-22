@@ -21,6 +21,7 @@
  */
 
 #include "scene.h"
+#include "core/buffer.h"
 #include "pixman.h"
 #include "src/core/compositor.h"
 #include "src/core/core_types.h"
@@ -80,10 +81,10 @@ static bool _scene_node_is_layer_candidate(struct vt_scene_node_t *node) {
   if (node->type == VT_SCENE_NODE_INVISIBLE_GEOMETRY)
     return false;
 
-  if (!node->surf)
+  if (!node->surf && !node->buf)
     return false;
 
-  if (!vt_surface_effectively_mapped(node->surf))
+  if (node->surf && !vt_surface_effectively_mapped(node->surf))
     return false;
 
   if (node->surf->role.impl &&
@@ -130,6 +131,87 @@ static bool _scene_node_on_output(struct vt_scene_node_t *node,
   return true;
 }
 
+bool _scene_node_push_surface_layer(struct vt_scene_t      *scene,
+                                    struct vt_output_t     *output,
+                                    struct vt_scene_node_t *node) {
+  assert(scene && output && node && node->type == VT_SCENE_NODE_SURFACE);
+
+  struct vt_box_t *rect = vt_scene_node_get_global_bounds(node);
+  if (!rect)
+    return false;
+
+  int32_t left = rect->x;
+  int32_t top = rect->y;
+  int32_t right = rect->x + rect->width;
+  int32_t bottom = rect->y + rect->height;
+
+  int32_t output_left = output->x;
+  int32_t output_top = output->y;
+  int32_t output_right = output->x + output->width;
+  int32_t output_bottom = output->y + output->height;
+
+  int32_t clipped_left = VT_MAX(left, output_left);
+  int32_t clipped_top = VT_MAX(top, output_top);
+  int32_t clipped_right = VT_MIN(right, output_right);
+  int32_t clipped_bottom = VT_MIN(bottom, output_bottom);
+
+  if (clipped_right <= clipped_left || clipped_bottom <= clipped_top)
+    return false;
+
+  struct vt_output_layer_state_t *layer = _scene_push_layer(scene);
+  if (!layer)
+    return false;
+
+  layer->surface = node->surf;
+
+  layer->src = (struct vt_box_t){
+      .x = clipped_left - left,
+      .y = clipped_top - top,
+      .width = clipped_right - clipped_left,
+      .height = clipped_bottom - clipped_top,
+  };
+
+  layer->dst = (struct vt_box_t){
+      .x = clipped_left - output->x,
+      .y = clipped_top - output->y,
+      .width = clipped_right - clipped_left,
+      .height = clipped_bottom - clipped_top,
+  };
+
+  return true;
+}
+
+bool _scene_node_push_buffer_layer(struct vt_scene_t      *scene,
+                                    struct vt_scene_node_t *node) {
+  assert(scene && node && node->type == VT_SCENE_NODE_BUFFER);
+  
+  struct vt_box_t *rect = vt_scene_node_get_global_bounds(node);
+  if (!rect)
+    return false;
+
+  struct vt_output_layer_state_t *layer = _scene_push_layer(scene);
+  if (!layer)
+    return false;
+
+  layer->buf = node->buf;
+
+  layer->src = (struct vt_box_t){
+      .x = 0, 
+      .y = 0, 
+      .width = rect->width, 
+      .height = rect->height 
+  };
+
+  layer->dst = (struct vt_box_t){
+      .x = rect->x, 
+      .y = rect->y, 
+      .width = rect->width, 
+      .height = rect->height 
+  };
+
+  return true;
+}
+
 static void _scene_node_accumulate_layers(struct vt_scene_t      *scene,
                                           struct vt_output_t     *output,
                                           struct vt_scene_node_t *node,
@@ -144,47 +226,13 @@ static void _scene_node_accumulate_layers(struct vt_scene_t      *scene,
     if (!_scene_node_on_output(node, output))
       goto children;
 
-    struct vt_box_t *rect = vt_scene_node_get_global_bounds(node);
-    if (!rect)
+    if (node->type == VT_SCENE_NODE_SURFACE &&
+        !_scene_node_push_surface_layer(scene, output, node)) {
       goto children;
-
-    int32_t left = rect->x;
-    int32_t top = rect->y;
-    int32_t right = rect->x + rect->width;
-    int32_t bottom = rect->y + rect->height;
-
-    int32_t output_left = output->x;
-    int32_t output_top = output->y;
-    int32_t output_right = output->x + output->width;
-    int32_t output_bottom = output->y + output->height;
-
-    int32_t clipped_left = VT_MAX(left, output_left);
-    int32_t clipped_top = VT_MAX(top, output_top);
-    int32_t clipped_right = VT_MIN(right, output_right);
-    int32_t clipped_bottom = VT_MIN(bottom, output_bottom);
-
-    if (clipped_right <= clipped_left || clipped_bottom <= clipped_top)
+    } else if (node->type == VT_SCENE_NODE_BUFFER &&
+               !_scene_node_push_buffer_layer(scene, node)) {
       goto children;
-
-    struct vt_output_layer_state_t *layer = _scene_push_layer(scene);
-    if (!layer)
-      return;
-
-    layer->surface = node->surf;
-
-    layer->src = (struct vt_box_t){
-        .x = clipped_left - left,
-        .y = clipped_top - top,
-        .width = clipped_right - clipped_left,
-        .height = clipped_bottom - clipped_top,
-    };
-
-    layer->dst = (struct vt_box_t){
-        .x = clipped_left - output->x,
-        .y = clipped_top - output->y,
-        .width = clipped_right - clipped_left,
-        .height = clipped_bottom - clipped_top,
-    };
+    }
   }
 
 children:
@@ -292,6 +340,10 @@ static void _scene_node_get_size(struct vt_scene_node_t *node, int32_t *o_w,
     *o_w = node->rect_w;
     *o_h = node->rect_h;
     return;
+  case VT_SCENE_NODE_BUFFER:
+    *o_w = node->buf->width;
+    *o_h = node->buf->height;
+    return;
   default:
     *o_w = 0;
     *o_h = 0;
@@ -353,8 +405,30 @@ struct vt_scene_node_t *vt_scene_node_create(struct vt_compositor_t *c,
     surf->scene_node = n;
 
   VT_TRACE(c->log,
-           "Created scene node %p for surface %p at (%d,%d), geom_dirty=%d",
-           (void *)n, (void *)surf, n->x, n->y, n->geom_dirty);
+           "Created scene node %p for surface %p, geom_dirty=%d",
+           (void *)n, (void *)surf, n->geom_dirty);
+
+  return n;
+}
+
+struct vt_scene_node_t *vt_scene_node_create_buffer(struct vt_compositor_t *c,
+                                                    struct vt_buffer_t *buf) {
+ struct vt_scene_node_t *n = VT_ALLOC(c, sizeof(*n));
+  if (!n) {
+    VT_ERROR(c->log, "Failed to allocate scene node.");
+    return NULL;
+  }
+
+  n->buf = buf;
+  n->type = VT_SCENE_NODE_BUFFER;
+
+  n->x = 0;
+  n->y = 0;
+
+  n->geom_dirty = true;
+
+  VT_TRACE(c->log, "Created scene node %p for buffer %p geom_dirty=%d",
+           (void *)n, (void *)buf, n->geom_dirty);
 
   return n;
 }
@@ -362,6 +436,9 @@ struct vt_scene_node_t *vt_scene_node_create(struct vt_compositor_t *c,
 bool vt_scene_node_destroy(struct vt_compositor_t *c,
                            struct vt_scene_node_t *node) {
   (void)c;
+  if (node->buf) {
+    vt_buffer_unref(&node->buf);
+  }
   if (node->parent) {
     return vt_scene_node_remove_child(node->parent, node);
   }

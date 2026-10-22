@@ -674,14 +674,8 @@ bool _wl_backend_destroy_output(struct vt_backend_t *backend,
           backend->comp->renderer, output))
     return false;
 
-  output->user_data = NULL;
+  vt_output_fini(output);
 
-  free(output->physical.make);
-  free(output->physical.model);
-  free(output->physical.name);
-  free(output->physical.serial_number);
-
-  wl_list_remove(&output->link_global);
   if (backend->on_output_change)
     backend->on_output_change(backend, output);
   output = NULL;
@@ -698,8 +692,6 @@ bool _wl_backend_destroy_output(struct vt_backend_t *backend,
 #define _VT_DRM_FORMAT_XRGB8888                                                \
   _vt_fourcc_code('X', 'R', '2', '4') /* [31:0] A:R:G:B 8:8:8:8 little endian  \
                                        */
-/* The renderer samples dmabufs through GL_TEXTURE_2D only, so external-only
- * modifiers (e.g. LINEAR on NVIDIA) must not be offered to clients. */
 static bool _wl_push_sampleable_formats(struct wl_array       *dst,
                                         const struct wl_array *src) {
   struct vt_drm_format_t *it;
@@ -709,8 +701,12 @@ static bool _wl_push_sampleable_formats(struct wl_array       *dst,
 
     struct vt_drm_format_modifier_t *mod;
     wl_array_for_each(mod, &it->mods) {
+      /* The renderer samples dmabufs through GL_TEXTURE_2D only, so
+       * external-only modifiers (e.g. LINEAR on NVIDIA) must not be offered to
+       * clients. */
       if (mod->_egl_ext_only)
         continue;
+
       if (!vt_drm_format_add_mod(&fmt, mod->mod)) {
         vt_drm_format_fini(&fmt);
         return false;

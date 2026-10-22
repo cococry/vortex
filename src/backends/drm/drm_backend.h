@@ -31,6 +31,14 @@ bool backend_is_dmabuf_importable_drm(struct vt_backend_t     *backend,
                                       struct vt_dmabuf_attr_t *attr,
                                       int32_t                  device_fd);
 
+struct vt_buffer_t *backend_allocate_buffer_drm(struct vt_backend_t *backend,
+                                                uint32_t width, uint32_t height,
+                                                uint32_t format);
+
+bool backend_clear_buffer_drm(struct vt_backend_t *backend,
+                                             struct vt_buffer_t  *buf,
+                                             uint32_t             col);
+
 bool backend_implement_drm(struct vt_compositor_t *comp);
 
 bool backend_handle_frame_drm(struct vt_backend_t *backend,

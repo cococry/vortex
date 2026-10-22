@@ -73,6 +73,7 @@
 #include "drm_types.h"
 #include "fb.h"
 #include "kms.h"
+#include "gbm_allocator.h"
 #include "liftoff_log.h"
 #include "prime.h"
 
@@ -1814,9 +1815,6 @@ static bool _drm_create_output_for_device(struct vt_drm_backend_state_t *drm,
                                          drm_output->liftoff_composition_layer);
   }
 
-  if (output->backend->on_output_change)
-    output->backend->on_output_change(output->backend, output);
-
   return true;
 }
 
@@ -1940,6 +1938,10 @@ static bool _drm_scan_connectors(struct vt_drm_backend_state_t *drm) {
     }
 
     drm_output->renderable_setup = true;
+
+    if (output->backend->on_output_change)
+      output->backend->on_output_change(output->backend, output);
+
     drmModeFreeConnector(conn);
   }
 
@@ -2374,23 +2376,8 @@ static bool _drm_destroy_output_for_device(struct vt_drm_backend_state_t *drm,
     drm_output->gbm_surf = NULL;
   }
 
-  output->user_data = NULL;
+  vt_output_fini(output);
 
-  free(output->physical.make);
-  free(output->physical.model);
-  free(output->physical.name);
-  free(output->physical.serial_number);
-
-  struct vt_output_mode_t *mode, *tmp_mode;
-  wl_list_for_each_safe(mode, tmp_mode, &output->physical.modes, link) {
-    wl_list_remove(&mode->link);
-    free(mode);
-  }
-
-  pixman_region32_fini(&output->damage);
-
-  wl_list_remove(&output->link_local);
-  wl_list_remove(&output->link_global);
   if (output->backend->on_output_change)
     output->backend->on_output_change(output->backend, output);
 
@@ -3203,6 +3190,41 @@ bool backend_is_dmabuf_importable_drm(struct vt_backend_t     *backend,
   return drm_prime_test_import(master->main_drm->drm_fd, attr);
 }
 
+struct vt_buffer_t *backend_allocate_buffer_drm(struct vt_backend_t *backend,
+                                                uint32_t width, uint32_t height,
+                                                uint32_t format) {
+  assert(backend);
+
+  struct vt_drm_backend_master_state_t *master =
+      BACKEND_DATA(backend, struct vt_drm_backend_master_state_t);
+
+  if (!master || !master->main_drm || !master->main_drm->gbm_dev)
+    return NULL;
+
+  if (!width || !height)
+    return NULL;
+
+  return drm_gbm_buffer_allocator_alloc(
+      backend->comp, master->main_drm->gbm_dev, width, height, format);
+}
+
+bool backend_clear_buffer_drm(struct vt_backend_t *backend,
+                              struct vt_buffer_t *buf, uint32_t col) {
+
+  assert(backend);
+
+  if (!buf)
+    return NULL;
+
+  struct vt_drm_backend_master_state_t *master =
+      BACKEND_DATA(backend, struct vt_drm_backend_master_state_t);
+
+  if (!master || !master->main_drm || !master->main_drm->gbm_dev)
+    return NULL;
+
+  return drm_gbm_buffer_allocator_clear(buf, col);
+}
+
 static bool
 _drm_output_can_scanout_dmabuf(struct vt_drm_backend_state_t *drm,
                                struct vt_drm_output_state_t  *output,
@@ -3895,6 +3917,8 @@ bool backend_implement_drm(struct vt_compositor_t *comp) {
   comp->backend->impl = (struct vt_backend_interface_t){
       .init = backend_init_drm,
       .is_dmabuf_importable = backend_is_dmabuf_importable_drm,
+      .allocate_buffer = backend_allocate_buffer_drm,
+      .clear_buffer = backend_clear_buffer_drm,
       .handle_frame = backend_handle_frame_drm,
       .commit_cursor_only = backend_commit_cursor_only_drm,
       .terminate = backend_terminate_drm,

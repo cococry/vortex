@@ -75,6 +75,13 @@ struct vt_backend_interface_t {
   bool (*is_dmabuf_importable)(struct vt_backend_t     *backend,
                                struct vt_dmabuf_attr_t *attr,
                                int32_t                  device_fd);
+  struct vt_buffer_t *(*allocate_buffer)(struct vt_backend_t *backend,
+                                         uint32_t width, uint32_t height,
+                                         uint32_t format);
+
+  bool (*clear_buffer)(struct vt_backend_t *backend, struct vt_buffer_t *buf,
+                       uint32_t col);
+
   bool (*handle_frame)(struct vt_backend_t *backend,
                        struct vt_output_t  *output);
   bool (*prepare_output_frame)(struct vt_backend_t *backend,
@@ -104,24 +111,6 @@ struct vt_backend_t {
   struct vt_compositor_t *comp;
 
   enum vt_backend_platform_t platform;
-};
-
-enum vt_output_mode_aspect_ratio_t {
-  VT_MODE_PIC_AR_NONE = 0,    /* DRM_MODE_PICTURE_ASPECT_NONE */
-  VT_MODE_PIC_AR_4_3 = 1,     /* DRM_MODE_PICTURE_ASPECT_4_3 */
-  VT_MODE_PIC_AR_16_9 = 2,    /* DRM_MODE_PICTURE_ASPECT_16_9 */
-  VT_MODE_PIC_AR_64_27 = 3,   /* DRM_MODE_PICTURE_ASPECT_64_27 */
-  VT_MODE_PIC_AR_256_135 = 4, /* DRM_MODE_PICTURE_ASPECT_256_135*/
-};
-
-struct vt_output_mode_t {
-  uint32_t flags;
-  /** Picture aspect ratio.*/
-  enum vt_output_mode_aspect_ratio_t aspect_ratio;
-  int32_t                            width;   /**< Width in pixels. */
-  int32_t                            height;  /**< Height in pixels. */
-  uint32_t                           refresh; /**< Refresh rate in mHz. */
-  struct wl_list                     link;
 };
 
 struct vt_presented_surface_t {

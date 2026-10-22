@@ -33,7 +33,7 @@ enum vt_scene_node_type_t {
   VT_SCENE_NODE_ROOT = 0,
   VT_SCENE_NODE_SURFACE,
   VT_SCENE_NODE_RECT,
-  VT_SCENE_NODE_BACKGROUND,
+  VT_SCENE_NODE_BUFFER,
   VT_SCENE_NODE_INVISIBLE_GEOMETRY
 };
 
@@ -55,7 +55,10 @@ struct vt_scene_node_t {
 
   bool geom_dirty;
 
-  struct vt_surface_t *surf;
+  union {
+    struct vt_surface_t *surf;
+    struct vt_buffer_t  *buf;
+  };
 
   enum vt_scene_node_type_t type;
 };
@@ -71,6 +74,9 @@ struct vt_scene_t {
 
 struct vt_scene_node_t *vt_scene_node_create(struct vt_compositor_t *c,
                                              struct vt_surface_t    *surf);
+
+struct vt_scene_node_t *vt_scene_node_create_buffer(struct vt_compositor_t *c,
+                                                    struct vt_buffer_t *buf);
 
 bool vt_scene_node_destroy(struct vt_compositor_t *c,
                            struct vt_scene_node_t *node);

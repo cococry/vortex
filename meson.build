@@ -240,7 +240,6 @@ configure_file(
 # ============================================================
 
 vortex_inc = include_directories(
-  'include',
   'src',
 )
 
