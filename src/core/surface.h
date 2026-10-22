@@ -120,7 +120,7 @@ struct vt_surface_role_impl_t {
 
 struct vt_surface_role_t {
   const struct vt_surface_role_impl_t *impl;
-  void                          *data;
+  void                                *data;
 };
 
 struct vt_surface_frame_callback_t {

@@ -495,8 +495,9 @@ void vt_content_update_add_constraint(
   wl_list_insert(&cu->constraints, &c->link);
 }
 
-static void _content_update_collect_dependant_surfaces(
-    struct vt_content_update_t *cu, struct wl_array *surfs) {
+static void
+_content_update_collect_dependant_surfaces(struct vt_content_update_t *cu,
+                                           struct wl_array            *surfs) {
   struct vt_content_update_dependency_t *edge;
   wl_list_for_each(edge, &cu->dependants, dependant_link) {
     struct vt_surface_t **slot = wl_array_add(surfs, sizeof(*slot));
@@ -531,9 +532,7 @@ void vt_content_update_resolve_constraint(
     *slot = cu->surf;
   _content_update_collect_dependant_surfaces(cu, &surfs);
 
-  wl_array_for_each(slot, &surfs) {
-    _content_update_flush_surface(*slot);
-  }
+  wl_array_for_each(slot, &surfs) { _content_update_flush_surface(*slot); }
 
   wl_array_release(&surfs);
 }

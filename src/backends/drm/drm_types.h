@@ -261,7 +261,7 @@ struct vt_drm_output_state_t {
   bool needs_compositing;
 
   /* cursor->image is currently displayed */
-  struct vt_drm_cursor_state_t  cursor;
+  struct vt_drm_cursor_state_t cursor;
   /* kms_cursor_image is currently scanned out */
   struct vt_drm_cursor_image_t *kms_cursor_image;
   /* pending_cursor_image is currently pending */

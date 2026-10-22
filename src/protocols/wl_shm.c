@@ -612,8 +612,8 @@ bool vt_proto_wl_shm_init(struct vt_compositor_t *comp,
     return false;
   }
 
-  _proto.global = wl_global_create(comp->wl.dsp, &wl_shm_interface, _WL_SHM_VERSION,
-                                   &_proto, _wl_shm_bind);
+  _proto.global = wl_global_create(comp->wl.dsp, &wl_shm_interface,
+                                   _WL_SHM_VERSION, &_proto, _wl_shm_bind);
   if (!_proto.global) {
     wl_array_release(&_proto.formats);
     memset(&_proto, 0, sizeof(_proto));

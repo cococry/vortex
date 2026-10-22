@@ -36,8 +36,7 @@ struct vt_buffer_t *backend_allocate_buffer_drm(struct vt_backend_t *backend,
                                                 uint32_t format);
 
 bool backend_clear_buffer_drm(struct vt_backend_t *backend,
-                                             struct vt_buffer_t  *buf,
-                                             uint32_t             col);
+                              struct vt_buffer_t *buf, uint32_t col);
 
 bool backend_implement_drm(struct vt_compositor_t *comp);
 

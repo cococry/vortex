@@ -151,9 +151,8 @@ static bool _timeline_import_sync_file(struct vt_drm_syncobj_timeline_t *tl,
     return false;
 
   _proto.stats.release_imported++;
-  bool ok =
-      drmSyncobjImportSyncFile(tl->drm_fd, tmp, sync_file_fd) == 0 &&
-      drmSyncobjTransfer(tl->drm_fd, tl->handle, point, tmp, 0, 0) == 0;
+  bool ok = drmSyncobjImportSyncFile(tl->drm_fd, tmp, sync_file_fd) == 0 &&
+            drmSyncobjTransfer(tl->drm_fd, tl->handle, point, tmp, 0, 0) == 0;
 
   drmSyncobjDestroy(tl->drm_fd, tmp);
   return ok;
@@ -164,8 +163,9 @@ static void _timeline_signal(struct vt_drm_syncobj_timeline_t *tl,
   _proto.stats.release_signaled++;
   uint32_t handle = tl->handle;
   if (drmSyncobjTimelineSignal(tl->drm_fd, &handle, &point, 1) != 0)
-    VT_ERROR(_proto.comp->log, "Failed to signal timeline point %" PRIu64 ": %s",
-             point, strerror(errno));
+    VT_ERROR(_proto.comp->log,
+             "Failed to signal timeline point %" PRIu64 ": %s", point,
+             strerror(errno));
 }
 
 /* ===================================================
@@ -265,9 +265,9 @@ static void _waiter_finish(struct vt_drm_syncobj_acquire_waiter_t *w) {
   free(w);
 }
 
-static void _waiter_constraint_destroy(struct vt_content_update_constraint_t *c) {
-  struct vt_drm_syncobj_acquire_waiter_t *w =
-      wl_container_of(c, w, constraint);
+static void
+_waiter_constraint_destroy(struct vt_content_update_constraint_t *c) {
+  struct vt_drm_syncobj_acquire_waiter_t *w = wl_container_of(c, w, constraint);
   _waiter_finish(w);
 }
 
@@ -338,13 +338,15 @@ static bool _acquire_attach(struct vt_content_update_t       *cu,
  * ================== SURFACE ADDON ==================
  * =================================================== */
 
-static void _state_clear_points(struct vt_linux_drm_syncobj_v1_surface_state_t *s) {
+static void
+_state_clear_points(struct vt_linux_drm_syncobj_v1_surface_state_t *s) {
   _timeline_unref(&s->acquire_timeline);
   _timeline_unref(&s->release_timeline);
 }
 
-static bool _post_surface_error(struct vt_linux_drm_syncobj_v1_surface_state_t *s,
-                                uint32_t code, const char *msg) {
+static bool
+_post_surface_error(struct vt_linux_drm_syncobj_v1_surface_state_t *s,
+                    uint32_t code, const char *msg) {
   wl_resource_post_error(s->res, code, "%s", msg);
   return false;
 }
@@ -360,8 +362,9 @@ static bool _addon_validate_commit(struct vt_surface_t *surf) {
 
   if (!has_buffer) {
     if (has_points)
-      return _post_surface_error(s, WP_LINUX_DRM_SYNCOBJ_SURFACE_V1_ERROR_NO_BUFFER,
-                                 "timeline points set without a buffer");
+      return _post_surface_error(
+          s, WP_LINUX_DRM_SYNCOBJ_SURFACE_V1_ERROR_NO_BUFFER,
+          "timeline points set without a buffer");
     return true;
   }
 
@@ -465,7 +468,8 @@ static void _surface_set_point(struct wl_resource *resource,
     return;
   }
 
-  struct vt_drm_syncobj_timeline_t *tl = wl_resource_get_user_data(timeline_res);
+  struct vt_drm_syncobj_timeline_t *tl =
+      wl_resource_get_user_data(timeline_res);
   struct vt_drm_syncobj_timeline_t **slot =
       acquire ? &s->acquire_timeline : &s->release_timeline;
 
@@ -535,7 +539,7 @@ static void _manager_destroy(struct wl_client   *client,
   wl_resource_destroy(resource);
 }
 
-static void _manager_get_surface(struct wl_client *client,
+static void _manager_get_surface(struct wl_client   *client,
                                  struct wl_resource *resource, uint32_t id,
                                  struct wl_resource *surface_res) {
   struct vt_surface_t *surf = wl_resource_get_user_data(surface_res);
@@ -549,9 +553,9 @@ static void _manager_get_surface(struct wl_client *client,
   }
 
   struct vt_linux_drm_syncobj_v1_surface_state_t *s = calloc(1, sizeof(*s));
-  struct wl_resource                             *res = wl_resource_create(
-      client, &wp_linux_drm_syncobj_surface_v1_interface,
-      wl_resource_get_version(resource), id);
+  struct wl_resource                             *res =
+      wl_resource_create(client, &wp_linux_drm_syncobj_surface_v1_interface,
+                         wl_resource_get_version(resource), id);
   if (!s || !res) {
     free(s);
     if (res)
@@ -589,9 +593,9 @@ static void _manager_import_timeline(struct wl_client   *client,
 
   if (ret != 0) {
     free(tl);
-    wl_resource_post_error(resource,
-                           WP_LINUX_DRM_SYNCOBJ_MANAGER_V1_ERROR_INVALID_TIMELINE,
-                           "cannot import DRM syncobj: %s", strerror(errno));
+    wl_resource_post_error(
+        resource, WP_LINUX_DRM_SYNCOBJ_MANAGER_V1_ERROR_INVALID_TIMELINE,
+        "cannot import DRM syncobj: %s", strerror(errno));
     return;
   }
 
@@ -645,8 +649,9 @@ bool vt_proto_linux_drm_syncobj_v1_init(struct vt_compositor_t *comp,
   _proto.comp = comp;
   _proto.drm_fd = drm_fd;
 
-  if (!wl_global_create(comp->wl.dsp, &wp_linux_drm_syncobj_manager_v1_interface,
-                        1, NULL, _manager_bind)) {
+  if (!wl_global_create(comp->wl.dsp,
+                        &wp_linux_drm_syncobj_manager_v1_interface, 1, NULL,
+                        _manager_bind)) {
     VT_ERROR(comp->log, "Cannot create linux-drm-syncobj-v1 global.");
     return false;
   }

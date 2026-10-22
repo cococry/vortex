@@ -72,8 +72,8 @@
 #include "drm_backend.h"
 #include "drm_types.h"
 #include "fb.h"
-#include "kms.h"
 #include "gbm_allocator.h"
+#include "kms.h"
 #include "liftoff_log.h"
 #include "prime.h"
 
@@ -669,7 +669,6 @@ _drm_build_dmabuf_feedback(struct vt_drm_backend_master_state_t *master,
       return false;
     }
 
-
     _log_dmabuf_tranche(master->comp, main_tranche, dev->path);
   }
 
@@ -1182,9 +1181,7 @@ static void _drm_liftoff_finish(struct vt_drm_backend_state_t *drm) {
   }
 
   struct vt_drm_plane_t *plane;
-  wl_array_for_each(plane, &drm->planes) {
-    plane->liftoff_plane = NULL;
-  }
+  wl_array_for_each(plane, &drm->planes) { plane->liftoff_plane = NULL; }
 }
 
 static bool _drm_liftoff_init(struct vt_drm_backend_state_t *drm) {
@@ -1799,9 +1796,8 @@ static bool _drm_create_output_for_device(struct vt_drm_backend_state_t *drm,
   }
 
   if (drm->impl->atomic) {
-    if (!(drm_output->liftoff_output =
-              liftoff_output_create(drm_output->crtc->liftoff_dev,
-                                    drm_output->crtc->id))) {
+    if (!(drm_output->liftoff_output = liftoff_output_create(
+              drm_output->crtc->liftoff_dev, drm_output->crtc->id))) {
       VT_ERROR(comp->log, "Failed to create liftoff output for output.");
       return false;
     }

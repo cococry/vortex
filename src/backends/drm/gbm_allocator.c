@@ -17,7 +17,7 @@ static const char gbm_attachment_owner_key;
 
 static void _gbm_attachment_destroy(struct vt_buffer_t *buffer,
                                     const void *owner, void *ptr);
-static struct gbm_attachment_data *
+static struct gbm_attachment_data             *
 _find_gbm_attachment(struct vt_buffer_t *buffer);
 static bool _allocated_gbm_get_dmabuf(struct vt_buffer_t      *buffer,
                                       struct vt_dmabuf_attr_t *out);

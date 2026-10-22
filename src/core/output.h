@@ -64,8 +64,6 @@ struct vt_output_mode_t {
   struct wl_list                     link;
 };
 
-
-
 struct vt_output_t {
   struct vt_output_implementation_t *impl;
 
@@ -129,7 +127,7 @@ struct vt_output_t {
   } background;
 };
 
-enum vt_output_layer_type_t{
+enum vt_output_layer_type_t {
   VT_OUTPUT_LAYER_SURFACE = 0,
   VT_OUTPUT_LAYER_BUFFER,
 };
@@ -152,7 +150,8 @@ struct vt_output_t *vt_output_init(struct vt_backend_t               *backend,
 
 void vt_output_fini(struct vt_output_t *output);
 
-bool vt_output_init_geom(struct vt_output_t* output, uint32_t width, uint32_t height); 
+bool vt_output_init_geom(struct vt_output_t *output, uint32_t width,
+                         uint32_t height);
 
 bool vt_output_track_presented_surface(struct vt_output_t  *output,
                                        struct vt_surface_t *surface);

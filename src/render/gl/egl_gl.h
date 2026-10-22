@@ -33,7 +33,7 @@
 
 struct vt_egl_texture_t {
   uint32_t width, height;
-  GLuint id;
+  GLuint   id;
 };
 
 struct vt_egl_buffer_t {
@@ -81,7 +81,7 @@ void renderer_set_clear_color_egl(struct vt_renderer_t *r,
                                   struct vt_output_t *output, uint32_t col);
 
 void renderer_clear_color_buffer_egl(struct vt_renderer_t *r,
-                                  struct vt_output_t *output);
+                                     struct vt_output_t   *output);
 
 void renderer_stencil_damage_pass_egl(struct vt_renderer_t *r,
                                       struct vt_output_t   *output);

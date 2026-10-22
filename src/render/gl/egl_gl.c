@@ -1372,8 +1372,7 @@ bool renderer_setup_renderable_output_egl(struct vt_renderer_t *r,
     struct rn_init_options_t opts = {
         .gl_load_proc = (rn_gl_load_proc)eglGetProcAddress,
         .log = {.verbose = r->comp->log.verbose,
-                .log_stream = r->comp->log.stream
-        }};
+                .log_stream = r->comp->log.stream}};
     egl->runara = rn_state_init(&opts, 0, 0);
 
     if (!egl->runara) {
@@ -1599,11 +1598,11 @@ void renderer_set_clear_color_egl(struct vt_renderer_t *r,
   rn_clear_color(egl->runara, _hex_to_rn_color(col));
 }
 void renderer_clear_color_buffer_egl(struct vt_renderer_t *r,
-                                  struct vt_output_t *output) {
+                                     struct vt_output_t   *output) {
   (void)output;
 
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
-  rn_clear_color_buffer(egl->runara); 
+  rn_clear_color_buffer(egl->runara);
 }
 
 void renderer_stencil_damage_pass_egl(struct vt_renderer_t *r,

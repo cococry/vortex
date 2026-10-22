@@ -68,9 +68,10 @@ void vt_output_fini(struct vt_output_t *output) {
   wl_list_remove(&output->link_local);
 }
 
-bool _init_output_bg(struct vt_output_t* output) {
-  assert(output && output->backend && output->backend->comp && 
-      output->backend->impl.allocate_buffer && output->backend->impl.clear_buffer);
+bool _init_output_bg(struct vt_output_t *output) {
+  assert(output && output->backend && output->backend->comp &&
+         output->backend->impl.allocate_buffer &&
+         output->backend->impl.clear_buffer);
 
   struct vt_scene_node_t *bg_node = NULL;
   struct vt_buffer_t     *fallback_buf = NULL;
@@ -79,7 +80,7 @@ bool _init_output_bg(struct vt_output_t* output) {
   fallback_buf = output->backend->impl.allocate_buffer(
       output->backend, output->width, output->height, DRM_FORMAT_XRGB8888);
 
-  if(!fallback_buf)
+  if (!fallback_buf)
     goto fail;
 
   if (!output->backend->impl.clear_buffer(output->backend, fallback_buf, 0x0))
@@ -94,9 +95,9 @@ bool _init_output_bg(struct vt_output_t* output) {
 
   return true;
 fail:
-  if(bg_node)
+  if (bg_node)
     vt_scene_node_destroy(output->backend->comp, bg_node);
-  if(fallback_buf) {
+  if (fallback_buf) {
     /* destroys the buffer */
     vt_buffer_unref(&fallback_buf);
   }
@@ -104,7 +105,8 @@ fail:
   return false;
 }
 
-bool vt_output_init_geom(struct vt_output_t* output, uint32_t width, uint32_t height) {
+bool vt_output_init_geom(struct vt_output_t *output, uint32_t width,
+                         uint32_t height) {
   assert(output && output->backend && output->backend->comp);
 
   output->width = width;

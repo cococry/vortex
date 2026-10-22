@@ -1630,7 +1630,8 @@ bool vt_proto_linux_dmabuf_v1_init(
 
 struct vt_linux_dmabuf_v1_buffer_t *
 vt_proto_linux_dmabuf_v1_from_buffer_res(struct wl_resource *res) {
-  if(!_proto) return NULL;
+  if (!_proto)
+    return NULL;
   /* 1. Validate wl_buffer instance */
   if (!res ||
       !wl_resource_instance_of(res, &wl_buffer_interface,

@@ -182,9 +182,9 @@ bool _scene_node_push_surface_layer(struct vt_scene_t      *scene,
 }
 
 bool _scene_node_push_buffer_layer(struct vt_scene_t      *scene,
-                                    struct vt_scene_node_t *node) {
+                                   struct vt_scene_node_t *node) {
   assert(scene && node && node->type == VT_SCENE_NODE_BUFFER);
-  
+
   struct vt_box_t *rect = vt_scene_node_get_global_bounds(node);
   if (!rect)
     return false;
@@ -196,18 +196,10 @@ bool _scene_node_push_buffer_layer(struct vt_scene_t      *scene,
   layer->buf = node->buf;
 
   layer->src = (struct vt_box_t){
-      .x = 0, 
-      .y = 0, 
-      .width = rect->width, 
-      .height = rect->height 
-  };
+      .x = 0, .y = 0, .width = rect->width, .height = rect->height};
 
   layer->dst = (struct vt_box_t){
-      .x = rect->x, 
-      .y = rect->y, 
-      .width = rect->width, 
-      .height = rect->height 
-  };
+      .x = rect->x, .y = rect->y, .width = rect->width, .height = rect->height};
 
   return true;
 }
@@ -313,7 +305,7 @@ static void _composite_pass(struct vt_scene_t  *scene,
 
   r->impl.begin_scene(r, output);
 
-  r->impl.clear_color_buffer(r, output); 
+  r->impl.clear_color_buffer(r, output);
 
   _scene_render_layers(scene, output);
 
@@ -404,8 +396,7 @@ struct vt_scene_node_t *vt_scene_node_create(struct vt_compositor_t *c,
   if (surf)
     surf->scene_node = n;
 
-  VT_TRACE(c->log,
-           "Created scene node %p for surface %p, geom_dirty=%d",
+  VT_TRACE(c->log, "Created scene node %p for surface %p, geom_dirty=%d",
            (void *)n, (void *)surf, n->geom_dirty);
 
   return n;
@@ -413,7 +404,7 @@ struct vt_scene_node_t *vt_scene_node_create(struct vt_compositor_t *c,
 
 struct vt_scene_node_t *vt_scene_node_create_buffer(struct vt_compositor_t *c,
                                                     struct vt_buffer_t *buf) {
- struct vt_scene_node_t *n = VT_ALLOC(c, sizeof(*n));
+  struct vt_scene_node_t *n = VT_ALLOC(c, sizeof(*n));
   if (!n) {
     VT_ERROR(c->log, "Failed to allocate scene node.");
     return NULL;

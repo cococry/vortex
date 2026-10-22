@@ -83,8 +83,8 @@ bool vt_content_update_apply_dag(struct vt_content_update_t *root);
 // true while cu or an update queued ahead of it is held by a constraint
 bool vt_content_update_waits(const struct vt_content_update_t *cu);
 
-void vt_content_update_add_constraint(
-    struct vt_content_update_t *cu, struct vt_content_update_constraint_t *c);
+void vt_content_update_add_constraint(struct vt_content_update_t            *cu,
+                                      struct vt_content_update_constraint_t *c);
 
 /* Detaches the constraint and applies whatever became ready. cu may be
  * destroyed by the time this returns. */

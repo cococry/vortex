@@ -20,8 +20,8 @@
  * SOFTWARE.
  */
 
-#include "config.h"
 #include "renderer.h"
+#include "config.h"
 
 #if VT_HAS_OPENGL
 #include "gl/egl_gl.h"
@@ -58,6 +58,7 @@ void vt_renderer_implement(struct vt_renderer_t       *renderer,
         .destroy = renderer_destroy_egl};
   }
 #else
-#error "You are not building any renderer, or you use Vulkan which is currently unsupported."
+#error                                                                         \
+    "You are not building any renderer, or you use Vulkan which is currently unsupported."
 #endif
 }
