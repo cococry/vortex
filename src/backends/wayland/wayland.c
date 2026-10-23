@@ -45,6 +45,9 @@
 #include "../../render/renderer.h"
 #include "xdg-shell-client-protocol.h"
 
+#include "../../core/buffer.h"
+#include <limits.h>
+#include <drm/drm_fourcc.h>
 #include <errno.h>
 #include <string.h>
 
@@ -52,6 +55,148 @@
 #define _WL_DEFAULT_OUTPUT_HEIGHT 720
 
 #define _SUBSYS_NAME "WL"
+
+/* CPU storage stays allocated across interactive resizes. The renderer imports
+ * this through get_shm; no parent wl_buffer or roundtrip is needed. */
+struct wl_allocated_buffer {
+  void *pixels;
+  size_t capacity;
+  uint32_t format;
+  uint32_t clear_pixel;
+  bool solid;
+};
+static const char wl_allocator_owner;
+
+static void _wl_allocated_destroy(struct vt_buffer_t *buf, const void *owner,
+                                   void *ptr) {
+  (void)buf;
+  (void)owner;
+  struct wl_allocated_buffer *data = ptr;
+  free(data->pixels);
+  free(data);
+}
+
+static const struct vt_buffer_attachment_implementation_t wl_allocator_impl = {
+    .destroy = _wl_allocated_destroy,
+};
+
+static struct wl_allocated_buffer *_wl_allocated_data(struct vt_buffer_t *buf) {
+  struct vt_buffer_attachment_t *a = vt_buffer_find_attachment(
+      buf, &wl_allocator_owner, &wl_allocator_impl);
+  return a ? a->data : NULL;
+}
+
+static bool _wl_allocated_get_shm(struct vt_buffer_t *buf,
+                                  struct vt_shm_attr_t *attr) {
+  struct wl_allocated_buffer *data = _wl_allocated_data(buf);
+  if (!data || !attr)
+    return false;
+  *attr = (struct vt_shm_attr_t){
+      .data = data->pixels, .size = data->capacity,
+      .width = buf->width, .height = buf->height,
+      .stride = buf->width * 4,
+      .format = data->format == DRM_FORMAT_XRGB8888
+                    ? WL_SHM_FORMAT_XRGB8888 : WL_SHM_FORMAT_ARGB8888,
+  };
+  return true;
+}
+
+static const struct vt_buffer_implementation_t wl_allocated_impl = {
+    .get_shm = _wl_allocated_get_shm,
+};
+
+static bool _wl_buffer_size(uint32_t width, uint32_t height, size_t *size) {
+  if (!width || !height || width > INT32_MAX / 4 || height > INT32_MAX ||
+      height > SIZE_MAX / ((size_t)width * 4))
+    return false;
+  *size = (size_t)width * height * 4;
+  return true;
+}
+
+static struct vt_buffer_t *backend_allocate_buffer_wl(
+    struct vt_backend_t *backend, uint32_t width, uint32_t height,
+    uint32_t format) {
+  size_t size;
+  if (!_wl_buffer_size(width, height, &size) ||
+      (format != DRM_FORMAT_XRGB8888 && format != DRM_FORMAT_ARGB8888))
+    return NULL;
+  struct wl_allocated_buffer *data = calloc(1, sizeof(*data));
+  if (!data)
+    return NULL;
+  data->pixels = calloc(1, size);
+  data->capacity = size;
+  data->format = format;
+  struct vt_buffer_t *buf = data->pixels
+      ? vt_buffer_create(backend->comp, width, height, &wl_allocated_impl) : NULL;
+  if (!buf || !vt_buffer_add_attachment(buf, &wl_allocator_owner, data,
+                                         &wl_allocator_impl)) {
+    if (buf)
+      vt_buffer_unref(&buf);
+    _wl_allocated_destroy(NULL, NULL, data);
+    return NULL;
+  }
+  return buf;
+}
+
+static bool backend_clear_buffer_wl(struct vt_backend_t *backend,
+                                     struct vt_buffer_t *buf, uint32_t color) {
+  (void)backend;
+  struct wl_allocated_buffer *data = buf ? _wl_allocated_data(buf) : NULL;
+  if (!data || buf->uses)
+    return false;
+  uint32_t *pixels = data->pixels;
+  size_t count = data->capacity / sizeof(*pixels);
+  uint32_t pixel = 0xff000000u | (color & 0xffffffu);
+  if (data->solid && data->clear_pixel == pixel)
+    return true;
+  for (size_t i = 0; i < count; ++i)
+    pixels[i] = pixel;
+  data->solid = true;
+  data->clear_pixel = pixel;
+  return true;
+}
+
+static bool backend_resize_buffer_wl(struct vt_backend_t *backend,
+                                      struct vt_buffer_t **buf,
+                                      uint32_t width, uint32_t height) {
+  size_t size;
+  if (!buf || !*buf || !_wl_buffer_size(width, height, &size))
+    return false;
+  struct wl_allocated_buffer *data = _wl_allocated_data(*buf);
+  if (!data)
+    return false;
+  if ((*buf)->width == width && (*buf)->height == height)
+    return true;
+  if ((*buf)->uses || (*buf)->refcount > 1) {
+    struct vt_buffer_t *replacement = backend_allocate_buffer_wl(
+        backend, width, height, data->format);
+    if (!replacement)
+      return false;
+    vt_buffer_unref(buf);
+    *buf = replacement;
+    return true;
+  }
+  if (size > data->capacity) {
+    size_t capacity = data->capacity;
+    while (capacity < size && capacity <= SIZE_MAX / 2)
+      capacity *= 2;
+    if (capacity < size)
+      capacity = size;
+    void *pixels = realloc(data->pixels, capacity);
+    if (!pixels)
+      return false;
+    if (data->solid) {
+      uint32_t *tail = pixels;
+      for (size_t i = data->capacity / 4; i < capacity / 4; ++i)
+        tail[i] = data->clear_pixel;
+    }
+    data->pixels = pixels;
+    data->capacity = capacity;
+  }
+  (*buf)->width = width;
+  (*buf)->height = height;
+  return true;
+}
 
 typedef struct {
   bool                    nested;
@@ -68,6 +213,7 @@ typedef struct {
   struct xdg_surface  *parent_xdg_surface;
   struct xdg_toplevel *parent_xdg_toplevel;
   struct wl_callback  *parent_frame_cb;
+  int32_t pending_width, pending_height;
 } wayland_output_state_t;
 
 typedef struct {
@@ -304,10 +450,11 @@ void _wl_parent_xdg_toplevel_configure(void                *data,
   if (!wl_output)
     return;
 
-  // Handle resize output in renderer
-  if (w != (int32_t)output->width || h != (int32_t)output->height) {
-    _output_handle_render_resize(output, w, h);
-  }
+  /* Zero means the compositor chooses that dimension. Apply only the latest
+   * configure at the next available frame, outside parent event dispatch. */
+  wl_output->pending_width = w > 0 ? w : (int32_t)output->width;
+  wl_output->pending_height = h > 0 ? h : (int32_t)output->height;
+  vt_comp_schedule_repaint(output->backend->comp, output);
 }
 
 static bool _wl_parent_flush(wayland_backend_state_t *wl) {
@@ -655,6 +802,16 @@ bool _wl_backend_destroy_output(struct vt_backend_t *backend,
   if (!wl_output)
     return false;
 
+  if (wl_output->parent_frame_cb) {
+    wl_callback_destroy(wl_output->parent_frame_cb);
+    wl_output->parent_frame_cb = NULL;
+  }
+
+  // EGL owns a native window referring to parent_surface.
+  if (!backend->comp->renderer->impl.destroy_renderable_output(
+          backend->comp->renderer, output))
+    VT_WARN(backend->comp->log, "Failed to destroy renderable Wayland output.");
+
   if (wl_output->parent_xdg_toplevel) {
     xdg_toplevel_destroy(wl_output->parent_xdg_toplevel);
     wl_output->parent_xdg_toplevel = NULL;
@@ -669,10 +826,6 @@ bool _wl_backend_destroy_output(struct vt_backend_t *backend,
     wl_surface_destroy(wl_output->parent_surface);
     wl_output->parent_surface = NULL;
   }
-
-  if (!backend->comp->renderer->impl.destroy_renderable_output(
-          backend->comp->renderer, output))
-    return false;
 
   vt_output_fini(output);
 
@@ -692,37 +845,6 @@ bool _wl_backend_destroy_output(struct vt_backend_t *backend,
 #define _VT_DRM_FORMAT_XRGB8888                                                \
   _vt_fourcc_code('X', 'R', '2', '4') /* [31:0] A:R:G:B 8:8:8:8 little endian  \
                                        */
-static bool _wl_push_sampleable_formats(struct wl_array       *dst,
-                                        const struct wl_array *src) {
-  struct vt_drm_format_t *it;
-  wl_array_for_each(it, src) {
-    struct vt_drm_format_t fmt = {0};
-    vt_drm_format_init(&fmt, it->format);
-
-    struct vt_drm_format_modifier_t *mod;
-    wl_array_for_each(mod, &it->mods) {
-      /* The renderer samples dmabufs through GL_TEXTURE_2D only, so
-       * external-only modifiers (e.g. LINEAR on NVIDIA) must not be offered to
-       * clients. */
-      if (mod->_egl_ext_only)
-        continue;
-
-      if (!vt_drm_format_add_mod(&fmt, mod->mod)) {
-        vt_drm_format_fini(&fmt);
-        return false;
-      }
-    }
-
-    bool ok = vt_drm_format_mod_count(&fmt) == 0 ||
-              vt_drm_format_array_push(dst, &fmt);
-    vt_drm_format_fini(&fmt);
-    if (!ok)
-      return false;
-  }
-
-  return true;
-}
-
 bool _wl_init_dmabuf_feedback(struct vt_compositor_t      *comp,
                               struct vt_dmabuf_feedback_t *fb) {
   fb->dev_main = calloc(1, sizeof(*fb->dev_main));
@@ -757,20 +879,17 @@ bool _wl_init_dmabuf_feedback(struct vt_compositor_t      *comp,
   tranche->flags = 0;
   tranche->target_device = fb->dev_main;
 
-  /* Advertise what the renderer can actually sample. This also fills the
-   * renderer's own table, which import needs to pick the texture target. */
-  struct vt_renderer_t *r = comp->renderer;
-  struct wl_array       renderer_formats;
-  if (!r || !r->impl.query_dmabuf_formats_with_renderer ||
-      !r->impl.query_dmabuf_formats_with_renderer(r, &renderer_formats)) {
-    VT_ERROR(comp->log, "Cannot query DMABUF formats from renderer.");
-    return false;
+  /* Nested sessions must not depend on querying the host GPU's EGL format
+   * table. Offer only the basic RGB formats with linear or implicit layout. */
+  const uint32_t formats[] = {DRM_FORMAT_XRGB8888, DRM_FORMAT_ARGB8888};
+  for (size_t i = 0; i < sizeof(formats) / sizeof(formats[0]); ++i) {
+    if (!vt_drm_format_array_push_pair(&tranche->formats, formats[i],
+                                        DRM_FORMAT_MOD_LINEAR) ||
+        !vt_drm_format_array_push_pair(&tranche->formats, formats[i],
+                                        DRM_FORMAT_MOD_INVALID))
+      return false;
   }
-
-  bool ok = _wl_push_sampleable_formats(&tranche->formats, &renderer_formats);
-  vt_drm_format_array_free(&renderer_formats);
-
-  return ok;
+  return true;
 }
 
 // ===================================================
@@ -907,6 +1026,9 @@ bool backend_implement_wl(struct vt_compositor_t *comp) {
   comp->backend->platform = VT_BACKEND_WAYLAND;
   comp->backend->impl = (struct vt_backend_interface_t){
       .init = backend_init_wl,
+      .allocate_buffer = backend_allocate_buffer_wl,
+      .clear_buffer = backend_clear_buffer_wl,
+      .resize_buffer = backend_resize_buffer_wl,
       .is_dmabuf_importable = backend_is_dmabuf_importable_wl,
       .handle_frame = backend_handle_frame_wl,
       .terminate = backend_terminate_wl,
@@ -937,9 +1059,26 @@ bool backend_terminate_wl(struct vt_backend_t *backend) {
 
   wayland_backend_state_t *wl = BACKEND_DATA(backend, wayland_backend_state_t);
 
+  if (wl->parent_event_source) {
+    wl_event_source_remove(wl->parent_event_source);
+    wl->parent_event_source = NULL;
+  }
+
   struct vt_output_t *output, *tmp;
   wl_list_for_each_safe(output, tmp, &backend->comp->outputs, link_global) {
     _wl_backend_destroy_output(backend, output);
+  }
+
+  if (backend->comp->renderer->impl.destroy)
+    backend->comp->renderer->impl.destroy(backend->comp->renderer);
+
+  if (wl->parent_seat) {
+    wl_seat_destroy(wl->parent_seat);
+    wl->parent_seat = NULL;
+  }
+  if (wl->parent_compositor) {
+    wl_compositor_destroy(wl->parent_compositor);
+    wl->parent_compositor = NULL;
   }
 
   if (wl->parent_xdg_wm_base) {
@@ -962,6 +1101,13 @@ bool backend_prepare_output_frame_wl(struct vt_backend_t *backend,
 
   if (wl_output->parent_frame_cb)
     return false;
+
+  if (wl_output->pending_width > 0 && wl_output->pending_height > 0) {
+    int32_t w = wl_output->pending_width, h = wl_output->pending_height;
+    wl_output->pending_width = wl_output->pending_height = 0;
+    if (w != (int32_t)output->width || h != (int32_t)output->height)
+      _output_handle_render_resize(output, w, h);
+  }
 
   wl_output->parent_frame_cb = wl_surface_frame(wl_output->parent_surface);
   if (!wl_output->parent_frame_cb)

@@ -37,6 +37,9 @@ struct vt_output_t *vt_output_init(struct vt_backend_t               *backend,
   if (!output)
     return NULL;
 
+  wl_list_init(&output->link_global);
+  wl_list_init(&output->link_local);
+
   output->backend = backend;
   output->impl = impl;
 
@@ -47,7 +50,10 @@ void vt_output_fini(struct vt_output_t *output) {
   assert(output && output->backend && output->backend->comp);
 
   output->background.buf_fallback = NULL;
-  vt_scene_node_destroy(output->backend->comp, output->background.node);
+  if (output->background.node) {
+    vt_scene_node_destroy(output->backend->comp, output->background.node);
+    output->background.node = NULL;
+  }
 
   output->user_data = NULL;
 

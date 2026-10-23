@@ -435,7 +435,7 @@ struct vt_scene_node_t *vt_scene_node_create_buffer(struct vt_compositor_t *c,
 bool vt_scene_node_destroy(struct vt_compositor_t *c,
                            struct vt_scene_node_t *node) {
   (void)c;
-  if (node->buf) {
+  if (node->type == VT_SCENE_NODE_BUFFER && node->buf) {
     vt_buffer_unref(&node->buf);
   }
   if (node->parent) {

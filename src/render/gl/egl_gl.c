@@ -1456,11 +1456,27 @@ bool renderer_destroy_renderable_output_egl(struct vt_renderer_t *r,
 
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
 
-  if (r->backend->platform == VT_BACKEND_WAYLAND) {
-    struct wl_egl_window *egl_win =
-        (struct wl_egl_window *)output->native_window;
-    wl_egl_window_destroy(egl_win);
+  // Finish GPU access before releasing retained buffer uses and native windows.
+  glFinish();
+  struct egl_output_state_t *egl_output = output->user_data_render;
+  if (egl_output) {
+    struct egl_rendered_buffer_use_t *entry, *tmp;
+    wl_list_for_each_safe(entry, tmp, &egl_output->rendered_buffer_uses, link) {
+      if (entry->use)
+        vt_buffer_use_unref(&entry->use);
+      wl_list_remove(&entry->link);
+      free(entry);
+    }
+    glDeleteTextures(1, &egl_output->fbo_tex_id);
+    glDeleteFramebuffers(1, &egl_output->fbo_id);
+    glDeleteRenderbuffers(1, &egl_output->rbo_tex_depth);
+    output->user_data_render = NULL;
   }
+
+  // A current EGL surface is only actually destroyed once it is unbound.
+  if (!eglMakeCurrent(egl->egl_dsp, EGL_NO_SURFACE, EGL_NO_SURFACE,
+                      egl->egl_ctx))
+    return false;
 
   if (!eglDestroySurface(egl->egl_dsp, (EGLSurface)output->render_surface)) {
     int32_t err = eglGetError();
@@ -1469,6 +1485,11 @@ bool renderer_destroy_renderable_output_egl(struct vt_renderer_t *r,
     return false;
   }
   output->render_surface = NULL;
+
+  if (r->backend->platform == VT_BACKEND_WAYLAND && output->native_window) {
+    wl_egl_window_destroy((struct wl_egl_window *)output->native_window);
+    output->native_window = NULL;
+  }
 
   VT_TRACE(r->comp->log, "Destroyed render surface.");
   return true;

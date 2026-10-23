@@ -2340,6 +2340,8 @@ static bool _drm_destroy_output_for_device(struct vt_drm_backend_state_t *drm,
     drm->impl->disable(drm, drm_output);
 
   _drm_release_all_layers(output);
+  if (drm_output->cursor.image)
+    drm_cursor_image_unref(&drm_output->cursor.image);
 
   if (drm->impl->atomic) {
     _drm_output_finish_liftoff_layers(drm_output);
@@ -3204,6 +3206,17 @@ struct vt_buffer_t *backend_allocate_buffer_drm(struct vt_backend_t *backend,
       backend->comp, master->main_drm->gbm_dev, width, height, format);
 }
 
+static bool backend_resize_buffer_drm(struct vt_backend_t *backend,
+                                      struct vt_buffer_t **buf,
+                                      uint32_t width, uint32_t height) {
+  struct vt_drm_backend_master_state_t *master =
+      BACKEND_DATA(backend, struct vt_drm_backend_master_state_t);
+  if (!master || !master->main_drm || !master->main_drm->gbm_dev)
+    return false;
+  return drm_gbm_buffer_allocator_resize(backend->comp,
+      master->main_drm->gbm_dev, buf, width, height);
+}
+
 bool backend_clear_buffer_drm(struct vt_backend_t *backend,
                               struct vt_buffer_t *buf, uint32_t col) {
 
@@ -3915,6 +3928,7 @@ bool backend_implement_drm(struct vt_compositor_t *comp) {
       .is_dmabuf_importable = backend_is_dmabuf_importable_drm,
       .allocate_buffer = backend_allocate_buffer_drm,
       .clear_buffer = backend_clear_buffer_drm,
+      .resize_buffer = backend_resize_buffer_drm,
       .handle_frame = backend_handle_frame_drm,
       .commit_cursor_only = backend_commit_cursor_only_drm,
       .terminate = backend_terminate_drm,

@@ -65,7 +65,7 @@ static bool _allocated_gbm_get_dmabuf(struct vt_buffer_t      *buffer,
   memset(out, 0, sizeof(*out));
   out->width = buffer->width;
   out->height = buffer->height;
-  out->format = DRM_FORMAT_XRGB8888;
+  out->format = data->format;
   out->mod = gbm_bo_get_modifier(data->bo);
   for (int i = 0; i < plane_count; i++) {
     out->fds[i] = gbm_bo_get_fd_for_plane(data->bo, i);
@@ -73,7 +73,7 @@ static bool _allocated_gbm_get_dmabuf(struct vt_buffer_t      *buffer,
     out->offsets[i] = gbm_bo_get_offset(data->bo, i);
   }
 
-  out->num_planes = 1;
+  out->num_planes = plane_count;
   return true;
 }
 
@@ -165,4 +165,24 @@ struct vt_buffer_t *drm_gbm_buffer_allocator_alloc(struct vt_compositor_t *comp,
   }
 
   return buffer;
+}
+
+bool drm_gbm_buffer_allocator_resize(struct vt_compositor_t *comp,
+                                      struct gbm_device *gbm,
+                                      struct vt_buffer_t **buffer,
+                                      uint32_t width, uint32_t height) {
+  if (!buffer || !*buffer || !width || !height)
+    return false;
+  struct gbm_attachment_data *data = _find_gbm_attachment(*buffer);
+  if (!data)
+    return false;
+  if ((*buffer)->width == width && (*buffer)->height == height)
+    return true;
+  struct vt_buffer_t *replacement = drm_gbm_buffer_allocator_alloc(
+      comp, gbm, width, height, data->format);
+  if (!replacement)
+    return false;
+  vt_buffer_unref(buffer);
+  *buffer = replacement;
+  return true;
 }

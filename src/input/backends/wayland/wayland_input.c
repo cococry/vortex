@@ -106,12 +106,16 @@ void _wl_keyboard_keymap(void *data, struct wl_keyboard *wl_keyboard,
                          uint32_t format, int fd, uint32_t size) {
   (void)wl_keyboard;
   struct vt_input_backend_wl_t *wl = data;
-  if (format != WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1)
+  if (format != WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1) {
+    close(fd);
     return;
+  }
 
   char *map_str = mmap(NULL, size, PROT_READ, MAP_SHARED, fd, 0);
-  if (!map_str)
+  if (map_str == MAP_FAILED) {
+    close(fd);
     return;
+  }
 
   struct xkb_keymap *keymap = xkb_keymap_new_from_string(
       wl->kb_context, map_str, XKB_KEYMAP_FORMAT_TEXT_V1,
@@ -369,14 +373,19 @@ static const struct wl_pointer_listener pointer_listener = {
 
 bool input_backend_init_wl(struct vt_input_backend_t *backend,
                            void                      *native_handle) {
-  if (!backend)
+  if (!backend || !native_handle)
     return false;
 
   backend->user_data =
       VT_ALLOC(backend->comp, sizeof(struct vt_input_backend_wl_t));
   struct vt_input_backend_wl_t *wl = backend->user_data;
+  if (!wl)
+    return false;
+  memset(wl, 0, sizeof(*wl));
   wl->comp = backend->comp;
   wl->kb_context = xkb_context_new(XKB_CONTEXT_NO_FLAGS);
+  if (!wl->kb_context)
+    return false;
   wl->comp->input_backend->kb_context = wl->kb_context;
 
   wl->wl_seat = native_handle;
@@ -401,6 +410,15 @@ bool input_backend_init_wl(struct vt_input_backend_t *backend,
 bool input_backend_terminate_wl(struct vt_input_backend_t *backend) {
   if (!backend || !backend->user_data)
     return false;
+  struct vt_input_backend_wl_t *wl = backend->user_data;
+  if (wl->wl_keyboard) {
+    wl_keyboard_destroy(wl->wl_keyboard);
+    wl->wl_keyboard = NULL;
+  }
+  if (wl->wl_pointer) {
+    wl_pointer_destroy(wl->wl_pointer);
+    wl->wl_pointer = NULL;
+  }
   VT_TRACE(backend->comp->log, "Terminated Wayland nested backend.");
   return true;
 }

@@ -29,8 +29,7 @@ int main(int argc, char **argv) {
 
   vt_comp_run(c);
 
-  if (!vt_comp_terminate(c))
-    return 1;
-
-  return 0;
+  bool success = vt_comp_terminate(c);
+  free(c);
+  return success ? 0 : 1;
 }

@@ -697,9 +697,22 @@ static void _sig_handler(int sig) {
 
 static void _handle_output_changed_backend(struct vt_backend_t *backend,
                                            struct vt_output_t  *output) {
-  (void)output;
   if (!backend || !backend->comp || !backend->comp->scene)
     return;
+
+  struct vt_scene_node_t *bg = output->background.node;
+  if (bg && bg->buf && backend->impl.resize_buffer &&
+      (bg->buf->width != output->width || bg->buf->height != output->height)) {
+    if (backend->impl.resize_buffer(backend, &bg->buf, output->width,
+                                    output->height) &&
+        backend->impl.clear_buffer(backend, bg->buf, 0x181818)) {
+      bg->geom_dirty = true;
+      vt_scene_node_update_global_bounds(bg);
+      output->needs_damage_rebuild = true;
+    } else {
+      VT_ERROR(backend->comp->log, "Failed to resize output background buffer.");
+    }
+  }
 
   if (backend->comp->scene->root) {
     uint32_t            root_w = 0, root_h = 0;
@@ -823,7 +836,11 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
   vt_input_implement(c->input_backend, input_backend);
 
   if (c->input_backend->impl.init) {
-    c->input_backend->impl.init(c->input_backend, c->session->native_handle);
+    if (!c->input_backend->impl.init(c->input_backend,
+                                     c->session->native_handle)) {
+      VT_ERROR(c->log, "Failed to initialize input backend.");
+      return false;
+    }
   }
 
   if (!vt_seat_init(c->seat)) {
@@ -917,11 +934,9 @@ bool vt_comp_terminate(struct vt_compositor_t *c) {
   VT_TRACE(c->log, "Shutting down...");
   c->running = false;
 
-  if (c->backend && c->backend->impl.terminate &&
-      !c->backend->impl.terminate(c->backend)) {
-    VT_ERROR(c->log, "Failed to terminate backend");
-    return false;
-  }
+  // Client and cursor buffers still need the renderer and backend devices.
+  if (c->wl.dsp)
+    wl_display_destroy_clients(c->wl.dsp);
 
   if (c->seat)
     vt_seat_terminate(c->seat);
@@ -929,14 +944,21 @@ bool vt_comp_terminate(struct vt_compositor_t *c) {
   if (c->input_backend && c->input_backend->impl.terminate)
     c->input_backend->impl.terminate(c->input_backend);
 
+  bool success = true;
+  if (c->backend && c->backend->impl.terminate &&
+      !c->backend->impl.terminate(c->backend)) {
+    VT_ERROR(c->log, "Failed to terminate backend");
+    success = false;
+  }
+
   if (c->session && c->session->impl.terminate) {
     c->session->impl.terminate(c->session);
   }
 
   // Shut down wayland
   if (c->wl.dsp) {
-    wl_display_destroy_clients(c->wl.dsp);
     wl_display_destroy(c->wl.dsp);
+    c->wl.evloop = NULL;
     c->wl.dsp = NULL;
   }
 
@@ -956,7 +978,8 @@ bool vt_comp_terminate(struct vt_compositor_t *c) {
     _vt_comp_dl_handle = NULL;
   }
 
-  exit(0);
+  vt_global_compositor = NULL;
+  return success;
 }
 
 void vt_comp_schedule_repaint(struct vt_compositor_t *c,

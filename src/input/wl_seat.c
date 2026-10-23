@@ -202,7 +202,7 @@ bool _wl_handle_global_keybind(struct vt_seat_t *seat, uint32_t keycode,
 
 void _wl_handle_keybind_exit(struct vt_compositor_t *comp, void *user_data) {
   (void)user_data;
-  vt_comp_terminate(comp);
+  comp->running = false;
 }
 void _wl_handle_keybind_term(struct vt_compositor_t *comp, void *user_data) {
   (void)user_data;

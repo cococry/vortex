@@ -79,6 +79,11 @@ struct vt_backend_interface_t {
                                          uint32_t width, uint32_t height,
                                          uint32_t format);
 
+  /* Replaces *buf only on success; old references remain valid. Contents
+   * after resizing are unspecified. Equal dimensions are a no-op. */
+  bool (*resize_buffer)(struct vt_backend_t *backend, struct vt_buffer_t **buf,
+                        uint32_t width, uint32_t height);
+
   bool (*clear_buffer)(struct vt_backend_t *backend, struct vt_buffer_t *buf,
                        uint32_t col);
 

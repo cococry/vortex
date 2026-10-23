@@ -518,6 +518,10 @@ void _wl_surface_handle_resource_destroy(struct wl_resource *resource) {
     }
   }
 
+  // The applied buffer use belongs to the surface, independently of its
+  // pending state and queued content updates.
+  vt_surface_apply_buffer_use(surf, NULL);
+
   wl_resource_set_user_data(resource, NULL);
   free(surf);
 }
