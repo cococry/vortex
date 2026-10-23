@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="vortex_background_v1">
+
+  <interface name="vt_background_shell_v1" version="1">
+    <description summary="Vortex background shell">
+      Assign a wl_surface as an output background.
+    </description>
+
+    <request name="get_background">
+      <arg name="id" type="new_id"
+           interface="vt_background_v1"/>
+      <arg name="surface" type="object"
+           interface="wl_surface"/>
+      <arg name="output" type="object"
+           interface="wl_output"/>
+    </request>
+
+    <enum name="error">
+      <entry name="role" value="0"/>
+      <entry name="output_busy" value="1"/>
+    </enum>
+  </interface>
+
+  <interface name="vt_background_v1" version="1">
+    <description summary="background surface role">
+      The associated wl_surface supplies the background
+      content of its assigned output.
+    </description>
+
+    <request name="destroy" type="destructor"/>
+
+    <event name="configure">
+      <arg name="width" type="uint"/>
+      <arg name="height" type="uint"/>
+    </event>
+  </interface>
+
+</protocol>
+

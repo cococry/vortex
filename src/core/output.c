@@ -22,6 +22,7 @@
 
 #include "output.h"
 
+#include "core/compositor.h"
 #include "core/scene.h"
 #include "core_types.h"
 #include "src/core/buffer.h"
@@ -49,7 +50,12 @@ struct vt_output_t *vt_output_init(struct vt_backend_t               *backend,
 void vt_output_fini(struct vt_output_t *output) {
   assert(output && output->backend && output->backend->comp);
 
-  output->background.buf_fallback = NULL;
+  if (output->background.owner) {
+    output->background.owner->output = NULL;
+    wl_resource_destroy(output->background.owner->resource);
+    output->background.owner = NULL;
+  }
+  vt_buffer_use_unref(&output->background.use_fallback);
   if (output->background.node) {
     vt_scene_node_destroy(output->backend->comp, output->background.node);
     output->background.node = NULL;
@@ -81,6 +87,7 @@ bool _init_output_bg(struct vt_output_t *output) {
 
   struct vt_scene_node_t *bg_node = NULL;
   struct vt_buffer_t     *fallback_buf = NULL;
+  struct vt_buffer_use_t *fallback_use = NULL;
 
   /* initial reference owned by the allocation */
   fallback_buf = output->backend->impl.allocate_buffer(
@@ -89,18 +96,26 @@ bool _init_output_bg(struct vt_output_t *output) {
   if (!fallback_buf)
     goto fail;
 
-  if (!output->backend->impl.clear_buffer(output->backend, fallback_buf, 0x181818))
+  if (!output->backend->impl.clear_buffer(output->backend, fallback_buf,
+                                          0x181818))
     goto fail;
 
-  bg_node = vt_scene_node_create_buffer(output->backend->comp, fallback_buf);
+  fallback_use = vt_buffer_use_create_take(output->backend->comp, output,
+                                            &fallback_buf, NULL, NULL);
+  if (!fallback_use)
+    goto fail;
+
+  bg_node = vt_scene_node_create_buffer(output->backend->comp, fallback_use);
 
   if (!bg_node)
     goto fail;
 
   output->background.node = bg_node;
+  output->background.use_fallback = fallback_use;
 
   return true;
 fail:
+  vt_buffer_use_unref(&fallback_use);
   if (bg_node)
     vt_scene_node_destroy(output->backend->comp, bg_node);
   if (fallback_buf) {
@@ -142,4 +157,55 @@ bool vt_output_track_presented_surface(struct vt_output_t  *output,
   wl_list_insert(output->presented_surfaces.prev, &entry->link);
 
   return true;
+}
+
+/* Retains use; NULL restores the compositor-owned fallback. */
+void vt_output_set_background(struct vt_output_t *output,
+                              struct vt_buffer_use_t *use) {
+  assert(output && output->background.node && output->background.use_fallback);
+
+  struct vt_buffer_use_t *next = vt_buffer_use_ref(
+      use ? use : output->background.use_fallback);
+  vt_buffer_use_unref(&output->background.node->use);
+  output->background.node->use = next;
+  vt_scene_node_mark_geometry_dirty(output->background.node);
+  vt_output_damage_whole(output);
+}
+
+bool vt_output_resize_background(struct vt_output_t *output) {
+  struct vt_buffer_use_t *old = output->background.use_fallback;
+  if (!old || (old->buf->width == output->width &&
+               old->buf->height == output->height))
+    return true;
+
+  struct vt_backend_t *backend = output->backend;
+  struct vt_buffer_t *buf = backend->impl.allocate_buffer(
+      backend, output->width, output->height, DRM_FORMAT_XRGB8888);
+  if (!buf)
+    return false;
+  if (!backend->impl.clear_buffer(backend, buf, 0x181818)) {
+    vt_buffer_unref(&buf);
+    return false;
+  }
+  struct vt_buffer_use_t *use = vt_buffer_use_create_take(
+      backend->comp, output, &buf, NULL, NULL);
+  if (!use) {
+    vt_buffer_unref(&buf);
+    return false;
+  }
+  output->background.use_fallback = use;
+  if (output->background.node->use == old)
+    vt_output_set_background(output, NULL);
+  vt_buffer_use_unref(&old);
+  output->needs_damage_rebuild = true;
+  return true;
+}
+
+void vt_output_damage_whole(struct vt_output_t *output) {
+  assert(output && output->backend && output->backend->comp);
+
+  pixman_region32_union_rect(&output->damage, &output->damage, 0, 0,
+                             output->width, output->height);
+
+  vt_comp_schedule_repaint(output->backend->comp, output);
 }

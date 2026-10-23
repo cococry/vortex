@@ -57,7 +57,7 @@ struct vt_scene_node_t {
 
   union {
     struct vt_surface_t *surf;
-    struct vt_buffer_t  *buf;
+    struct vt_buffer_use_t *use;
   };
 
   enum vt_scene_node_type_t type;
@@ -76,7 +76,7 @@ struct vt_scene_node_t *vt_scene_node_create(struct vt_compositor_t *c,
                                              struct vt_surface_t    *surf);
 
 struct vt_scene_node_t *vt_scene_node_create_buffer(struct vt_compositor_t *c,
-                                                    struct vt_buffer_t *buf);
+                                                    struct vt_buffer_use_t *use);
 
 bool vt_scene_node_destroy(struct vt_compositor_t *c,
                            struct vt_scene_node_t *node);

@@ -103,6 +103,8 @@ enum vt_surface_role_type_t {
   VT_SURFACE_ROLE_SESSION_LOCK,
 
   VT_SURFACE_ROLE_XWAYLAND,
+
+  VT_SURFACE_ROLE_VT_BACKGROUND,
 };
 
 struct vt_content_update_t;

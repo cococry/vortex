@@ -96,9 +96,8 @@ void renderer_begin_scene_egl(struct vt_renderer_t *r,
                               struct vt_output_t   *output);
 
 void renderer_draw_buffer_egl(struct vt_renderer_t *r,
-                              struct vt_output_t *output,
-                              struct vt_buffer_t *buf,
-                              struct vt_box_t *src_box,
+                              struct vt_output_t   *output,
+                              struct vt_buffer_use_t *use, struct vt_box_t *src_box,
                               struct vt_box_t *dst_box);
 
 void renderer_draw_surface_egl(struct vt_renderer_t *r,

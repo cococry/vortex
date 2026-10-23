@@ -23,6 +23,9 @@
 #define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
+#include "protocols/vt_background.h"
+#include "vt-background-v1-server-protocol.h"
+
 #include "src/input/input.h"
 #include "src/input/wl_seat.h"
 #include "src/protocols/wl_data_device.h"
@@ -55,6 +58,8 @@
 #include "surface.h"
 
 #include "compositor.h"
+
+#include "vt-background-v1-server-protocol.h"
 
 #define _SUBSYS_NAME "COMPOSITOR"
 
@@ -656,6 +661,11 @@ bool _vt_comp_wl_init(struct vt_compositor_t *c) {
     goto error;
   }
 
+  if (!vt_proto_vt_background_init(c)) {
+    VT_ERROR(c->log, "Cannot initialize Vortex background prtocol.");
+    goto error;
+  }
+
   const char *socket_name = wl_display_add_socket_auto(c->wl.dsp);
   c->wl.socket_name = socket_name;
   if (!socket_name) {
@@ -700,19 +710,11 @@ static void _handle_output_changed_backend(struct vt_backend_t *backend,
   if (!backend || !backend->comp || !backend->comp->scene)
     return;
 
-  struct vt_scene_node_t *bg = output->background.node;
-  if (bg && bg->buf && backend->impl.resize_buffer &&
-      (bg->buf->width != output->width || bg->buf->height != output->height)) {
-    if (backend->impl.resize_buffer(backend, &bg->buf, output->width,
-                                    output->height) &&
-        backend->impl.clear_buffer(backend, bg->buf, 0x181818)) {
-      bg->geom_dirty = true;
-      vt_scene_node_update_global_bounds(bg);
-      output->needs_damage_rebuild = true;
-    } else {
-      VT_ERROR(backend->comp->log, "Failed to resize output background buffer.");
-    }
-  }
+  if (!vt_output_resize_background(output))
+    VT_ERROR(backend->comp->log, "Failed to resize output background buffer.");
+  if (output->background.owner)
+    vt_background_v1_send_configure(output->background.owner->resource,
+                                    output->width, output->height);
 
   if (backend->comp->scene->root) {
     uint32_t            root_w = 0, root_h = 0;

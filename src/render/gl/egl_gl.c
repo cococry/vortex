@@ -1740,10 +1740,8 @@ static bool _egl_draw_buffer(struct vt_renderer_t *r, struct vt_buffer_t *buf,
 
   egl_buf->rn_img.uv[0] = (float)src_box->x / (float)width;
   egl_buf->rn_img.uv[1] = (float)src_box->y / (float)height;
-  egl_buf->rn_img.uv[2] =
-      (float)(src_box->x + src_box->width) / (float)width;
-  egl_buf->rn_img.uv[3] =
-      (float)(src_box->y + src_box->height) / (float)height;
+  egl_buf->rn_img.uv[2] = (float)(src_box->x + src_box->width) / (float)width;
+  egl_buf->rn_img.uv[3] = (float)(src_box->y + src_box->height) / (float)height;
 
   rn_draw_texture(egl->runara, &egl_buf->rn_img,
                   (struct rn_rect_t){.x = dst_box->x,
@@ -1756,15 +1754,16 @@ static bool _egl_draw_buffer(struct vt_renderer_t *r, struct vt_buffer_t *buf,
 }
 
 void renderer_draw_buffer_egl(struct vt_renderer_t *r,
-                              struct vt_output_t *output,
-                              struct vt_buffer_t *buf,
-                              struct vt_box_t *src_box,
+                              struct vt_output_t   *output,
+                              struct vt_buffer_use_t *use, struct vt_box_t *src_box,
                               struct vt_box_t *dst_box) {
-  (void)output;
-  if (!buf || !renderer_import_buffer_egl(r, buf, NULL))
+  if (!use || !_egl_buffer_use_is_ready(r, use) ||
+      !renderer_import_buffer_egl(r, use->buf, NULL))
     return;
 
-  _egl_draw_buffer(r, buf, buf->width, buf->height, src_box, dst_box);
+  if (_egl_draw_buffer(r, use->buf, use->buf->width, use->buf->height,
+                        src_box, dst_box))
+    _egl_track_rendered_buffer_use(output, use);
 }
 
 void renderer_draw_surface_egl(struct vt_renderer_t *r,

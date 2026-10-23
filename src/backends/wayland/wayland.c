@@ -46,9 +46,9 @@
 #include "xdg-shell-client-protocol.h"
 
 #include "../../core/buffer.h"
-#include <limits.h>
 #include <drm/drm_fourcc.h>
 #include <errno.h>
+#include <limits.h>
 #include <string.h>
 
 #define _WL_DEFAULT_OUTPUT_WIDTH  1280
@@ -59,16 +59,16 @@
 /* CPU storage stays allocated across interactive resizes. The renderer imports
  * this through get_shm; no parent wl_buffer or roundtrip is needed. */
 struct wl_allocated_buffer {
-  void *pixels;
-  size_t capacity;
+  void    *pixels;
+  size_t   capacity;
   uint32_t format;
   uint32_t clear_pixel;
-  bool solid;
+  bool     solid;
 };
 static const char wl_allocator_owner;
 
 static void _wl_allocated_destroy(struct vt_buffer_t *buf, const void *owner,
-                                   void *ptr) {
+                                  void *ptr) {
   (void)buf;
   (void)owner;
   struct wl_allocated_buffer *data = ptr;
@@ -81,22 +81,24 @@ static const struct vt_buffer_attachment_implementation_t wl_allocator_impl = {
 };
 
 static struct wl_allocated_buffer *_wl_allocated_data(struct vt_buffer_t *buf) {
-  struct vt_buffer_attachment_t *a = vt_buffer_find_attachment(
-      buf, &wl_allocator_owner, &wl_allocator_impl);
+  struct vt_buffer_attachment_t *a =
+      vt_buffer_find_attachment(buf, &wl_allocator_owner, &wl_allocator_impl);
   return a ? a->data : NULL;
 }
 
-static bool _wl_allocated_get_shm(struct vt_buffer_t *buf,
+static bool _wl_allocated_get_shm(struct vt_buffer_t   *buf,
                                   struct vt_shm_attr_t *attr) {
   struct wl_allocated_buffer *data = _wl_allocated_data(buf);
   if (!data || !attr)
     return false;
   *attr = (struct vt_shm_attr_t){
-      .data = data->pixels, .size = data->capacity,
-      .width = buf->width, .height = buf->height,
+      .data = data->pixels,
+      .size = data->capacity,
+      .width = buf->width,
+      .height = buf->height,
       .stride = buf->width * 4,
-      .format = data->format == DRM_FORMAT_XRGB8888
-                    ? WL_SHM_FORMAT_XRGB8888 : WL_SHM_FORMAT_ARGB8888,
+      .format = data->format == DRM_FORMAT_XRGB8888 ? WL_SHM_FORMAT_XRGB8888
+                                                    : WL_SHM_FORMAT_ARGB8888,
   };
   return true;
 }
@@ -113,9 +115,9 @@ static bool _wl_buffer_size(uint32_t width, uint32_t height, size_t *size) {
   return true;
 }
 
-static struct vt_buffer_t *backend_allocate_buffer_wl(
-    struct vt_backend_t *backend, uint32_t width, uint32_t height,
-    uint32_t format) {
+static struct vt_buffer_t *
+backend_allocate_buffer_wl(struct vt_backend_t *backend, uint32_t width,
+                           uint32_t height, uint32_t format) {
   size_t size;
   if (!_wl_buffer_size(width, height, &size) ||
       (format != DRM_FORMAT_XRGB8888 && format != DRM_FORMAT_ARGB8888))
@@ -126,10 +128,12 @@ static struct vt_buffer_t *backend_allocate_buffer_wl(
   data->pixels = calloc(1, size);
   data->capacity = size;
   data->format = format;
-  struct vt_buffer_t *buf = data->pixels
-      ? vt_buffer_create(backend->comp, width, height, &wl_allocated_impl) : NULL;
+  struct vt_buffer_t *buf =
+      data->pixels
+          ? vt_buffer_create(backend->comp, width, height, &wl_allocated_impl)
+          : NULL;
   if (!buf || !vt_buffer_add_attachment(buf, &wl_allocator_owner, data,
-                                         &wl_allocator_impl)) {
+                                        &wl_allocator_impl)) {
     if (buf)
       vt_buffer_unref(&buf);
     _wl_allocated_destroy(NULL, NULL, data);
@@ -139,14 +143,14 @@ static struct vt_buffer_t *backend_allocate_buffer_wl(
 }
 
 static bool backend_clear_buffer_wl(struct vt_backend_t *backend,
-                                     struct vt_buffer_t *buf, uint32_t color) {
+                                    struct vt_buffer_t *buf, uint32_t color) {
   (void)backend;
   struct wl_allocated_buffer *data = buf ? _wl_allocated_data(buf) : NULL;
   if (!data || buf->uses)
     return false;
   uint32_t *pixels = data->pixels;
-  size_t count = data->capacity / sizeof(*pixels);
-  uint32_t pixel = 0xff000000u | (color & 0xffffffu);
+  size_t    count = data->capacity / sizeof(*pixels);
+  uint32_t  pixel = 0xff000000u | (color & 0xffffffu);
   if (data->solid && data->clear_pixel == pixel)
     return true;
   for (size_t i = 0; i < count; ++i)
@@ -157,8 +161,8 @@ static bool backend_clear_buffer_wl(struct vt_backend_t *backend,
 }
 
 static bool backend_resize_buffer_wl(struct vt_backend_t *backend,
-                                      struct vt_buffer_t **buf,
-                                      uint32_t width, uint32_t height) {
+                                     struct vt_buffer_t **buf, uint32_t width,
+                                     uint32_t height) {
   size_t size;
   if (!buf || !*buf || !_wl_buffer_size(width, height, &size))
     return false;
@@ -168,8 +172,8 @@ static bool backend_resize_buffer_wl(struct vt_backend_t *backend,
   if ((*buf)->width == width && (*buf)->height == height)
     return true;
   if ((*buf)->uses || (*buf)->refcount > 1) {
-    struct vt_buffer_t *replacement = backend_allocate_buffer_wl(
-        backend, width, height, data->format);
+    struct vt_buffer_t *replacement =
+        backend_allocate_buffer_wl(backend, width, height, data->format);
     if (!replacement)
       return false;
     vt_buffer_unref(buf);
@@ -213,7 +217,7 @@ typedef struct {
   struct xdg_surface  *parent_xdg_surface;
   struct xdg_toplevel *parent_xdg_toplevel;
   struct wl_callback  *parent_frame_cb;
-  int32_t pending_width, pending_height;
+  int32_t              pending_width, pending_height;
 } wayland_output_state_t;
 
 typedef struct {
@@ -884,9 +888,9 @@ bool _wl_init_dmabuf_feedback(struct vt_compositor_t      *comp,
   const uint32_t formats[] = {DRM_FORMAT_XRGB8888, DRM_FORMAT_ARGB8888};
   for (size_t i = 0; i < sizeof(formats) / sizeof(formats[0]); ++i) {
     if (!vt_drm_format_array_push_pair(&tranche->formats, formats[i],
-                                        DRM_FORMAT_MOD_LINEAR) ||
+                                       DRM_FORMAT_MOD_LINEAR) ||
         !vt_drm_format_array_push_pair(&tranche->formats, formats[i],
-                                        DRM_FORMAT_MOD_INVALID))
+                                       DRM_FORMAT_MOD_INVALID))
       return false;
   }
   return true;

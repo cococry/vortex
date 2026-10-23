@@ -81,14 +81,14 @@ static bool _scene_node_is_layer_candidate(struct vt_scene_node_t *node) {
   if (node->type == VT_SCENE_NODE_INVISIBLE_GEOMETRY)
     return false;
 
-  if (!node->surf && !node->buf)
+  if (node->type == VT_SCENE_NODE_BUFFER)
+    return node->use != NULL;
+  if (node->type != VT_SCENE_NODE_SURFACE || !node->surf ||
+      !vt_surface_effectively_mapped(node->surf))
     return false;
 
-  if (node->surf && !vt_surface_effectively_mapped(node->surf))
-    return false;
-
-  if (node->surf && node->surf->role.impl &&
-      node->surf->role.impl->type == VT_SURFACE_ROLE_CURSOR)
+  if (vt_surface_has_role(node->surf, VT_SURFACE_ROLE_CURSOR) ||
+      vt_surface_has_role(node->surf, VT_SURFACE_ROLE_VT_BACKGROUND))
     return false;
 
   return true;
@@ -163,6 +163,7 @@ bool _scene_node_push_surface_layer(struct vt_scene_t      *scene,
     return false;
 
   layer->surface = node->surf;
+  layer->use = node->surf->current_buf_use;
 
   layer->src = (struct vt_box_t){
       .x = clipped_left - left,
@@ -194,7 +195,7 @@ bool _scene_node_push_buffer_layer(struct vt_scene_t      *scene,
     return false;
 
   layer->type = VT_OUTPUT_LAYER_BUFFER;
-  layer->buf = node->buf;
+  layer->use = node->use;
 
   layer->src = (struct vt_box_t){
       .x = 0, .y = 0, .width = rect->width, .height = rect->height};
@@ -240,8 +241,13 @@ static void _scene_accumulate_layers(struct vt_scene_t  *scene,
 
   scene->n_layers = 0;
 
-  if (output->background.node)
-    _scene_node_push_buffer_layer(scene, output->background.node);
+  if (output->background.node &&
+      _scene_node_push_buffer_layer(scene, output->background.node)) {
+    struct vt_output_layer_state_t *bg = &scene->layers[scene->n_layers - 1];
+    bg->dst = (struct vt_box_t){.width = output->width, .height = output->height};
+    if (output->background.owner)
+      bg->surface = output->background.owner->surface;
+  }
 
   _scene_node_accumulate_layers(scene, output, scene->root, 0, 0);
 }
@@ -264,12 +270,15 @@ static void _scene_render_layers(struct vt_scene_t  *scene,
       continue;
     }
 
-    if (layer->surface)
+    if (layer->type == VT_OUTPUT_LAYER_SURFACE && layer->surface)
       renderer->impl.draw_surface(renderer, output, layer->surface, &layer->src,
                                   &layer->dst);
-    else if (layer->buf)
-      renderer->impl.draw_buffer(renderer, output, layer->buf, &layer->src,
+    else if (layer->use) {
+      renderer->impl.draw_buffer(renderer, output, layer->use, &layer->src,
                                  &layer->dst);
+      if (layer->surface)
+        vt_output_track_presented_surface(output, layer->surface);
+    }
   }
 }
 
@@ -341,8 +350,8 @@ static void _scene_node_get_size(struct vt_scene_node_t *node, int32_t *o_w,
     *o_h = node->rect_h;
     return;
   case VT_SCENE_NODE_BUFFER:
-    *o_w = node->buf->width;
-    *o_h = node->buf->height;
+    *o_w = node->use->buf->width;
+    *o_h = node->use->buf->height;
     return;
   default:
     *o_w = 0;
@@ -411,14 +420,14 @@ struct vt_scene_node_t *vt_scene_node_create(struct vt_compositor_t *c,
 }
 
 struct vt_scene_node_t *vt_scene_node_create_buffer(struct vt_compositor_t *c,
-                                                    struct vt_buffer_t *buf) {
+                                                    struct vt_buffer_use_t *use) {
   struct vt_scene_node_t *n = VT_ALLOC(c, sizeof(*n));
   if (!n) {
     VT_ERROR(c->log, "Failed to allocate scene node.");
     return NULL;
   }
 
-  n->buf = buf;
+  n->use = vt_buffer_use_ref(use);
   n->type = VT_SCENE_NODE_BUFFER;
 
   n->x = 0;
@@ -427,7 +436,7 @@ struct vt_scene_node_t *vt_scene_node_create_buffer(struct vt_compositor_t *c,
   n->geom_dirty = true;
 
   VT_TRACE(c->log, "Created scene node %p for buffer %p geom_dirty=%d",
-           (void *)n, (void *)buf, n->geom_dirty);
+           (void *)n, (void *)use->buf, n->geom_dirty);
 
   return n;
 }
@@ -435,8 +444,8 @@ struct vt_scene_node_t *vt_scene_node_create_buffer(struct vt_compositor_t *c,
 bool vt_scene_node_destroy(struct vt_compositor_t *c,
                            struct vt_scene_node_t *node) {
   (void)c;
-  if (node->type == VT_SCENE_NODE_BUFFER && node->buf) {
-    vt_buffer_unref(&node->buf);
+  if (node->type == VT_SCENE_NODE_BUFFER && node->use) {
+    vt_buffer_use_unref(&node->use);
   }
   if (node->parent) {
     return vt_scene_node_remove_child(node->parent, node);

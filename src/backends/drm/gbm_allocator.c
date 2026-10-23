@@ -168,9 +168,9 @@ struct vt_buffer_t *drm_gbm_buffer_allocator_alloc(struct vt_compositor_t *comp,
 }
 
 bool drm_gbm_buffer_allocator_resize(struct vt_compositor_t *comp,
-                                      struct gbm_device *gbm,
-                                      struct vt_buffer_t **buffer,
-                                      uint32_t width, uint32_t height) {
+                                     struct gbm_device      *gbm,
+                                     struct vt_buffer_t    **buffer,
+                                     uint32_t width, uint32_t height) {
   if (!buffer || !*buffer || !width || !height)
     return false;
   struct gbm_attachment_data *data = _find_gbm_attachment(*buffer);
@@ -178,8 +178,8 @@ bool drm_gbm_buffer_allocator_resize(struct vt_compositor_t *comp,
     return false;
   if ((*buffer)->width == width && (*buffer)->height == height)
     return true;
-  struct vt_buffer_t *replacement = drm_gbm_buffer_allocator_alloc(
-      comp, gbm, width, height, data->format);
+  struct vt_buffer_t *replacement =
+      drm_gbm_buffer_allocator_alloc(comp, gbm, width, height, data->format);
   if (!replacement)
     return false;
   vt_buffer_unref(buffer);

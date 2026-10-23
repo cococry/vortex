@@ -28,10 +28,15 @@ build_vulkan = renderers in ['vulkan', 'all']
 # Runara
 # ============================================================
 
+runara_backends = renderers
+if get_option('background-client') and renderers == 'opengl'
+  runara_backends = 'all'
+endif
+
 runara_sp = subproject(
   'runara',
   default_options: [
-    'backends=' + renderers,
+    'backends=' + runara_backends,
     'examples=false',
     'default_library=static',
   ],
@@ -143,6 +148,8 @@ drm_syncobj_xml = join_paths(
   'linux-drm-syncobj-v1.xml',
 )
 
+vt_background_xml = 'protocols/vt-background-v1.xml'
+
 protocol_sources = []
 
 protocols = {
@@ -166,6 +173,11 @@ protocols = {
     'linux-drm-syncobj-v1-server-protocol.h',
     'linux-drm-syncobj-v1-protocol.c',
   ],
+  'vt-background': [
+    vt_background_xml,
+    'vt-background-v1-server-protocol.h',
+    'vt-background-v1-protocol.c',
+  ]
 }
 
 foreach name, protocol : protocols
@@ -193,6 +205,13 @@ foreach name, protocol : protocols
     ],
   )
 endforeach
+
+if get_option('background-client')
+  if not runara_sp.get_variable('build_vulkan')
+    error('The background client needs Runara Vulkan: configure -Drunara:backends=all')
+  endif
+  subdir('examples')
+endif
 
 # ============================================================
 # Configuration
@@ -259,6 +278,7 @@ vortex_src = files(
   'src/protocols/linux_explicit_sync.c',
   'src/protocols/linux_drm_syncobj.c',
   'src/protocols/wl_surface.c',
+  'src/protocols/vt_background.c',
   'src/protocols/wl_output.c',
   'src/protocols/wl_data_device.c',
   'src/protocols/wl_subcompositor.c',
@@ -351,6 +371,7 @@ summary(
     'GPU renderers': renderers,
     'OpenGL': build_opengl,
     'Vulkan': build_vulkan,
+    'Vulkan background client': get_option('background-client'),
   },
   section: 'Vortex',
   bool_yn: true,

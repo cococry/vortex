@@ -23,6 +23,7 @@
 #pragma once
 
 #include "buffer.h"
+#include "protocols/vt_background.h"
 #include "scene.h"
 #include "util.h"
 #include <pixman.h>
@@ -123,7 +124,9 @@ struct vt_output_t {
 
   struct {
     struct vt_scene_node_t *node;
-    struct vt_buffer_t     *buf_fallback;
+    struct vt_buffer_use_t *use_fallback;
+
+    struct vt_background_t *owner;
   } background;
 };
 
@@ -133,8 +136,8 @@ enum vt_output_layer_type_t {
 };
 
 struct vt_output_layer_state_t {
-  struct vt_surface_t *surface;
-  struct vt_buffer_t  *buf;
+  struct vt_surface_t        *surface;
+  struct vt_buffer_use_t     *use;
   enum vt_output_layer_type_t type;
 
   struct vt_box_t src;
@@ -153,3 +156,10 @@ bool vt_output_init_geom(struct vt_output_t *output, uint32_t width,
 
 bool vt_output_track_presented_surface(struct vt_output_t  *output,
                                        struct vt_surface_t *surface);
+
+void vt_output_set_background(struct vt_output_t *output,
+                              struct vt_buffer_use_t *use);
+
+bool vt_output_resize_background(struct vt_output_t *output);
+
+void vt_output_damage_whole(struct vt_output_t *output);

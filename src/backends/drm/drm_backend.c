@@ -731,12 +731,13 @@ static bool _drm_scanout_fence_ready(struct vt_surface_t    *surface,
   if (fd >= 0) {
     struct pollfd pfd = {.fd = fd, .events = POLLIN};
     if (poll(&pfd, 1, 0) <= 0) {
-      surface->scanout_backoff = VT_DRM_SCANOUT_BACKOFF_FRAMES;
+      if (surface)
+        surface->scanout_backoff = VT_DRM_SCANOUT_BACKOFF_FRAMES;
       return false;
     }
   }
 
-  if (surface->scanout_backoff > 0) {
+  if (surface && surface->scanout_backoff > 0) {
     surface->scanout_backoff--;
     return false;
   }
@@ -3207,14 +3208,14 @@ struct vt_buffer_t *backend_allocate_buffer_drm(struct vt_backend_t *backend,
 }
 
 static bool backend_resize_buffer_drm(struct vt_backend_t *backend,
-                                      struct vt_buffer_t **buf,
-                                      uint32_t width, uint32_t height) {
+                                      struct vt_buffer_t **buf, uint32_t width,
+                                      uint32_t height) {
   struct vt_drm_backend_master_state_t *master =
       BACKEND_DATA(backend, struct vt_drm_backend_master_state_t);
   if (!master || !master->main_drm || !master->main_drm->gbm_dev)
     return false;
-  return drm_gbm_buffer_allocator_resize(backend->comp,
-      master->main_drm->gbm_dev, buf, width, height);
+  return drm_gbm_buffer_allocator_resize(
+      backend->comp, master->main_drm->gbm_dev, buf, width, height);
 }
 
 bool backend_clear_buffer_drm(struct vt_backend_t *backend,
@@ -3296,7 +3297,8 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
   if (!drm->impl->atomic || !drm_output->liftoff_output)
     return true;
 
-  /* If no background or scene layers are available, composite the clear color. */
+  /* If no background or scene layers are available, composite the clear color.
+   */
 
   if (layer_count == 0) {
     /* add synthetic composited layer so liftoff thinks it needs to offload to
@@ -3388,9 +3390,8 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
       continue;
     }
 
-    struct vt_buffer_use_t *use =
-        layer->surface ? layer->surface->current_buf_use : NULL;
-    struct vt_buffer_t *buf = use ? use->buf : layer->buf;
+    struct vt_buffer_use_t *use = layer->use;
+    struct vt_buffer_t *buf = use ? use->buf : NULL;
 
     if (!buf) {
       VT_TRACE(backend->comp->log,
