@@ -11,8 +11,3 @@ option(
   value: 'opengl',
   description: 'Rendering backends to build'
 )
-
-option('background-client',
-  type: 'boolean',
-  value: false,
-  description: 'Build the Runara Vulkan background example client')

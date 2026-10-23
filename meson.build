@@ -206,13 +206,6 @@ foreach name, protocol : protocols
   )
 endforeach
 
-if get_option('background-client')
-  if not runara_sp.get_variable('build_vulkan')
-    error('The background client needs Runara Vulkan: configure -Drunara:backends=all')
-  endif
-  subdir('examples')
-endif
-
 # ============================================================
 # Configuration
 # ============================================================
