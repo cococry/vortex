@@ -24,6 +24,7 @@
 #include "src/core/core_types.h"
 #include "src/core/surface.h"
 #include "src/core/util.h"
+#include "src/protocols/wl_subcompositor.h"
 #include "src/render/renderer.h"
 #include <wayland-util.h>
 
@@ -227,6 +228,8 @@ static bool _content_update_apply_one(struct vt_content_update_t *cu) {
       return false;
   }
 
+  vt_subsurface_apply_stacking(cu);
+
   vt_scene_node_mark_geometry_dirty(surf->scene_node);
 
   vt_surface_set_mapped(surf, surf->current_buf_use != NULL);
@@ -403,6 +406,7 @@ void vt_content_update_destroy(struct vt_content_update_t *cu) {
   if (cu->buffer_use)
     vt_buffer_use_unref(&cu->buffer_use);
 
+  free(cu->subsurface_stack);
   free(cu);
 }
 
@@ -470,6 +474,9 @@ bool vt_content_update_apply_dag(struct vt_content_update_t *root) {
 
   VT_TRACE(comp->log, "Content update apply DAG: root=%p applied, retiring",
            (void *)root);
+
+  if (comp->seat)
+    vt_seat_repick_pointer_focus(comp->seat);
 
   _content_update_retire_applied_dag(root);
 

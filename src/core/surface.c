@@ -47,6 +47,7 @@ bool vt_surface_init(struct vt_surface_t *surf) {
 
   wl_list_init(&surf->content_updates);
   wl_list_init(&surf->subsurface.childs);
+  wl_list_init(&surf->subsurface.stacking);
   wl_list_init(&surf->addons);
 
   wl_list_init(&surf->link);
@@ -321,6 +322,9 @@ bool vt_surface_effectively_mapped(struct vt_surface_t *surf) {
   while (vt_surface_has_role(surf, VT_SURFACE_ROLE_SUBSURFACE)) {
     struct vt_subsurface_t *sub = surf->role.data;
 
+    if (!sub)
+      return false;
+
     surf = sub->parent;
 
     if (!surf || !surf->mapped)
@@ -390,6 +394,9 @@ bool vt_surface_emit_content_update(struct vt_surface_t *surf) {
 
   if (!cu)
     return false;
+
+  if (!vt_subsurface_capture_stacking(cu))
+    goto fail;
 
   /* Addons capture */
   struct vt_surface_addon_t *it;

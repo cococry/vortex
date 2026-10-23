@@ -32,6 +32,9 @@ enum vt_content_update_type_t {
 struct vt_content_update_t {
   struct vt_surface_t *surf;
 
+  struct vt_subsurface_stack_entry_t *subsurface_stack;
+  size_t                              subsurface_stack_count;
+
   struct vt_surface_state_pending_t state;
 
   enum vt_content_update_type_t type;

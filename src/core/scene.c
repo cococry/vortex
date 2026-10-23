@@ -27,6 +27,7 @@
 #include "src/core/core_types.h"
 #include "src/core/surface.h"
 #include "src/core/util.h"
+#include "src/protocols/wl_subcompositor.h"
 #include "src/render/renderer.h"
 #include <string.h>
 #include <wayland-util.h>
@@ -216,6 +217,14 @@ static void _scene_node_accumulate_layers(struct vt_scene_t      *scene,
   int32_t x = parent_x + node->x;
   int32_t y = parent_y + node->y;
 
+  struct vt_subsurface_t *sub;
+  if (node->type == VT_SCENE_NODE_SURFACE && node->surf) {
+    wl_list_for_each(sub, &node->surf->subsurface.stacking, stacking_link) {
+      if (sub->below_parent)
+        _scene_node_accumulate_layers(scene, output, sub->scene_node, x, y);
+    }
+  }
+
   if (_scene_node_is_layer_candidate(node)) {
     if (!_scene_node_on_output(node, output))
       goto children;
@@ -230,8 +239,18 @@ static void _scene_node_accumulate_layers(struct vt_scene_t      *scene,
   }
 
 children:
+  if (node->type == VT_SCENE_NODE_SURFACE && node->surf) {
+    wl_list_for_each(sub, &node->surf->subsurface.stacking, stacking_link) {
+      if (!sub->below_parent)
+        _scene_node_accumulate_layers(scene, output, sub->scene_node, x, y);
+    }
+  }
   for (uint32_t i = 0; i < node->child_count; i++) {
-    _scene_node_accumulate_layers(scene, output, node->childs[i], x, y);
+    struct vt_scene_node_t *child = node->childs[i];
+    if (child->type == VT_SCENE_NODE_SURFACE && child->surf &&
+        vt_surface_has_role(child->surf, VT_SURFACE_ROLE_SUBSURFACE))
+      continue;
+    _scene_node_accumulate_layers(scene, output, child, x, y);
   }
 }
 

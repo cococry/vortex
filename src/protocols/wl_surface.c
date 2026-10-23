@@ -29,6 +29,7 @@
 #include "src/core/surface.h"
 #include "src/core/util.h"
 #include "src/input/wl_seat.h"
+#include "src/protocols/wl_subcompositor.h"
 #include "src/render/renderer.h"
 #include <assert.h>
 #include <stdbool.h>
@@ -472,6 +473,8 @@ void _wl_surface_handle_resource_destroy(struct wl_resource *resource) {
   }
 
   VT_TRACE(surf->comp->log, "Got wl_surface.destroy")
+
+  vt_subsurface_surface_destroy(surf);
 
   surf->res = NULL;
 

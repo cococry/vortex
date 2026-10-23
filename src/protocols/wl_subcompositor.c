@@ -21,6 +21,7 @@
  */
 
 #include "wl_subcompositor.h"
+#include "src/core/content_update.h"
 #include "src/core/core_types.h"
 #include "src/core/scene.h"
 #include "src/core/surface.h"
@@ -101,6 +102,8 @@ static bool _surface_has_ancestor(struct vt_surface_t *surf,
                                   struct vt_surface_t *ancestor) {
   while (surf && vt_surface_has_role(surf, VT_SURFACE_ROLE_SUBSURFACE)) {
     struct vt_subsurface_t *sub = surf->role.data;
+    if (!sub)
+      return false;
     surf = sub->parent;
 
     if (surf == ancestor) {
@@ -116,6 +119,9 @@ static void _destroy_subsurface(struct vt_subsurface_t *sub) {
 
   sub->surf->role.data = NULL;
   wl_list_remove(&sub->link);
+  wl_list_remove(&sub->stacking_link);
+  vt_scene_node_damage_whole(sub->surf->comp, sub->scene_node);
+  vt_scene_node_destroy(sub->surf->comp, sub->scene_node);
   free(sub);
 }
 
@@ -206,7 +212,10 @@ static void _subcompositor_get_subsurface(struct wl_client   *client,
 
   vt_scene_node_reparent(surf->comp, sub->scene_node, parent_node);
 
-  wl_list_insert(&parent->subsurface.childs, &sub->link);
+  static uint64_t next_stacking_id = 0;
+  sub->stacking_id = ++next_stacking_id;
+  wl_list_insert(parent->subsurface.childs.prev, &sub->link);
+  wl_list_insert(parent->subsurface.stacking.prev, &sub->stacking_link);
 
   wl_resource_set_implementation(sub->resource, &subsurface_impl, sub,
                                  _subsurface_resource_destroy);
@@ -232,24 +241,106 @@ static void _subsurface_set_position(struct wl_client   *client,
   }
 }
 
+static void _subsurface_place(struct wl_resource *resource,
+                              struct wl_resource *sibling_resource,
+                              bool                above) {
+  struct vt_subsurface_t *sub = wl_resource_get_user_data(resource);
+  struct vt_surface_t    *sibling = wl_resource_get_user_data(sibling_resource);
+  if (!sub || !sub->parent)
+    return;
+
+  struct vt_subsurface_t *reference = NULL;
+  if (sibling != sub->parent) {
+    struct vt_subsurface_t *it;
+    wl_list_for_each(it, &sub->parent->subsurface.childs, link) {
+      if (it != sub && it->surf == sibling) {
+        reference = it;
+        break;
+      }
+    }
+    if (!reference) {
+      wl_resource_post_error(resource, WL_SUBSURFACE_ERROR_BAD_SURFACE,
+                             "reference surface is not a sibling or parent");
+      return;
+    }
+  }
+
+  wl_list_remove(&sub->link);
+  if (reference) {
+    sub->pending_below_parent = reference->pending_below_parent;
+    wl_list_insert(above ? &reference->link : reference->link.prev, &sub->link);
+  } else {
+    struct wl_list         *position = &sub->parent->subsurface.childs;
+    struct vt_subsurface_t *it;
+    wl_list_for_each(it, &sub->parent->subsurface.childs, link) {
+      if (!it->pending_below_parent)
+        break;
+      position = &it->link;
+    }
+    sub->pending_below_parent = !above;
+    wl_list_insert(position, &sub->link);
+  }
+}
+
 static void _subsurface_place_above(struct wl_client   *client,
                                     struct wl_resource *resource,
                                     struct wl_resource *sibling_resource) {
   (void)client;
-  (void)resource;
-  (void)sibling_resource;
-
-  /* TODO: stacking */
+  _subsurface_place(resource, sibling_resource, true);
 }
 
 static void _subsurface_place_below(struct wl_client   *client,
                                     struct wl_resource *resource,
                                     struct wl_resource *sibling_resource) {
   (void)client;
-  (void)resource;
-  (void)sibling_resource;
+  _subsurface_place(resource, sibling_resource, false);
+}
 
-  /* TODO: stacking */
+bool vt_subsurface_capture_stacking(struct vt_content_update_t *cu) {
+  size_t count = wl_list_length(&cu->surf->subsurface.childs);
+  if (!count)
+    return true;
+  cu->subsurface_stack = calloc(count, sizeof(*cu->subsurface_stack));
+  if (!cu->subsurface_stack)
+    return false;
+  struct vt_subsurface_t *sub;
+  wl_list_for_each(sub, &cu->surf->subsurface.childs, link) {
+    cu->subsurface_stack[cu->subsurface_stack_count++] =
+        (struct vt_subsurface_stack_entry_t){sub->stacking_id,
+                                             sub->pending_below_parent};
+  }
+  return true;
+}
+
+void vt_subsurface_apply_stacking(struct vt_content_update_t *cu) {
+  /* IDs let queued parent commits safely outlive destroyed subsurfaces. */
+  struct wl_list *position = &cu->surf->subsurface.stacking;
+  for (size_t i = 0; i < cu->subsurface_stack_count; i++) {
+    struct vt_subsurface_t *sub;
+    wl_list_for_each(sub, &cu->surf->subsurface.childs, link) {
+      if (sub->stacking_id != cu->subsurface_stack[i].id)
+        continue;
+      wl_list_remove(&sub->stacking_link);
+      wl_list_insert(position, &sub->stacking_link);
+      position = &sub->stacking_link;
+      sub->below_parent = cu->subsurface_stack[i].below_parent;
+      break;
+    }
+  }
+}
+
+void vt_subsurface_surface_destroy(struct vt_surface_t *surf) {
+  struct vt_subsurface_t *sub, *tmp;
+  wl_list_for_each_safe(sub, tmp, &surf->subsurface.childs, link) {
+    wl_resource_set_user_data(sub->resource, NULL);
+    _destroy_subsurface(sub);
+  }
+  if (vt_surface_has_role(surf, VT_SURFACE_ROLE_SUBSURFACE) &&
+      surf->role.data) {
+    sub = surf->role.data;
+    wl_resource_set_user_data(sub->resource, NULL);
+    _destroy_subsurface(sub);
+  }
 }
 
 static void _subsurface_set_sync(struct wl_client   *client,
@@ -258,7 +349,8 @@ static void _subsurface_set_sync(struct wl_client   *client,
 
   struct vt_subsurface_t *sub = wl_resource_get_user_data(resource);
 
-  sub->synchronized = true;
+  if (sub)
+    sub->synchronized = true;
 }
 
 static void _subsurface_set_desync(struct wl_client   *client,
@@ -267,7 +359,8 @@ static void _subsurface_set_desync(struct wl_client   *client,
 
   struct vt_subsurface_t *sub = wl_resource_get_user_data(resource);
 
-  sub->synchronized = false;
+  if (sub)
+    sub->synchronized = false;
 }
 
 bool vt_proto_wl_subcompositor_init(struct vt_compositor_t *comp) {

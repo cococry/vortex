@@ -163,6 +163,7 @@ struct vt_surface_t {
 
   struct {
     struct wl_list childs;
+    struct wl_list stacking;
   } subsurface;
 
   struct wl_list frame_callbacks;

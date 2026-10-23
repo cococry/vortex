@@ -33,9 +33,22 @@ struct vt_subsurface_t {
 
   bool synchronized;
 
-  struct wl_list link;
+  struct wl_list link;          /* pending bottom to top */
+  struct wl_list stacking_link; /* applied bottom to top */
+  uint64_t       stacking_id;
+  bool           pending_below_parent, below_parent;
 
   struct vt_scene_node_t *scene_node;
 };
 
 bool vt_proto_wl_subcompositor_init(struct vt_compositor_t *comp);
+
+struct vt_subsurface_stack_entry_t {
+  uint64_t id;
+  bool     below_parent;
+};
+
+struct vt_content_update_t;
+bool vt_subsurface_capture_stacking(struct vt_content_update_t *cu);
+void vt_subsurface_apply_stacking(struct vt_content_update_t *cu);
+void vt_subsurface_surface_destroy(struct vt_surface_t *surf);

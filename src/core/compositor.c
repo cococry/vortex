@@ -1054,7 +1054,9 @@ static struct vt_surface_t *_scene_pick_surface(struct vt_scene_node_t *node,
 
   for (int i = (int)node->child_count - 1; i >= 0; i--) {
     struct vt_scene_node_t *child = node->childs[i];
-    if (!child)
+    if (!child ||
+        (child->type == VT_SCENE_NODE_SURFACE && child->surf &&
+         vt_surface_has_role(child->surf, VT_SURFACE_ROLE_SUBSURFACE)))
       continue;
 
     if (child->surf &&
@@ -1068,27 +1070,51 @@ static struct vt_surface_t *_scene_pick_surface(struct vt_scene_node_t *node,
       return surf;
   }
 
+  struct vt_subsurface_t *sub;
+  if (node->type == VT_SCENE_NODE_SURFACE && node->surf) {
+    wl_list_for_each_reverse(sub, &node->surf->subsurface.stacking,
+                             stacking_link) {
+      if (sub->below_parent)
+        continue;
+      struct vt_surface_t *picked =
+          _scene_pick_surface(sub->scene_node, x, y, px, py);
+      if (picked)
+        return picked;
+    }
+  }
+
   if (!node->surf)
     return NULL;
 
   struct vt_surface_t *surf = node->surf;
 
   if (!vt_surface_effectively_mapped(surf))
-    return NULL;
+    goto below;
 
   if (!vt_surface_get_buffer(surf))
-    return NULL;
+    goto below;
 
   double w = (double)surf->applied.width;
   double h = (double)surf->applied.height;
 
   if (px < x || py < y || px >= x + w || py >= y + h)
-    return NULL;
+    goto below;
 
   if (!_surface_accepts_input(surf, px - x, py - y))
-    return NULL;
+    goto below;
 
   return surf;
+
+below:
+  wl_list_for_each_reverse(sub, &surf->subsurface.stacking, stacking_link) {
+    if (!sub->below_parent)
+      continue;
+    struct vt_surface_t *picked =
+        _scene_pick_surface(sub->scene_node, x, y, px, py);
+    if (picked)
+      return picked;
+  }
+  return NULL;
 }
 
 struct vt_surface_t *vt_comp_pick_surface(struct vt_compositor_t *comp,
