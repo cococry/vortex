@@ -87,7 +87,7 @@ static bool _scene_node_is_layer_candidate(struct vt_scene_node_t *node) {
   if (node->surf && !vt_surface_effectively_mapped(node->surf))
     return false;
 
-  if (node->surf->role.impl &&
+  if (node->surf && node->surf->role.impl &&
       node->surf->role.impl->type == VT_SURFACE_ROLE_CURSOR)
     return false;
 
@@ -193,6 +193,7 @@ bool _scene_node_push_buffer_layer(struct vt_scene_t      *scene,
   if (!layer)
     return false;
 
+  layer->type = VT_OUTPUT_LAYER_BUFFER;
   layer->buf = node->buf;
 
   layer->src = (struct vt_box_t){
@@ -239,6 +240,9 @@ static void _scene_accumulate_layers(struct vt_scene_t  *scene,
 
   scene->n_layers = 0;
 
+  if (output->background.node)
+    _scene_node_push_buffer_layer(scene, output->background.node);
+
   _scene_node_accumulate_layers(scene, output, scene->root, 0, 0);
 }
 
@@ -260,8 +264,12 @@ static void _scene_render_layers(struct vt_scene_t  *scene,
       continue;
     }
 
-    renderer->impl.draw_surface(renderer, output, layer->surface, &layer->src,
-                                &layer->dst);
+    if (layer->surface)
+      renderer->impl.draw_surface(renderer, output, layer->surface, &layer->src,
+                                  &layer->dst);
+    else if (layer->buf)
+      renderer->impl.draw_buffer(renderer, output, layer->buf, &layer->src,
+                                 &layer->dst);
   }
 }
 

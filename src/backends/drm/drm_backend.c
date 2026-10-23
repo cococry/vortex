@@ -3283,8 +3283,7 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
   if (!drm->impl->atomic || !drm_output->liftoff_output)
     return true;
 
-  /* No scene layers, but we still need to composite the clear color of the
-   * scene (TODO, probably have the scene insert a background layer)*/
+  /* If no background or scene layers are available, composite the clear color. */
 
   if (layer_count == 0) {
     /* add synthetic composited layer so liftoff thinks it needs to offload to
@@ -3376,8 +3375,11 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
       continue;
     }
 
-    if (!layer->surface || !layer->surface->current_buf_use ||
-        !layer->surface->current_buf_use->buf) {
+    struct vt_buffer_use_t *use =
+        layer->surface ? layer->surface->current_buf_use : NULL;
+    struct vt_buffer_t *buf = use ? use->buf : layer->buf;
+
+    if (!buf) {
       VT_TRACE(backend->comp->log,
                "layer %zu rejected from liftoff test: "
                "surface/buffer state unavailable.",
@@ -3386,8 +3388,6 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
       liftoff_layer_unset_property(liftoff_layer, "IN_FENCE_FD");
       continue;
     }
-
-    struct vt_buffer_use_t *use = layer->surface->current_buf_use;
 
     test->liftoff_layer = liftoff_layer;
 
@@ -3400,11 +3400,11 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
      * stall the whole output. Compositing waits on the GPU instead. Back off
      * for a while so a client that is late half the time does not flap
      * between plane and composition every frame. */
-    if (!_drm_scanout_fence_ready(layer->surface, use))
+    if (use && !_drm_scanout_fence_ready(layer->surface, use))
       goto composited;
 
     /* 1. Prove layer has a DMABUF */
-    if (!vt_buffer_get_dmabuf(use->buf, &attr)) {
+    if (!vt_buffer_get_dmabuf(buf, &attr)) {
       VT_TRACE(backend->comp->log,
                "layer %zu surface=%p rejected from liftoff test: "
                "buffer is not a DMABUF.",
@@ -3456,7 +3456,7 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
 
     /* 5. Prove that this output can satisfy the need for a release fence
      */
-    if (use->release && vt_buffer_release_needs_fence(use->release) &&
+    if (use && use->release && vt_buffer_release_needs_fence(use->release) &&
         drm_output->crtc->props[VT_DRM_CRTC_OUT_FENCE_PTR] == 0) {
       VT_TRACE(backend->comp->log,
                "layer %zu surface=%p rejected from liftoff test: "
@@ -3468,7 +3468,7 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
 
     /* 6. Prove that we can get a PRIME fb handle from the layer's buffer
      */
-    if (!drm_fb_init_from_buffer(drm, &test->fb, use->buf)) {
+    if (!drm_fb_init_from_buffer(drm, &test->fb, buf)) {
       VT_TRACE(backend->comp->log,
                "layer %zu surface=%p rejected from liftoff test: "
                "failed to import buffer as KMS framebuffer "
@@ -3479,8 +3479,8 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
 
     test->has_fb = true;
 
-    test->use = vt_buffer_use_ref(use);
-    if (!test->use) {
+    test->use = use ? vt_buffer_use_ref(use) : NULL;
+    if (use && !test->use) {
       VT_ERROR(backend->comp->log,
                "failed to reference buffer use for layer %zu "
                "surface=%p.",
@@ -3605,10 +3605,10 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
       memset(&test->fb, 0, sizeof(test->fb));
       test->has_fb = false;
 
-      /* because this layer's buffer will be scanned out, we need to increase
-       * its use count */
-      planned->use = vt_buffer_use_ref(test->use);
-      if (!planned->use)
+      /* surface layers retain their client buffer use. Buffer-only layers
+       * are kept alive by the framebuffer reference. */
+      planned->use = test->use ? vt_buffer_use_ref(test->use) : NULL;
+      if (test->use && !planned->use)
         goto fail_plan;
 
       planned->acquire_fence_fd = vt_buffer_use_acquire_fence(test->use);

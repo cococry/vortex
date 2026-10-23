@@ -83,7 +83,7 @@ bool _init_output_bg(struct vt_output_t *output) {
   if (!fallback_buf)
     goto fail;
 
-  if (!output->backend->impl.clear_buffer(output->backend, fallback_buf, 0x0))
+  if (!output->backend->impl.clear_buffer(output->backend, fallback_buf, 0x181818))
     goto fail;
 
   bg_node = vt_scene_node_create_buffer(output->backend->comp, fallback_buf);

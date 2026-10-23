@@ -133,10 +133,8 @@ enum vt_output_layer_type_t {
 };
 
 struct vt_output_layer_state_t {
-  union {
-    struct vt_surface_t *surface;
-    struct vt_buffer_t  *buf;
-  };
+  struct vt_surface_t *surface;
+  struct vt_buffer_t  *buf;
   enum vt_output_layer_type_t type;
 
   struct vt_box_t src;

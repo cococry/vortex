@@ -1694,6 +1694,58 @@ void renderer_begin_frame_egl(struct vt_renderer_t *r,
   glBindFramebuffer(GL_FRAMEBUFFER, egl_output->fbo_id);
 }
 
+static bool _egl_draw_buffer(struct vt_renderer_t *r, struct vt_buffer_t *buf,
+                             int32_t width, int32_t height,
+                             struct vt_box_t *src_box,
+                             struct vt_box_t *dst_box) {
+  struct vt_buffer_attachment_t *attachment =
+      vt_buffer_find_attachment(buf, r, &egl_buffer_attachment_impl);
+
+  if (!attachment) {
+    VT_ERROR(r->comp->log, "Trying to render buffer with no "
+                           "EGL buffer attachment");
+    return false;
+  }
+
+  struct vt_egl_buffer_t *egl_buf = attachment->data;
+
+  if (egl_buf->tex.id == 0)
+    return false;
+
+  if (width <= 0 || height <= 0)
+    return false;
+
+  struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
+
+  egl_buf->rn_img.uv[0] = (float)src_box->x / (float)width;
+  egl_buf->rn_img.uv[1] = (float)src_box->y / (float)height;
+  egl_buf->rn_img.uv[2] =
+      (float)(src_box->x + src_box->width) / (float)width;
+  egl_buf->rn_img.uv[3] =
+      (float)(src_box->y + src_box->height) / (float)height;
+
+  rn_draw_texture(egl->runara, &egl_buf->rn_img,
+                  (struct rn_rect_t){.x = dst_box->x,
+                                     .y = dst_box->y,
+                                     .width = dst_box->width,
+                                     .height = dst_box->height},
+                  (rn_color_t){1.0f, 1.0f, 1.0f, 1.0f});
+
+  return true;
+}
+
+void renderer_draw_buffer_egl(struct vt_renderer_t *r,
+                              struct vt_output_t *output,
+                              struct vt_buffer_t *buf,
+                              struct vt_box_t *src_box,
+                              struct vt_box_t *dst_box) {
+  (void)output;
+  if (!buf || !renderer_import_buffer_egl(r, buf, NULL))
+    return;
+
+  _egl_draw_buffer(r, buf, buf->width, buf->height, src_box, dst_box);
+}
+
 void renderer_draw_surface_egl(struct vt_renderer_t *r,
                                struct vt_output_t   *output,
                                struct vt_surface_t  *surface,
@@ -1739,38 +1791,9 @@ void renderer_draw_surface_egl(struct vt_renderer_t *r,
     return;
   }
 
-  struct vt_buffer_attachment_t *attachment =
-      vt_buffer_find_attachment(buf, r, &egl_buffer_attachment_impl);
-
-  if (!attachment) {
-    VT_ERROR(r->comp->log, "Trying to render surface that has a buffer but no "
-                           "EGL buffer attachment");
+  if (!_egl_draw_buffer(r, buf, surface->applied.width, surface->applied.height,
+                        src_box, dst_box))
     return;
-  }
-
-  struct vt_egl_buffer_t *egl_buf = attachment->data;
-
-  if (egl_buf->tex.id == 0)
-    return;
-
-  if (surface->applied.width <= 0 || surface->applied.height <= 0)
-    return;
-
-  struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
-
-  egl_buf->rn_img.uv[0] = (float)src_box->x / (float)surface->applied.width;
-  egl_buf->rn_img.uv[1] = (float)src_box->y / (float)surface->applied.height;
-  egl_buf->rn_img.uv[2] =
-      (float)(src_box->x + src_box->width) / (float)surface->applied.width,
-  egl_buf->rn_img.uv[3] =
-      (float)(src_box->y + src_box->height) / (float)surface->applied.height;
-
-  rn_draw_texture(egl->runara, &egl_buf->rn_img,
-                  (struct rn_rect_t){.x = dst_box->x,
-                                     .y = dst_box->y,
-                                     .width = dst_box->width,
-                                     .height = dst_box->height},
-                  (rn_color_t){1.0f, 1.0f, 1.0f, 1.0f});
 
   if (!vt_output_track_presented_surface(output, surface)) {
     VT_ERROR(r->comp->log, "Failed to track presented surface %p on output %p.",
