@@ -29,9 +29,6 @@ build_vulkan = renderers in ['vulkan', 'all']
 # ============================================================
 
 runara_backends = renderers
-if get_option('background-client') and renderers == 'opengl'
-  runara_backends = 'all'
-endif
 
 runara_sp = subproject(
   'runara',
@@ -364,7 +361,6 @@ summary(
     'GPU renderers': renderers,
     'OpenGL': build_opengl,
     'Vulkan': build_vulkan,
-    'Vulkan background client': get_option('background-client'),
   },
   section: 'Vortex',
   bool_yn: true,
