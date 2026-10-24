@@ -9,7 +9,7 @@
 
 struct gbm_attachment_data {
   struct gbm_bo *bo;
-  int            dma_fd;
+  int            dma_fds[VT_DMABUF_PLANES_CAP];
   uint32_t       format;
 };
 
@@ -37,8 +37,10 @@ static void _gbm_attachment_destroy(struct vt_buffer_t *buffer,
   if (!data)
     return;
 
-  if (data->dma_fd >= 0)
-    close(data->dma_fd);
+  for (int i = 0; i < VT_DMABUF_PLANES_CAP; i++) {
+    if (data->dma_fds[i] >= 0)
+      close(data->dma_fds[i]);
+  }
   if (data->bo)
     gbm_bo_destroy(data->bo);
   free(data);
@@ -54,26 +56,33 @@ _find_gbm_attachment(struct vt_buffer_t *buffer) {
   return attachment ? attachment->data : NULL;
 }
 
+struct gbm_bo *drm_gbm_buffer_allocator_get_bo(struct vt_buffer_t *buffer) {
+  struct gbm_attachment_data *data = _find_gbm_attachment(buffer);
+  return data ? data->bo : NULL;
+}
+
 static bool _allocated_gbm_get_dmabuf(struct vt_buffer_t      *buffer,
                                       struct vt_dmabuf_attr_t *out) {
   struct gbm_attachment_data *data = _find_gbm_attachment(buffer);
-  if (!data || !out || data->dma_fd < 0)
+  if (!data || !out)
     return false;
 
-  int plane_count = gbm_bo_get_plane_count(data->bo);
+  int count = gbm_bo_get_plane_count(data->bo);
+  if (count < 1 || count > VT_DMABUF_PLANES_CAP)
+    return false;
 
   memset(out, 0, sizeof(*out));
   out->width = buffer->width;
   out->height = buffer->height;
-  out->format = data->format;
+  out->format = gbm_bo_get_format(data->bo);
   out->mod = gbm_bo_get_modifier(data->bo);
-  for (int i = 0; i < plane_count; i++) {
-    out->fds[i] = gbm_bo_get_fd_for_plane(data->bo, i);
+
+  for (int i = 0; i < count; i++) {
+    out->fds[i] = data->dma_fds[i];
     out->strides[i] = gbm_bo_get_stride_for_plane(data->bo, i);
     out->offsets[i] = gbm_bo_get_offset(data->bo, i);
   }
-
-  out->num_planes = plane_count;
+  out->num_planes = count;
   return true;
 }
 
@@ -137,11 +146,22 @@ struct vt_buffer_t *drm_gbm_buffer_allocator_alloc(struct vt_compositor_t *comp,
 
   data->format = format;
   data->bo = bo;
-  /* new owned FD */
-  data->dma_fd = gbm_bo_get_fd(bo);
-  if (data->dma_fd < 0) {
+  for (int i = 0; i < VT_DMABUF_PLANES_CAP; i++)
+    data->dma_fds[i] = -1;
+
+  int plane_count = gbm_bo_get_plane_count(bo);
+  if (plane_count < 1 || plane_count > VT_DMABUF_PLANES_CAP) {
     _gbm_attachment_destroy(NULL, NULL, data);
     return NULL;
+  }
+
+  /* get_dmabuf callers borrow these FDs for the buffer's lifetime. */
+  for (int i = 0; i < plane_count; i++) {
+    data->dma_fds[i] = gbm_bo_get_fd_for_plane(bo, i);
+    if (data->dma_fds[i] < 0 || !gbm_bo_get_stride_for_plane(bo, i)) {
+      _gbm_attachment_destroy(NULL, NULL, data);
+      return NULL;
+    }
   }
 
   struct vt_buffer_t *buffer =

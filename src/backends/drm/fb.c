@@ -21,6 +21,7 @@
  */
 
 #include "fb.h"
+#include "gbm_allocator.h"
 #include "prime.h"
 #include <drm/drm_fourcc.h>
 #include <errno.h>
@@ -81,6 +82,16 @@ bool drm_fb_init_from_buffer(struct vt_drm_backend_state_t *drm,
     return false;
 
   memset(fb, 0, sizeof(*fb));
+
+  struct gbm_bo *bo = drm_gbm_buffer_allocator_get_bo(buf);
+  if (bo) {
+    /* PRIME imports through the same device that allocated the bo
+     * only alias GBM's handle without a kernel reference. */
+    if (!drm_fb_init_from_gbm(drm, fb, bo, NULL))
+      return false;
+    fb->buf = vt_buffer_ref(buf);
+    return true;
+  }
 
   struct vt_dmabuf_attr_t attr = {0};
   if (!vt_buffer_get_dmabuf(buf, &attr) || attr.num_planes <= 0 ||

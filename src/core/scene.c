@@ -232,7 +232,8 @@ static void _scene_node_accumulate_layers(struct vt_scene_t      *scene,
     if (node->type == VT_SCENE_NODE_SURFACE &&
         !_scene_node_push_surface_layer(scene, output, node)) {
       goto children;
-    } else if (node->type == VT_SCENE_NODE_BUFFER &&
+    } 
+    else if (node->type == VT_SCENE_NODE_BUFFER &&
                !_scene_node_push_buffer_layer(scene, node)) {
       goto children;
     }

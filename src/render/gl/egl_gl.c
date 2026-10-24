@@ -746,6 +746,7 @@ bool _egl_record_surface_release_fences(struct vt_renderer_t *renderer,
         // TODO: handle dup failure
       }
     }
+
     vt_buffer_use_unref(&entry->use);
   }
 
@@ -1926,6 +1927,7 @@ void renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,
              "Cannot record surface release fences after render for output %p.",
              (void *)output);
   }
+
 
   if (!eglSwapBuffers(egl->egl_dsp, output->render_surface)) {
     VT_ERROR(r->comp->log,

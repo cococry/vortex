@@ -115,7 +115,6 @@ bool _init_output_bg(struct vt_output_t *output) {
 
   return true;
 fail:
-  vt_buffer_use_unref(&fallback_use);
   if (bg_node)
     vt_scene_node_destroy(output->backend->comp, bg_node);
   if (fallback_buf) {
