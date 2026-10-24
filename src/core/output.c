@@ -101,7 +101,7 @@ bool _init_output_bg(struct vt_output_t *output) {
     goto fail;
 
   fallback_use = vt_buffer_use_create_take(output->backend->comp, output,
-                                            &fallback_buf, NULL, NULL);
+                                           &fallback_buf, NULL, NULL);
   if (!fallback_use)
     goto fail;
 
@@ -159,12 +159,12 @@ bool vt_output_track_presented_surface(struct vt_output_t  *output,
 }
 
 /* Retains use; NULL restores the compositor-owned fallback. */
-void vt_output_set_background(struct vt_output_t *output,
+void vt_output_set_background(struct vt_output_t     *output,
                               struct vt_buffer_use_t *use) {
   assert(output && output->background.node && output->background.use_fallback);
 
-  struct vt_buffer_use_t *next = vt_buffer_use_ref(
-      use ? use : output->background.use_fallback);
+  struct vt_buffer_use_t *next =
+      vt_buffer_use_ref(use ? use : output->background.use_fallback);
   vt_buffer_use_unref(&output->background.node->use);
   output->background.node->use = next;
   vt_scene_node_mark_geometry_dirty(output->background.node);
@@ -173,12 +173,12 @@ void vt_output_set_background(struct vt_output_t *output,
 
 bool vt_output_resize_background(struct vt_output_t *output) {
   struct vt_buffer_use_t *old = output->background.use_fallback;
-  if (!old || (old->buf->width == output->width &&
-               old->buf->height == output->height))
+  if (!old ||
+      (old->buf->width == output->width && old->buf->height == output->height))
     return true;
 
   struct vt_backend_t *backend = output->backend;
-  struct vt_buffer_t *buf = backend->impl.allocate_buffer(
+  struct vt_buffer_t  *buf = backend->impl.allocate_buffer(
       backend, output->width, output->height, DRM_FORMAT_XRGB8888);
   if (!buf)
     return false;
@@ -186,8 +186,8 @@ bool vt_output_resize_background(struct vt_output_t *output) {
     vt_buffer_unref(&buf);
     return false;
   }
-  struct vt_buffer_use_t *use = vt_buffer_use_create_take(
-      backend->comp, output, &buf, NULL, NULL);
+  struct vt_buffer_use_t *use =
+      vt_buffer_use_create_take(backend->comp, output, &buf, NULL, NULL);
   if (!use) {
     vt_buffer_unref(&buf);
     return false;

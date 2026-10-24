@@ -1754,16 +1754,17 @@ static bool _egl_draw_buffer(struct vt_renderer_t *r, struct vt_buffer_t *buf,
   return true;
 }
 
-void renderer_draw_buffer_egl(struct vt_renderer_t *r,
-                              struct vt_output_t   *output,
-                              struct vt_buffer_use_t *use, struct vt_box_t *src_box,
-                              struct vt_box_t *dst_box) {
+void renderer_draw_buffer_egl(struct vt_renderer_t   *r,
+                              struct vt_output_t     *output,
+                              struct vt_buffer_use_t *use,
+                              struct vt_box_t        *src_box,
+                              struct vt_box_t        *dst_box) {
   if (!use || !_egl_buffer_use_is_ready(r, use) ||
       !renderer_import_buffer_egl(r, use->buf, NULL))
     return;
 
-  if (_egl_draw_buffer(r, use->buf, use->buf->width, use->buf->height,
-                        src_box, dst_box))
+  if (_egl_draw_buffer(r, use->buf, use->buf->width, use->buf->height, src_box,
+                       dst_box))
     _egl_track_rendered_buffer_use(output, use);
 }
 
@@ -1927,7 +1928,6 @@ void renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,
              "Cannot record surface release fences after render for output %p.",
              (void *)output);
   }
-
 
   if (!eglSwapBuffers(egl->egl_dsp, output->render_surface)) {
     VT_ERROR(r->comp->log,

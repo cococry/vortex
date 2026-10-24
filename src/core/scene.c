@@ -232,8 +232,7 @@ static void _scene_node_accumulate_layers(struct vt_scene_t      *scene,
     if (node->type == VT_SCENE_NODE_SURFACE &&
         !_scene_node_push_surface_layer(scene, output, node)) {
       goto children;
-    } 
-    else if (node->type == VT_SCENE_NODE_BUFFER &&
+    } else if (node->type == VT_SCENE_NODE_BUFFER &&
                !_scene_node_push_buffer_layer(scene, node)) {
       goto children;
     }
@@ -264,7 +263,8 @@ static void _scene_accumulate_layers(struct vt_scene_t  *scene,
   if (output->background.node &&
       _scene_node_push_buffer_layer(scene, output->background.node)) {
     struct vt_output_layer_state_t *bg = &scene->layers[scene->n_layers - 1];
-    bg->dst = (struct vt_box_t){.width = output->width, .height = output->height};
+    bg->dst =
+        (struct vt_box_t){.width = output->width, .height = output->height};
     if (output->background.owner)
       bg->surface = output->background.owner->surface;
   }
@@ -439,8 +439,9 @@ struct vt_scene_node_t *vt_scene_node_create(struct vt_compositor_t *c,
   return n;
 }
 
-struct vt_scene_node_t *vt_scene_node_create_buffer(struct vt_compositor_t *c,
-                                                    struct vt_buffer_use_t *use) {
+struct vt_scene_node_t *
+vt_scene_node_create_buffer(struct vt_compositor_t *c,
+                            struct vt_buffer_use_t *use) {
   struct vt_scene_node_t *n = VT_ALLOC(c, sizeof(*n));
   if (!n) {
     VT_ERROR(c->log, "Failed to allocate scene node.");

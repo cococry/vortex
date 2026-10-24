@@ -5,8 +5,8 @@
 
 #include <wayland-server.h>
 
-static bool background_apply(struct vt_surface_t *surf,
-                              struct vt_content_update_t *cu) {
+static bool background_apply(struct vt_surface_t        *surf,
+                             struct vt_content_update_t *cu) {
   (void)cu;
   struct vt_background_t *bg = surf->role.data;
   if (bg)
@@ -14,7 +14,8 @@ static bool background_apply(struct vt_surface_t *surf,
   return true;
 }
 
-static void background_surface_destroy(struct wl_listener *listener, void *data) {
+static void background_surface_destroy(struct wl_listener *listener,
+                                       void               *data) {
   (void)data;
   struct vt_background_t *bg = wl_container_of(listener, bg, surface_destroy);
   wl_resource_destroy(bg->resource);
@@ -130,6 +131,6 @@ bool vt_proto_vt_background_init(struct vt_compositor_t *comp) {
   if (!comp)
     return false;
 
-  return wl_global_create(comp->wl.dsp, &vt_background_shell_v1_interface,
-                          1, comp, bind_shell) != NULL;
+  return wl_global_create(comp->wl.dsp, &vt_background_shell_v1_interface, 1,
+                          comp, bind_shell) != NULL;
 }

@@ -63,6 +63,7 @@ struct vt_drm_plane_t {
   size_t                          n_cursor_sizes;
 
   struct liftoff_plane *liftoff_plane;
+  struct vt_drm_crtc_t *liftoff_crtc;
 };
 
 struct vt_drm_crtc_t {
@@ -109,6 +110,8 @@ struct vt_drm_layer_state_t {
 
   struct vt_surface_t    *surface;
   struct vt_buffer_use_t *use;
+
+  bool is_background;
 
   enum vt_drm_layer_role_t role;
   struct liftoff_layer    *liftoff_layer;
@@ -254,9 +257,10 @@ struct vt_drm_output_state_t {
   uint32_t        conn_id;
   uint32_t        conn_props[VT_DRM_CONNECTOR__COUNT];
 
-  struct liftoff_output *liftoff_output;
-  struct liftoff_layer  *liftoff_composition_layer;
-  struct wl_array        liftoff_layers;
+  struct liftoff_output      *liftoff_output;
+  struct liftoff_layer       *liftoff_composition_layer;
+  struct vt_drm_framebuffer_t composition_test_fb;
+  struct wl_array             liftoff_layers;
 
   bool needs_compositing;
 

@@ -192,19 +192,6 @@ static bool _atomic_prepare_liftoff(struct vt_drm_backend_state_t *drm,
     return false;
   }
 
-  /*
-   * The composition layer belongs to the output and persists between
-   * frames. Frames begin with the FB disabled so a composition FB
-   * from a previous frame can never accidentally survive into this one.
-   */
-  if (liftoff_layer_set_property(output->liftoff_composition_layer, "FB_ID",
-                                 0) < 0) {
-    return false;
-  }
-
-  liftoff_layer_unset_property(output->liftoff_composition_layer,
-                               "IN_FENCE_FD");
-
   bool have_composition = false;
 
   struct vt_drm_layer_state_t *layer;
@@ -214,16 +201,8 @@ static bool _atomic_prepare_liftoff(struct vt_drm_backend_state_t *drm,
     switch (layer->role) {
     case VT_DRM_LAYER_DIRECT:
     case VT_DRM_LAYER_COMPOSITED:
-
-      liftoff_layer = layer->liftoff_layer;
-
-      if (!liftoff_layer) {
-        VT_ERROR(drm->comp->log, "Layer %p has no retained Liftoff layer.",
-                 (void *)layer);
-        return false;
-      }
-
-      break;
+      /* client properties and candidate FBs are retained from the test. */
+      continue;
     case VT_DRM_LAYER_COMPOSITED_SCENE:
       if (have_composition) {
         VT_ERROR(drm->comp->log, "multiple composition layers in one commit.");
@@ -322,106 +301,59 @@ _atomic_validate_liftoff_allocation(struct vt_drm_backend_state_t *drm,
   return true;
 }
 
-static const char *_atomic_layer_role_name(enum vt_drm_layer_role_t role) {
-  switch (role) {
-  case VT_DRM_LAYER_DIRECT:
-    return "DIRECT";
-  case VT_DRM_LAYER_COMPOSITED:
-    return "COMPOSITED";
-  case VT_DRM_LAYER_COMPOSITED_SCENE:
-    return "SCENE";
-  default:
-    return "UNKNOWN";
-  }
-}
-
-static const char *_atomic_plane_type_name(uint64_t type) {
-  switch (type) {
-  case DRM_PLANE_TYPE_PRIMARY:
-    return "PRIMARY";
-  case DRM_PLANE_TYPE_OVERLAY:
-    return "OVERLAY";
-  case DRM_PLANE_TYPE_CURSOR:
-    return "CURSOR";
-  default:
-    return "UNKNOWN";
-  }
-}
-
-static struct vt_drm_plane_t *
-_atomic_find_plane(struct vt_drm_backend_state_t *drm, uint32_t plane_id) {
-  struct vt_drm_plane_t *plane;
-
-  wl_array_for_each(plane, &drm->planes) {
-    if (plane->id == plane_id)
-      return plane;
-  }
-
-  return NULL;
-}
-
 static void
 _atomic_trace_liftoff_allocation(struct vt_drm_backend_state_t *drm,
                                  struct vt_drm_kms_commit_t    *commit) {
   if (!drm || !drm->comp || !commit || !commit->output)
     return;
 
-  struct vt_drm_output_state_t *output = commit->output;
-
-  VT_TRACE(drm->comp->log,
-           "Liftoff allocation output=%p layers=%zu:", (void *)output->base,
-           commit->layers.size / sizeof(struct vt_drm_layer_state_t));
-
   size_t index = 0;
 
   struct vt_drm_layer_state_t *layer;
   wl_array_for_each(layer, &commit->layers) {
-    const char *role = _atomic_layer_role_name(layer->role);
-
-    if (layer->role == VT_DRM_LAYER_COMPOSITED) {
-      VT_TRACE(drm->comp->log,
-               "  [%zu] %-10s z=%" PRIu64 " surface=%p -> SCENE", index, role,
-               layer->zpos, (void *)layer->surface);
-
-      index++;
+    if (layer->role == VT_DRM_LAYER_COMPOSITED_SCENE)
       continue;
-    }
 
-    struct liftoff_layer *liftoff_layer = NULL;
-
-    if (layer->role == VT_DRM_LAYER_DIRECT) {
-      liftoff_layer = layer->liftoff_layer;
-    } else if (layer->role == VT_DRM_LAYER_COMPOSITED_SCENE) {
-      liftoff_layer = output->liftoff_composition_layer;
-    }
-
+    const char *status = layer->role == VT_DRM_LAYER_COMPOSITED
+                             ? "composited"
+                             : "direct scanout";
+    struct liftoff_layer *liftoff_layer =
+        layer->role == VT_DRM_LAYER_COMPOSITED
+            ? commit->output->liftoff_composition_layer
+            : layer->liftoff_layer;
     struct liftoff_plane *liftoff_plane =
         liftoff_layer ? liftoff_layer_get_plane(liftoff_layer) : NULL;
+    const char *plane_name = liftoff_plane ? "unknown plane" : "no plane";
 
-    if (!liftoff_plane) {
-      VT_TRACE(drm->comp->log,
-               "  [%zu] %-10s z=%" PRIu64 " fb=%" PRIu32
-               " surface=%p -> NO PLANE",
-               index, role, layer->zpos, layer->fb.id, (void *)layer->surface);
+    if (liftoff_plane) {
+      uint32_t plane_id = liftoff_plane_get_id(liftoff_plane);
+      struct vt_drm_plane_t *plane;
+      wl_array_for_each(plane, &drm->planes) {
+        if (plane->id != plane_id)
+          continue;
 
-      index++;
-      continue;
+        switch (plane->type) {
+        case DRM_PLANE_TYPE_PRIMARY:
+          plane_name = "primary plane";
+          break;
+        case DRM_PLANE_TYPE_OVERLAY:
+          plane_name = "overlay plane";
+          break;
+        case DRM_PLANE_TYPE_CURSOR:
+          plane_name = "cursor plane";
+          break;
+        }
+        break;
+      }
     }
 
-    uint32_t plane_id = liftoff_plane_get_id(liftoff_plane);
-
-    struct vt_drm_plane_t *plane = _atomic_find_plane(drm, plane_id);
-
-    const char *plane_type =
-        plane ? _atomic_plane_type_name(plane->type) : "UNKNOWN";
-
-    VT_TRACE(drm->comp->log,
-             "  [%zu] %-10s z=%" PRIu64 " fb=%" PRIu32
-             " surface=%p -> plane=%" PRIu32 " %s",
-             index, role, layer->zpos, layer->fb.id, (void *)layer->surface,
-             plane_id, plane_type);
-
-    index++;
+    if (layer->is_background) {
+      VT_TRACE(drm->comp->log, "background: %dx%d, %s (%s)", layer->dst.width,
+               layer->dst.height, status, plane_name);
+    } else {
+      VT_TRACE(drm->comp->log, "layer %zu: %dx%d, %s (%s)", index++,
+               layer->dst.width, layer->dst.height, status, plane_name);
+    }
   }
 }
 

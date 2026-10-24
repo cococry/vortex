@@ -56,7 +56,7 @@ struct vt_scene_node_t {
   bool geom_dirty;
 
   union {
-    struct vt_surface_t *surf;
+    struct vt_surface_t    *surf;
     struct vt_buffer_use_t *use;
   };
 
@@ -75,8 +75,9 @@ struct vt_scene_t {
 struct vt_scene_node_t *vt_scene_node_create(struct vt_compositor_t *c,
                                              struct vt_surface_t    *surf);
 
-struct vt_scene_node_t *vt_scene_node_create_buffer(struct vt_compositor_t *c,
-                                                    struct vt_buffer_use_t *use);
+struct vt_scene_node_t *
+vt_scene_node_create_buffer(struct vt_compositor_t *c,
+                            struct vt_buffer_use_t *use);
 
 bool vt_scene_node_destroy(struct vt_compositor_t *c,
                            struct vt_scene_node_t *node);
