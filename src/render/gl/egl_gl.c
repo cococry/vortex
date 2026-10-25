@@ -35,6 +35,7 @@
 #include "src/core/compositor.h"
 #include "src/core/core_types.h"
 #include "src/core/surface.h"
+#include "src/core/surface_addon.h"
 #include "src/core/util.h"
 #include "src/protocols/linux_dmabuf.h"
 #include "src/render/dmabuf_attr.h"
@@ -59,6 +60,13 @@
 struct egl_rendered_buffer_use_t {
   struct wl_list          link;
   struct vt_buffer_use_t *use;
+};
+
+struct egl_surface_texture_t {
+  struct vt_surface_addon_t addon;
+  struct wl_list            link;
+  struct vt_egl_buffer_t    buffer;
+  bool                      valid;
 };
 
 // Minimal GBM interop
@@ -114,6 +122,8 @@ struct egl_backend_state_t {
   uint64_t fenced_draws, fence_pending_draws;
 
   struct rn_state_t *runara;
+
+  struct wl_list surface_textures;
 
   struct wl_array formats;
 };
@@ -201,9 +211,6 @@ bool _egl_gl_import_buffer_shm(struct vt_renderer_t *r, struct vt_shm_attr_t *a,
                                struct vt_buffer_t      *buf,
                                struct vt_egl_buffer_t  *egl_buf,
                                const pixman_region32_t *damage) {
-  // TODO: damage
-  (void)damage;
-
   if (!buf || !a || !r || !egl_buf || !a->data)
     return false;
 
@@ -244,7 +251,7 @@ bool _egl_gl_import_buffer_shm(struct vt_renderer_t *r, struct vt_shm_attr_t *a,
     VT_TRACE(r->comp->log,
              "Regenerating OpenGL texture for SHM-backend EGL buffer %p. Old "
              "dimensions: "
-             "[%i,%i], new dimensions: [%i, %i]",
+             "[%ix%i], new dimensions: [%ix%i]",
              (void *)egl_buf, egl_buf->tex.width, egl_buf->tex.height, width,
              height);
     glGenTextures(1, &egl_buf->tex.id);
@@ -273,8 +280,30 @@ bool _egl_gl_import_buffer_shm(struct vt_renderer_t *r, struct vt_shm_attr_t *a,
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-  } else {
+  } else if (!damage) {
+    /* update the texture in place */
+    VT_TRACE(r->comp->log,
+             "Updating full texture of SHM-backed buffer %p (%ix%i)",
+             (void *)egl_buf, width, height);
     glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, width, height, format, type, data);
+  } else if (pixman_region32_not_empty(damage)) {
+    /* update only the box covering the damaged regions of the texture */
+
+    const pixman_box32_t *box = pixman_region32_extents(damage);
+    int                   x1 = VT_MAX(0, box->x1), y1 = VT_MAX(0, box->y1);
+    int x2 = VT_MIN(width, box->x2), y2 = VT_MIN(height, box->y2);
+
+    if (x2 > x1 && y2 > y1) {
+      VT_TRACE(r->comp->log,
+               "Updating only damaged section in texture of SHM-backed buffer "
+               "%p from %ix%i, (size: %ix%i)",
+               (void *)egl_buf, x1, y1, x2 - x1, y2 - y1);
+
+      const uint8_t *pixels =
+          (const uint8_t *)data + (size_t)y1 * stride + (size_t)x1 * 4;
+      glTexSubImage2D(GL_TEXTURE_2D, 0, x1, y1, x2 - x1, y2 - y1, format, type,
+                      pixels);
+    }
   }
 
   GLenum upload_error = glGetError();
@@ -868,6 +897,7 @@ bool _egl_create_renderer(struct vt_renderer_t      *renderer,
       BACKEND_DATA(renderer, struct egl_backend_state_t);
 
   wl_array_init(&egl->formats);
+  wl_list_init(&egl->surface_textures);
 
   if (!(egl->egl_dsp = _egl_create_display(renderer->comp, platform,
                                            native_handle, log_error))) {
@@ -922,6 +952,37 @@ static void _egl_buffer_attachment_destroy(struct vt_buffer_t *buf,
 
   VT_TRACE(r->comp->log, "Destroyed EGL Image handle for buffer %p",
            (void *)buf);
+}
+
+static void _egl_surface_texture_destroy(struct vt_surface_addon_t *addon) {
+  struct egl_surface_texture_t *texture =
+      wl_container_of(addon, texture, addon);
+  _egl_buffer_attachment_destroy(NULL, NULL, &texture->buffer);
+  wl_list_remove(&texture->link);
+  free(texture);
+}
+
+static struct egl_surface_texture_t *
+_egl_surface_texture(struct vt_renderer_t *r, struct vt_surface_t *surface) {
+  struct vt_surface_addon_t *addon;
+  wl_list_for_each(addon, &surface->addons, link) {
+    if (addon->impl.destroy != _egl_surface_texture_destroy)
+      continue;
+    struct egl_surface_texture_t *texture =
+        wl_container_of(addon, texture, addon);
+    if (texture->buffer.renderer == r)
+      return texture;
+  }
+  struct egl_surface_texture_t *texture = calloc(1, sizeof(*texture));
+  if (!texture)
+    return NULL;
+  texture->addon.impl.name = "egl-surface-texture";
+  texture->addon.impl.destroy = _egl_surface_texture_destroy;
+  texture->buffer.renderer = r;
+  wl_list_insert(&surface->addons, &texture->addon.link);
+  struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
+  wl_list_insert(&egl->surface_textures, &texture->link);
+  return texture;
 }
 
 static bool _egl_track_rendered_buffer_use(struct vt_output_t     *output,
@@ -1621,10 +1682,15 @@ void renderer_set_clear_color_egl(struct vt_renderer_t *r,
 }
 void renderer_clear_color_buffer_egl(struct vt_renderer_t *r,
                                      struct vt_output_t   *output) {
-  (void)output;
-
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
-  rn_clear_color_buffer(egl->runara);
+  glEnable(GL_SCISSOR_TEST);
+  for (int i = 0; i < output->n_damage_boxes; i++) {
+    const pixman_box32_t *box = &output->cached_damage[i];
+    glScissor(box->x1, output->height - box->y2, box->x2 - box->x1,
+              box->y2 - box->y1);
+    rn_clear_color_buffer(egl->runara);
+  }
+  glDisable(GL_SCISSOR_TEST);
 }
 
 void renderer_stencil_damage_pass_egl(struct vt_renderer_t *r,
@@ -1633,15 +1699,19 @@ void renderer_stencil_damage_pass_egl(struct vt_renderer_t *r,
     return;
 
   glEnable(GL_STENCIL_TEST);
-
+  glDisable(GL_SCISSOR_TEST);
   glStencilMask(0xFF);
   glClearStencil(0);
   glClear(GL_STENCIL_BUFFER_BIT);
-
-  glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
-  glStencilMask(0xFF);
-  glStencilFunc(GL_ALWAYS, 1, 0xFF);
-  glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+  glClearStencil(1);
+  glEnable(GL_SCISSOR_TEST);
+  for (int i = 0; i < output->n_damage_boxes; i++) {
+    const pixman_box32_t *box = &output->cached_damage[i];
+    glScissor(box->x1, output->height - box->y2, box->x2 - box->x1,
+              box->y2 - box->y1);
+    glClear(GL_STENCIL_BUFFER_BIT);
+  }
+  glDisable(GL_SCISSOR_TEST);
 }
 
 void renderer_composite_pass_egl(struct vt_renderer_t *r,
@@ -1716,21 +1786,10 @@ void renderer_begin_frame_egl(struct vt_renderer_t *r,
   glBindFramebuffer(GL_FRAMEBUFFER, egl_output->fbo_id);
 }
 
-static bool _egl_draw_buffer(struct vt_renderer_t *r, struct vt_buffer_t *buf,
-                             int32_t width, int32_t height,
-                             struct vt_box_t *src_box,
-                             struct vt_box_t *dst_box) {
-  struct vt_buffer_attachment_t *attachment =
-      vt_buffer_find_attachment(buf, r, &egl_buffer_attachment_impl);
-
-  if (!attachment) {
-    VT_ERROR(r->comp->log, "Trying to render buffer with no "
-                           "EGL buffer attachment");
-    return false;
-  }
-
-  struct vt_egl_buffer_t *egl_buf = attachment->data;
-
+static bool _egl_draw_texture(struct vt_renderer_t   *r,
+                              struct vt_egl_buffer_t *egl_buf, int32_t width,
+                              int32_t height, struct vt_box_t *src_box,
+                              struct vt_box_t *dst_box) {
   if (egl_buf->tex.id == 0)
     return false;
 
@@ -1752,6 +1811,16 @@ static bool _egl_draw_buffer(struct vt_renderer_t *r, struct vt_buffer_t *buf,
                   (rn_color_t){1.0f, 1.0f, 1.0f, 1.0f});
 
   return true;
+}
+
+static bool _egl_draw_buffer(struct vt_renderer_t *r, struct vt_buffer_t *buf,
+                             int32_t width, int32_t height,
+                             struct vt_box_t *src_box,
+                             struct vt_box_t *dst_box) {
+  struct vt_buffer_attachment_t *attachment =
+      vt_buffer_find_attachment(buf, r, &egl_buffer_attachment_impl);
+  return attachment && _egl_draw_texture(r, attachment->data, width, height,
+                                         src_box, dst_box);
 }
 
 void renderer_draw_buffer_egl(struct vt_renderer_t   *r,
@@ -1807,15 +1876,44 @@ void renderer_draw_surface_egl(struct vt_renderer_t *r,
   if (!_egl_buffer_use_is_ready(r, use))
     return;
 
-  if (!renderer_import_buffer_egl(r, use->buf, &surface->applied.damage)) {
-    VT_ERROR(r->comp->log, "Failed to import buffer %p for surface %p.",
-             (void *)use->buf, (void *)surface);
-    return;
-  }
+  struct vt_shm_attr_t shm = {0};
+  if (vt_buffer_get_shm(buf, &shm)) {
+    /* shm buffers get a per-surface texture that retains the shm buffer, beause
+     * client damage describes differences from the previous surface buffer.
+     * thus, we need to retain the previous surface buffer to get correct
+     * damage-only importing. */
+    struct egl_surface_texture_t *texture = _egl_surface_texture(r, surface);
+    if (!texture || !_egl_gl_import_buffer_shm(
+                        r, &shm, buf, &texture->buffer,
+                        texture->valid ? &surface->applied.damage : NULL))
+      return;
+    texture->valid = true;
+    pixman_region32_clear(&surface->applied.damage);
+    if (!_egl_draw_texture(r, &texture->buffer, surface->applied.width,
+                           surface->applied.height, src_box, dst_box))
+      return;
+  } else {
+    /* a later SHM commit must not reuse pixels from before this dmabuf, so we
+     * invalidate the expired per-surface SHM-backed texture. */
+    struct vt_surface_addon_t *addon;
+    wl_list_for_each(addon, &surface->addons, link) {
+      if (addon->impl.destroy == _egl_surface_texture_destroy) {
+        struct egl_surface_texture_t *texture =
+            wl_container_of(addon, texture, addon);
+        texture->valid = false;
+      }
+    }
 
-  if (!_egl_draw_buffer(r, buf, surface->applied.width, surface->applied.height,
-                        src_box, dst_box))
-    return;
+    if (!renderer_import_buffer_egl(r, buf, &surface->applied.damage)) {
+      VT_ERROR(r->comp->log, "Failed to import buffer %p for surface %p.",
+               (void *)buf, (void *)surface);
+      return;
+    }
+    pixman_region32_clear(&surface->applied.damage);
+    if (!_egl_draw_buffer(r, buf, surface->applied.width,
+                          surface->applied.height, src_box, dst_box))
+      return;
+  }
 
   if (!vt_output_track_presented_surface(output, surface)) {
     VT_ERROR(r->comp->log, "Failed to track presented surface %p on output %p.",
@@ -1911,6 +2009,8 @@ void renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,
 
   glBindFramebuffer(GL_READ_FRAMEBUFFER, egl_output->fbo_id);
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+  glDisable(GL_STENCIL_TEST);
+  glDisable(GL_SCISSOR_TEST);
 
   glBlitFramebuffer(0, 0, output->width, output->height, 0, 0, output->width,
                     output->height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
@@ -1958,6 +2058,9 @@ bool renderer_destroy_egl(struct vt_renderer_t *r) {
              "Cannot tear down Runara without current EGL context.");
     return false;
   }
+  struct egl_surface_texture_t *texture, *tmp;
+  wl_list_for_each_safe(texture, tmp, &egl->surface_textures, link)
+      vt_surface_addon_destroy(&texture->addon);
   if (egl->runara)
     rn_state_fini(egl->runara);
 

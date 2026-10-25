@@ -181,6 +181,10 @@ struct vt_box_t {
   int32_t height;
 };
 
+/* Transform a box within a width x height coordinate space. */
+struct vt_box_t vt_util_transform_box(struct vt_box_t box, uint32_t transform,
+                                      int32_t width, int32_t height);
+
 uint64_t vt_util_get_time_msec(void);
 
 void vt_util_arena_init(struct vt_arena_t *a, size_t capacity);

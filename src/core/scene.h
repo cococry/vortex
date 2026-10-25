@@ -38,7 +38,7 @@ enum vt_scene_node_type_t {
 };
 
 struct vt_scene_node_t {
-
+  struct vt_compositor_t  *comp;
   struct vt_scene_node_t  *parent;
   struct vt_scene_node_t **childs;
   uint32_t                 child_count;
@@ -84,6 +84,15 @@ bool vt_scene_node_destroy(struct vt_compositor_t *c,
 
 bool vt_scene_node_damage_whole(struct vt_compositor_t *comp,
                                 struct vt_scene_node_t *node);
+
+void vt_scene_damage_box(struct vt_compositor_t *comp,
+                         const struct vt_box_t  *box);
+void vt_scene_node_damage_region(struct vt_compositor_t  *comp,
+                                 struct vt_scene_node_t  *node,
+                                 const pixman_region32_t *damage);
+void vt_scene_node_damage_buffer(struct vt_compositor_t  *comp,
+                                 struct vt_scene_node_t  *node,
+                                 const pixman_region32_t *damage);
 
 struct vt_scene_node_t *vt_scene_node_create_rect(struct vt_compositor_t *c,
                                                   float x, float y, float w,

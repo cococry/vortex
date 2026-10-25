@@ -205,6 +205,7 @@ void vt_output_damage_whole(struct vt_output_t *output) {
 
   pixman_region32_union_rect(&output->damage, &output->damage, 0, 0,
                              output->width, output->height);
+  output->needs_damage_rebuild = true;
 
   vt_comp_schedule_repaint(output->backend->comp, output);
 }

@@ -21,6 +21,7 @@
  */
 
 #include "content_update.h"
+#include "src/core/compositor.h"
 #include "src/core/core_types.h"
 #include "src/core/surface.h"
 #include "src/core/util.h"
@@ -30,6 +31,7 @@
 
 #include <assert.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #define _SUBSYS_NAME "CONTENT-UPDATE"
@@ -202,6 +204,47 @@ _content_update_apply_surface_state(struct vt_content_update_t *cu) {
     pixman_region32_copy(&surf->applied.opaque_region, &pending->opaque_region);
   }
 
+  /* we need to accumulate both buffer-damage and surface-damage
+   * independently. */
+  struct vt_buffer_t *buf = vt_surface_get_buffer(surf);
+  if (buf) {
+    /* buffer-damage is already in buffer coordinates*/
+    pixman_region32_union(&surf->applied.damage, &surf->applied.damage,
+                          &pending->damage_buffer);
+
+    /* clip surface-damage to buffer size and convert surface coordinates to
+     * buffer coordinates by applying scale and reversing the transform.*/
+    pixman_region32_t clipped;
+    pixman_region32_init(&clipped);
+    pixman_region32_intersect_rect(&clipped, &pending->damage_surface, 0, 0,
+                                   surf->applied.width, surf->applied.height);
+    int             count;
+    pixman_box32_t *rects = pixman_region32_rectangles(&clipped, &count);
+    int32_t         scale = surf->applied.buffer_scale;
+
+    uint32_t transform = surf->applied.buffer_transform;
+    /* inverses the transform */
+    if (!(transform & WL_OUTPUT_TRANSFORM_FLIPPED))
+      transform = (4 - transform) & 3;
+
+    for (int i = 0; i < count; i++) {
+      struct vt_box_t box = {rects[i].x1 * scale, rects[i].y1 * scale,
+                             (rects[i].x2 - rects[i].x1) * scale,
+                             (rects[i].y2 - rects[i].y1) * scale};
+
+      box = vt_util_transform_box(box, transform, surf->applied.width * scale,
+                                  surf->applied.height * scale);
+
+      pixman_region32_union_rect(&surf->applied.damage, &surf->applied.damage,
+                                 box.x, box.y, box.width, box.height);
+    }
+    pixman_region32_fini(&clipped);
+    pixman_region32_intersect_rect(&surf->applied.damage, &surf->applied.damage,
+                                   0, 0, buf->width, buf->height);
+  } else {
+    pixman_region32_clear(&surf->applied.damage);
+  }
+
   return true;
 }
 
@@ -213,6 +256,11 @@ static bool _content_update_apply_one(struct vt_content_update_t *cu) {
     return false;
 
   struct vt_surface_t *surf = cu->surf;
+
+  struct vt_box_t old_bounds = {0};
+  bool            was_mapped = vt_surface_effectively_mapped(surf);
+  if (surf->scene_node)
+    old_bounds = *vt_scene_node_get_global_bounds(surf->scene_node);
 
   bool applied = _content_update_apply_surface_state(cu);
   assert(applied);
@@ -237,12 +285,29 @@ static bool _content_update_apply_one(struct vt_content_update_t *cu) {
   if (surf->proto_state.linux_dmabuf_v1)
     vt_proto_linux_dmabuf_v1_update_surface_feedback(surf);
 
-  if (!vt_surface_has_role(surf, VT_SURFACE_ROLE_CURSOR)) {
-    bool damaged = vt_scene_node_damage_whole(surf->comp, surf->scene_node);
-    assert(damaged);
-
-    if (!damaged)
-      return false;
+  if (surf->scene_node && !vt_surface_has_role(surf, VT_SURFACE_ROLE_CURSOR)) {
+    struct vt_box_t bounds = *vt_scene_node_get_global_bounds(surf->scene_node);
+    bool            mapped = vt_surface_effectively_mapped(surf);
+    bool geometry_changed = memcmp(&old_bounds, &bounds, sizeof(bounds)) != 0;
+    if (was_mapped != mapped || geometry_changed ||
+        cu->state.buffer_transform_changed || cu->state.buffer_scale_changed) {
+      if (was_mapped)
+        vt_scene_damage_box(surf->comp, &old_bounds);
+      if (mapped)
+        vt_scene_node_damage_whole(surf->comp, surf->scene_node);
+    } else if (mapped) {
+      vt_scene_node_damage_buffer(surf->comp, surf->scene_node,
+                                  &surf->applied.damage);
+    }
+    /* A callback-only commit still needs presentation pacing, without
+     * inventing pixel damage on unrelated outputs. */
+    if (mapped && !pixman_region32_not_empty(&surf->applied.damage) &&
+        !wl_list_empty(&surf->frame_callbacks)) {
+      struct vt_output_t *output =
+          vt_scene_node_primary_output(surf->comp, surf->scene_node);
+      if (output)
+        vt_comp_schedule_repaint(surf->comp, output);
+    }
   }
 
   return true;

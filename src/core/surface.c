@@ -72,6 +72,11 @@ void vt_surface_set_mapped(struct vt_surface_t *surf, bool mapped) {
 
   struct vt_seat_t *seat = surf->comp->seat;
 
+  bool damage_scene = surf->scene_node &&
+                      !vt_surface_has_role(surf, VT_SURFACE_ROLE_CURSOR) &&
+                      !vt_surface_has_role(surf, VT_SURFACE_ROLE_VT_BACKGROUND);
+  if (damage_scene && vt_surface_effectively_mapped(surf))
+    vt_scene_node_damage_whole(surf->comp, surf->scene_node);
   surf->mapped = mapped;
 
   if (surf->role.impl && surf->role.impl->mapping_changed) {
@@ -88,6 +93,8 @@ void vt_surface_set_mapped(struct vt_surface_t *surf, bool mapped) {
 
     vt_seat_repick_pointer_focus(seat);
   }
+  if (damage_scene && vt_surface_effectively_mapped(surf))
+    vt_scene_node_damage_whole(surf->comp, surf->scene_node);
 }
 
 struct vt_surface_t *focus_stack_pop(struct vt_compositor_t *comp) {

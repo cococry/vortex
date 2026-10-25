@@ -320,6 +320,9 @@ void vt_subsurface_apply_stacking(struct vt_content_update_t *cu) {
     wl_list_for_each(sub, &cu->surf->subsurface.childs, link) {
       if (sub->stacking_id != cu->subsurface_stack[i].id)
         continue;
+      if (sub->stacking_link.prev != position ||
+          sub->below_parent != cu->subsurface_stack[i].below_parent)
+        vt_scene_node_damage_whole(cu->surf->comp, sub->scene_node);
       wl_list_remove(&sub->stacking_link);
       wl_list_insert(position, &sub->stacking_link);
       position = &sub->stacking_link;

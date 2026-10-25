@@ -262,3 +262,27 @@ bool vt_util_box_intersects_output(const struct vt_box_t    *box,
          box->y + (int32_t)box->height > output->y &&
          box->y < output->y + (int32_t)output->height;
 }
+struct vt_box_t vt_util_transform_box(struct vt_box_t box, uint32_t transform,
+                                      int32_t width, int32_t height) {
+  struct vt_box_t out = box;
+  switch (transform & 3) {
+  case WL_OUTPUT_TRANSFORM_NORMAL:
+    out = box;
+    break;
+  case WL_OUTPUT_TRANSFORM_90:
+    out = (struct vt_box_t){height - box.y - box.height, box.x, box.height,
+                            box.width};
+    break;
+  case WL_OUTPUT_TRANSFORM_180:
+    out.x = width - box.x - box.width;
+    out.y = height - box.y - box.height;
+    break;
+  case WL_OUTPUT_TRANSFORM_270:
+    out = (struct vt_box_t){box.y, width - box.x - box.width, box.height,
+                            box.width};
+    break;
+  }
+  if (transform & WL_OUTPUT_TRANSFORM_FLIPPED)
+    out.x = ((transform & 1) ? height : width) - out.x - out.width;
+  return out;
+}

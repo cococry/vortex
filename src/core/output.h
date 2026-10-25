@@ -92,6 +92,7 @@ struct vt_output_t {
   pixman_box32_t cached_damage[VT_OUTPUT_MAX_DAMAGE_RECTS];
   int32_t        n_damage_boxes;
   bool           needs_damage_rebuild;
+  bool           had_scanout_layers;
 
   struct {
     struct wl_global *global;

@@ -2102,7 +2102,7 @@ static bool _drm_output_update_cursor_image(struct vt_output_t     *output,
     cursor->visible = false;
 
     output->cursor_mode = VT_CURSOR_MODE_SOFTWARE;
-    vt_comp_schedule_repaint(output->backend->comp, output);
+    vt_output_damage_whole(output);
 
     return false;
   }

@@ -402,6 +402,8 @@ _scene_node_create_rect(struct vt_compositor_t *c, float x, float y, float w,
     return NULL;
   }
 
+  n->comp = c;
+  n->geom_dirty = true;
   n->surf = NULL;
   n->type = type;
 
@@ -422,6 +424,7 @@ struct vt_scene_node_t *vt_scene_node_create(struct vt_compositor_t *c,
     return NULL;
   }
 
+  n->comp = c;
   n->surf = surf;
   n->type = VT_SCENE_NODE_SURFACE;
 
@@ -448,6 +451,7 @@ vt_scene_node_create_buffer(struct vt_compositor_t *c,
     return NULL;
   }
 
+  n->comp = c;
   n->use = vt_buffer_use_ref(use);
   n->type = VT_SCENE_NODE_BUFFER;
 
@@ -474,20 +478,87 @@ bool vt_scene_node_destroy(struct vt_compositor_t *c,
   return true;
 }
 
+void vt_scene_damage_box(struct vt_compositor_t *comp,
+                         const struct vt_box_t  *box) {
+  if (!comp || !box || box->width <= 0 || box->height <= 0)
+    return;
+  struct vt_output_t *output;
+  wl_list_for_each(output, &comp->outputs, link_global) {
+    int32_t x1 = VT_MAX(box->x, output->x);
+    int32_t y1 = VT_MAX(box->y, output->y);
+    int32_t x2 = VT_MIN((int64_t)box->x + box->width,
+                        (int64_t)output->x + output->width);
+    int32_t y2 = VT_MIN((int64_t)box->y + box->height,
+                        (int64_t)output->y + output->height);
+    if (x2 <= x1 || y2 <= y1)
+      continue;
+    pixman_region32_union_rect(&output->damage, &output->damage, x1 - output->x,
+                               y1 - output->y, x2 - x1, y2 - y1);
+    output->needs_damage_rebuild = true;
+    vt_comp_schedule_repaint(comp, output);
+  }
+}
+
+void vt_scene_node_damage_region(struct vt_compositor_t  *comp,
+                                 struct vt_scene_node_t  *node,
+                                 const pixman_region32_t *damage) {
+  if (!node || !damage)
+    return;
+  const struct vt_box_t *bounds = vt_scene_node_get_global_bounds(node);
+  pixman_region32_t      clipped;
+  pixman_region32_init(&clipped);
+  pixman_region32_intersect_rect(&clipped, damage, 0, 0, bounds->width,
+                                 bounds->height);
+  int             count;
+  pixman_box32_t *rects = pixman_region32_rectangles(&clipped, &count);
+  for (int i = 0; i < count; i++) {
+    struct vt_box_t box = {bounds->x + rects[i].x1, bounds->y + rects[i].y1,
+                           rects[i].x2 - rects[i].x1,
+                           rects[i].y2 - rects[i].y1};
+    vt_scene_damage_box(comp, &box);
+  }
+  pixman_region32_fini(&clipped);
+}
+
+void vt_scene_node_damage_buffer(struct vt_compositor_t  *comp,
+                                 struct vt_scene_node_t  *node,
+                                 const pixman_region32_t *damage) {
+  if (!node || node->type != VT_SCENE_NODE_SURFACE || !node->surf)
+    return;
+  struct vt_surface_t *surf = node->surf;
+  struct vt_buffer_t  *buf = vt_surface_get_buffer(surf);
+  if (!buf)
+    return;
+  uint32_t          transform = surf->applied.buffer_transform;
+  int32_t           scale = surf->applied.buffer_scale;
+  pixman_region32_t local;
+  pixman_region32_init(&local);
+  int             count;
+  pixman_box32_t *rects = pixman_region32_rectangles(damage, &count);
+  for (int i = 0; i < count; i++) {
+    struct vt_box_t box = {rects[i].x1, rects[i].y1, rects[i].x2 - rects[i].x1,
+                           rects[i].y2 - rects[i].y1};
+    box = vt_util_transform_box(box, transform, buf->width, buf->height);
+    int32_t x2 = (box.x + box.width + scale - 1) / scale;
+    int32_t y2 = (box.y + box.height + scale - 1) / scale;
+    box.x /= scale;
+    box.y /= scale;
+    pixman_region32_union_rect(&local, &local, box.x, box.y, x2 - box.x,
+                               y2 - box.y);
+  }
+  vt_scene_node_damage_region(comp, node, &local);
+  pixman_region32_fini(&local);
+}
+
 bool vt_scene_node_damage_whole(struct vt_compositor_t *comp,
                                 struct vt_scene_node_t *node) {
   if (!node || !comp)
     return false;
-  VT_TRACE(comp->log, "DEBUG: node %p damaged; repainting all outputs",
-           (void *)node);
-
-  struct vt_output_t *it;
-  wl_list_for_each(it, &comp->outputs, link_global) {
-    VT_TRACE(comp->log, "DEBUG: scheduling output %p", (void *)it);
-
-    vt_comp_schedule_repaint(comp, it);
-  }
-
+  if (node->type != VT_SCENE_NODE_INVISIBLE_GEOMETRY &&
+      node->type != VT_SCENE_NODE_ROOT)
+    vt_scene_damage_box(comp, vt_scene_node_get_global_bounds(node));
+  for (uint32_t i = 0; i < node->child_count; i++)
+    vt_scene_node_damage_whole(comp, node->childs[i]);
   return true;
 }
 
@@ -521,6 +592,7 @@ bool vt_scene_node_reparent(struct vt_compositor_t *c,
   if (node->parent == new_parent)
     return true;
 
+  vt_scene_node_damage_whole(c, node);
   if (node->parent) {
     vt_scene_node_remove_child(node->parent, node);
   }
@@ -529,6 +601,7 @@ bool vt_scene_node_reparent(struct vt_compositor_t *c,
     return false;
 
   vt_scene_node_mark_geometry_dirty(node);
+  vt_scene_node_damage_whole(c, node);
   _scene_node_update_surface_feedback(node);
 
   return true;
@@ -606,30 +679,60 @@ void vt_scene_render(struct vt_scene_t *scene, struct vt_output_t *output) {
 
   _scene_accumulate_layers(scene, output);
 
+  /* test all accumulated layers for hardware-scanout. */
   if (output->backend->impl.test_output_layers)
     output->backend->impl.test_output_layers(output->backend, output,
                                              scene->layers, scene->n_layers);
 
   struct vt_renderer_t *r = scene->renderer;
   bool                  need_compositing = false;
+  bool                  has_scanout = false;
 
   for (size_t i = 0; i < scene->n_layers; i++) {
-    if (!scene->layers[i].accepted) {
+    if (scene->layers[i].accepted)
+      has_scanout = true;
+    else
       need_compositing = true;
-      break;
-    }
   }
   if (!need_compositing && scene->n_layers == 0)
     need_compositing = true;
 
   if (need_compositing) {
+    if (has_scanout || output->had_scanout_layers) {
+      /* when switching from hardware scanout to composition, the layers that
+       * were on hardware planes are gone from the composition buffer. we need
+       * to damage the whole output and rebuild them. */
+      pixman_region32_union_rect(&output->damage, &output->damage, 0, 0,
+                                 output->width, output->height);
+    }
+
+    pixman_region32_intersect_rect(&output->damage, &output->damage, 0, 0,
+                                   output->width, output->height);
+    int             count;
+    pixman_box32_t *rects = pixman_region32_rectangles(&output->damage, &count);
+
+    /* collapse damage into one rect if the disjoint rectangles exceed
+     * VT_OUTPUT_MAX_DAMAGE_RECTS */
+    if (count > VT_OUTPUT_MAX_DAMAGE_RECTS) {
+      output->cached_damage[0] = *pixman_region32_extents(&output->damage);
+      output->n_damage_boxes = 1;
+    } else {
+      memcpy(output->cached_damage, rects, count * sizeof(*rects));
+      output->n_damage_boxes = count;
+    }
+
+    output->needs_damage_rebuild = false;
     r->impl.begin_frame(r, output);
 
-    // TODO: Damage pass
+    /* prepares the stencil mask that prevents subsequent real pixel-writes
+     * outside of damage */
+    r->impl.stencil_damage_pass(r, output);
+
     _composite_pass(scene, output);
 
     r->impl.end_frame(r, output, output->cached_damage, output->n_damage_boxes);
   }
+  output->had_scanout_layers = has_scanout;
 
   pixman_region32_clear(&output->damage);
   output->needs_repaint = false;
@@ -643,10 +746,12 @@ void vt_scene_node_set_position(struct vt_scene_node_t *node, int32_t x,
   if (node->x == x && node->y == y)
     return;
 
+  vt_scene_node_damage_whole(node->comp, node);
   node->x = x;
   node->y = y;
 
   vt_scene_node_mark_geometry_dirty(node);
+  vt_scene_node_damage_whole(node->comp, node);
   _scene_node_update_surface_feedback(node);
 }
 
