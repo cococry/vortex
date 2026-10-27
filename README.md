@@ -57,30 +57,6 @@ For example, build only the DRM sink backend with OpenGL rendering:
 meson setup build --prefix="$HOME/.local" -Dbackends=drm -Drenderers=opengl
 ```
 
-Build only the Wayland sink backend with Vulkan rendering:
-
-```bash
-meson setup build --prefix="$HOME/.local" -Dbackends=wayland -Drenderers=vulkan
-```
-
-Build only the X11 sink backend with OpenGL rendering:
-
-```bash
-meson setup build --prefix="$HOME/.local" -Dbackends=x11 -Drenderers=opengl
-meson compile -C build
-meson install -C build
-./build/vortex -b x11
-```
-
-The X11 sink creates resizable windows, supports `--virtual-outputs`, and forwards
-keyboard, pointer, button, and wheel events to Wayland clients. It uses the common
-EGL/OpenGL renderer, including SHM and DMA-BUF imports where supported by the
-driver. Frame callbacks follow X11 Present MSC notifications, with a one-shot
-60 Hz timer fallback when Present is unavailable. These callbacks pace rendering;
-they do not report actual pixel presentation completion. Idle outputs do not run
-a periodic repaint timer.
-An Xcursor theme must be installed, as for the other sinks.
-
 Build all sink backends and rendering backends:
 
 ```bash
@@ -109,12 +85,6 @@ WAYLAND_DISPLAY=wayland-1 weston-simple-shm
 > [!NOTE]
 > Use the wayland display that is logged by the output of **./vortex --verbose** as the WAYLAND_DISPLAY variable
 > when starting clients.
-
-
-> [!NOTE]
-> The sink backend is selected automatically: Wayland when `WAYLAND_DISPLAY`
-> is set, otherwise X11 when `DISPLAY` is set, otherwise DRM/KMS.
-> Use `-b x11` to select X11 explicitly when both display variables are set.
 
 Supported sink backends are:
 - *DRM/KMS* (hardware scanout)
