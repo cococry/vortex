@@ -767,7 +767,12 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
   c->renderer->comp = c;
 
   wl_list_init(&c->renderer->buffer_attachments);
+
+#if VT_HAS_OPENGL
   vt_renderer_implement(c->renderer, VT_RENDERING_BACKEND_EGL_OPENGL);
+#elif VT_HAS_VULKAN
+  vt_renderer_implement(c->renderer, VT_RENDERING_BACKEND_VULKAN);
+#endif
 
   c->input_backend = VT_ALLOC(c, sizeof(*c->input_backend));
   if (!c->input_backend)

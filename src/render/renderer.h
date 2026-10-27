@@ -30,6 +30,7 @@ struct vt_buffer_t;
 
 enum vt_rendering_backend_t {
   VT_RENDERING_BACKEND_EGL_OPENGL = 0,
+  VT_RENDERING_BACKEND_VULKAN,
 };
 
 struct vt_renderer_interface_t {

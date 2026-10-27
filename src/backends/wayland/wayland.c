@@ -21,7 +21,6 @@
  */
 
 #define _GNU_SOURCE
-#include "wayland.h"
 
 #include <fcntl.h>
 #include <pthread.h>
@@ -202,8 +201,18 @@ static struct vt_buffer_t *
 backend_allocate_buffer_wl(struct vt_backend_t *backend, uint32_t width,
                            uint32_t height, uint32_t format);
 
+static bool backend_is_dmabuf_importable_wl(struct vt_backend_t     *backend,
+                                            struct vt_dmabuf_attr_t *attr,
+                                            int32_t                  device_fd);
+
 static bool backend_clear_buffer_wl(struct vt_backend_t *backend,
                                     struct vt_buffer_t *buf, uint32_t color);
+
+static bool backend_handle_frame_wl(struct vt_backend_t *backend,
+                                    struct vt_output_t  *output);
+static bool backend_terminate_wl(struct vt_backend_t *backend);
+static bool backend_prepare_output_frame_wl(struct vt_backend_t *backend,
+                                            struct vt_output_t  *output);
 
 static const char wl_allocator_owner;
 
@@ -1022,9 +1031,9 @@ static bool backend_clear_buffer_wl(struct vt_backend_t *backend,
   return true;
 }
 
-bool backend_is_dmabuf_importable_wl(struct vt_backend_t     *backend,
-                                     struct vt_dmabuf_attr_t *attr,
-                                     int32_t                  device_fd) {
+static bool backend_is_dmabuf_importable_wl(struct vt_backend_t     *backend,
+                                            struct vt_dmabuf_attr_t *attr,
+                                            int32_t device_fd) {
   (void)backend;
   (void)attr;
   (void)device_fd;
@@ -1053,8 +1062,8 @@ bool backend_implement_wl(struct vt_compositor_t *comp) {
   return true;
 }
 
-bool backend_handle_frame_wl(struct vt_backend_t *backend,
-                             struct vt_output_t  *output) {
+static bool backend_handle_frame_wl(struct vt_backend_t *backend,
+                                    struct vt_output_t  *output) {
   if (!backend || !output)
     return false;
 
@@ -1066,7 +1075,7 @@ bool backend_handle_frame_wl(struct vt_backend_t *backend,
   return true;
 }
 
-bool backend_terminate_wl(struct vt_backend_t *backend) {
+static bool backend_terminate_wl(struct vt_backend_t *backend) {
   if (!backend || !backend->user_data)
     return false;
 
@@ -1107,8 +1116,8 @@ bool backend_terminate_wl(struct vt_backend_t *backend) {
   return true;
 }
 
-bool backend_prepare_output_frame_wl(struct vt_backend_t *backend,
-                                     struct vt_output_t  *output) {
+static bool backend_prepare_output_frame_wl(struct vt_backend_t *backend,
+                                            struct vt_output_t  *output) {
   (void)backend;
   wayland_output_state_t *wl_output =
       BACKEND_DATA(output, wayland_output_state_t);

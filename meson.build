@@ -302,7 +302,11 @@ if build_opengl
   )
 endif
 
-# TODO: Vulkan
+if build_vulkan 
+  vortex_src += files(
+    'src/render/vk/vulkan.c',
+  )
+endif
 #
 # ============================================================
 # Input backend implementations
