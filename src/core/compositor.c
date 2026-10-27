@@ -788,11 +788,14 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
   if (!backend_str) {
     if (getenv("WAYLAND_DISPLAY"))
       backend_str = "wl";
+    else if (getenv("DISPLAY"))
+      backend_str = "x11";
     else
       backend_str = "drm";
   }
 
-  if (strcmp(backend_str, "wl") == 0 && !c->n_virtual_outputs)
+  if ((strcmp(backend_str, "wl") == 0 || strcmp(backend_str, "x11") == 0) &&
+      !c->n_virtual_outputs)
     c->n_virtual_outputs = 1;
 
   _vt_comp_load_backend(c, backend_str, c->_cmd_line_backend_path);
@@ -830,6 +833,9 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
     break;
   case VT_BACKEND_WAYLAND:
     input_backend = VT_INPUT_WAYLAND;
+    break;
+  case VT_BACKEND_X11:
+    input_backend = VT_INPUT_X11;
     break;
   case VT_BACKEND_SURFACELESS:
     // headless: no input devices to drive

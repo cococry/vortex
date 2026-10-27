@@ -158,6 +158,7 @@ bool vt_output_init_geom(struct vt_output_t *output, uint32_t width,
 bool vt_output_track_presented_surface(struct vt_output_t  *output,
                                        struct vt_surface_t *surface);
 
+/* retains use; providing a NULL use restores the compositor-owned fallback. */
 void vt_output_set_background(struct vt_output_t     *output,
                               struct vt_buffer_use_t *use);
 

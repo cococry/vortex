@@ -20,6 +20,7 @@ renderers = get_option('renderers')
 
 build_drm = sink_backends in ['drm', 'all']
 build_wayland = sink_backends in ['wayland', 'all']
+build_x11 = sink_backends in ['x11', 'all']
 
 build_opengl = renderers in ['opengl', 'all']
 build_vulkan = renderers in ['vulkan', 'all']
@@ -237,6 +238,7 @@ conf_data.set10('VT_HAS_OPENGL', build_opengl)
 conf_data.set10('VT_HAS_VULKAN', build_vulkan)
 conf_data.set10('VT_HAS_LIBINPUT', build_drm)
 conf_data.set10('VT_HAS_WAYLAND_INPUT', build_wayland)
+conf_data.set10('VT_HAS_X11_INPUT', build_x11)
 
 configure_file(
   input: 'gen/config.h.in',
@@ -325,6 +327,11 @@ if build_wayland
   deps += [
     dependency('wayland-client'),
   ]
+endif
+
+if build_x11
+  vortex_src += files('src/input/backends/x11/x11_input.c')
+  deps += [dependency('x11'), dependency('x11-xcb'), dependency('xkbcommon-x11')]
 endif
 
 # ============================================================

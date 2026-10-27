@@ -63,6 +63,7 @@ enum vt_backend_platform_t {
   VT_BACKEND_DRM_GBM = 0,
   VT_BACKEND_WAYLAND,
   VT_BACKEND_SURFACELESS,
+  VT_BACKEND_X11,
 };
 
 struct vt_region_t {
@@ -78,11 +79,6 @@ struct vt_backend_interface_t {
   struct vt_buffer_t *(*allocate_buffer)(struct vt_backend_t *backend,
                                          uint32_t width, uint32_t height,
                                          uint32_t format);
-
-  /* Replaces *buf only on success; old references remain valid. Contents
-   * after resizing are unspecified. Equal dimensions are a no-op. */
-  bool (*resize_buffer)(struct vt_backend_t *backend, struct vt_buffer_t **buf,
-                        uint32_t width, uint32_t height);
 
   bool (*clear_buffer)(struct vt_backend_t *backend, struct vt_buffer_t *buf,
                        uint32_t col);

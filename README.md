@@ -18,7 +18,7 @@ while components like the desktop shell are intentionally abstracted away from i
 Make sure you have the required dependencies installed (debian packages shown):
 
 ```bash
-sudo apt install meson ninja-build libwayland-dev wayland-protocols libdrm-dev libgbm-dev libegl-dev libgl-dev libwayland-egl-backend-dev libinput-dev libudev-dev libxcursor-dev xcursor-themes libxkbcommon-dev libpixman-1-dev libseat-dev libliftoff-dev libcglm-dev
+sudo apt install meson ninja-build libwayland-dev wayland-protocols libdrm-dev libgbm-dev libegl-dev libgl-dev libwayland-egl-backend-dev libinput-dev libudev-dev libxcursor-dev xcursor-themes libxkbcommon-dev libpixman-1-dev libseat-dev libliftoff-dev libcglm-dev libx11-dev libx11-xcb-dev libxkbcommon-x11-dev libxcb-present-dev
 ```
 
 For Vulkan rendering support, additionally install:
@@ -44,7 +44,7 @@ Vortex supports configuring which sink backends and rendering backends are built
 
 | Option | Values | Default | Description |
 |--------|--------|---------|-------------|
-| `-Dbackends` | `drm`, `wayland`, `all` | `all` | Specify which sink backends to build |
+| `-Dbackends` | `drm`, `wayland`, `x11`, `all` | `all` | Specify which sink backends to build |
 | `-Drenderers` | `opengl`, `vulkan`, `all` | `opengl` | Specify which rendering backends to build |
 
 The `backends` option controls which sink backend `.so` modules are compiled and installed.
@@ -62,6 +62,24 @@ Build only the Wayland sink backend with Vulkan rendering:
 ```bash
 meson setup build --prefix="$HOME/.local" -Dbackends=wayland -Drenderers=vulkan
 ```
+
+Build only the X11 sink backend with OpenGL rendering:
+
+```bash
+meson setup build --prefix="$HOME/.local" -Dbackends=x11 -Drenderers=opengl
+meson compile -C build
+meson install -C build
+./build/vortex -b x11
+```
+
+The X11 sink creates resizable windows, supports `--virtual-outputs`, and forwards
+keyboard, pointer, button, and wheel events to Wayland clients. It uses the common
+EGL/OpenGL renderer, including SHM and DMA-BUF imports where supported by the
+driver. Frame callbacks follow X11 Present MSC notifications, with a one-shot
+60 Hz timer fallback when Present is unavailable. These callbacks pace rendering;
+they do not report actual pixel presentation completion. Idle outputs do not run
+a periodic repaint timer.
+An Xcursor theme must be installed, as for the other sinks.
 
 Build all sink backends and rendering backends:
 
@@ -94,11 +112,14 @@ WAYLAND_DISPLAY=wayland-1 weston-simple-shm
 
 
 > [!NOTE]
->  The sink backend is automatically chosen at runtime, depending on context.
+> The sink backend is selected automatically: Wayland when `WAYLAND_DISPLAY`
+> is set, otherwise X11 when `DISPLAY` is set, otherwise DRM/KMS.
+> Use `-b x11` to select X11 explicitly when both display variables are set.
 
 Supported sink backends are:
 - *DRM/KMS* (hardware scanout)
 - *Wayland* (nested session)
+- *X11* (nested session)
 
 ---
 
@@ -120,7 +141,7 @@ vortex [option:s] (value:s)
 | `-lf, --logfile` | Write logs to a logfile located in:<br>`~/.local/state/vortex/logs/` or `$XDG_STATE_HOME/vortex/logs` |
 | `-q, --quiet` | Run in quiet mode (no logging) |
 | `-vo, --virtual-outputs [val]` | Specify the number of virtual outputs (windows) in nested mode |
-| `-b, --backend [val]` | Specify the compositor’s sink backend.<br>Valid options: `drm`, `wl`. Example:<br>`vortex -b drm` |
+| `-b, --backend [val]` | Specify the compositor’s sink backend.<br>Valid options: `drm`, `wl`, `x11`. Example:<br>`vortex -b drm` |
 | `-bp, --backend-path [val]` | Specify the **path to a `.so` file** to load as a custom sink backend |
 | `-expt,  --exclude-protocol [val(s)]` | Specify the optional protocols (space seperated) you wish to not support during runtime |
 
@@ -133,6 +154,7 @@ The compositor supports **pluggable sink backends** that can be discovered at ru
 Valid options for backends are:
   - drm
   - wl
+  - x11
 
 You can specify one directly:
 

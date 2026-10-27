@@ -9,3 +9,4 @@
 
 #mesondefine VT_HAS_LIBINPUT
 #mesondefine VT_HAS_WAYLAND_INPUT
+#mesondefine VT_HAS_X11_INPUT

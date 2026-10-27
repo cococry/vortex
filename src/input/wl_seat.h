@@ -157,3 +157,5 @@ void vt_seat_handle_surface_unmapped(struct vt_seat_t    *seat,
 void vt_seat_repick_pointer_focus(struct vt_seat_t *seat);
 
 bool vt_seat_terminate(struct vt_seat_t *seat);
+
+void vt_seat_refresh_keymap(struct vt_seat_t *seat);

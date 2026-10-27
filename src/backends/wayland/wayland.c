@@ -56,151 +56,13 @@
 
 #define _SUBSYS_NAME "WL"
 
-/* CPU storage stays allocated across interactive resizes. The renderer imports
- * this through get_shm; no parent wl_buffer or roundtrip is needed. */
-struct wl_allocated_buffer {
+struct vt_wl_buffer_attachment_t {
   void    *pixels;
   size_t   capacity;
   uint32_t format;
   uint32_t clear_pixel;
   bool     solid;
 };
-static const char wl_allocator_owner;
-
-static void _wl_allocated_destroy(struct vt_buffer_t *buf, const void *owner,
-                                  void *ptr) {
-  (void)buf;
-  (void)owner;
-  struct wl_allocated_buffer *data = ptr;
-  free(data->pixels);
-  free(data);
-}
-
-static const struct vt_buffer_attachment_implementation_t wl_allocator_impl = {
-    .destroy = _wl_allocated_destroy,
-};
-
-static struct wl_allocated_buffer *_wl_allocated_data(struct vt_buffer_t *buf) {
-  struct vt_buffer_attachment_t *a =
-      vt_buffer_find_attachment(buf, &wl_allocator_owner, &wl_allocator_impl);
-  return a ? a->data : NULL;
-}
-
-static bool _wl_allocated_get_shm(struct vt_buffer_t   *buf,
-                                  struct vt_shm_attr_t *attr) {
-  struct wl_allocated_buffer *data = _wl_allocated_data(buf);
-  if (!data || !attr)
-    return false;
-  *attr = (struct vt_shm_attr_t){
-      .data = data->pixels,
-      .size = data->capacity,
-      .width = buf->width,
-      .height = buf->height,
-      .stride = buf->width * 4,
-      .format = data->format == DRM_FORMAT_XRGB8888 ? WL_SHM_FORMAT_XRGB8888
-                                                    : WL_SHM_FORMAT_ARGB8888,
-  };
-  return true;
-}
-
-static const struct vt_buffer_implementation_t wl_allocated_impl = {
-    .get_shm = _wl_allocated_get_shm,
-};
-
-static bool _wl_buffer_size(uint32_t width, uint32_t height, size_t *size) {
-  if (!width || !height || width > INT32_MAX / 4 || height > INT32_MAX ||
-      height > SIZE_MAX / ((size_t)width * 4))
-    return false;
-  *size = (size_t)width * height * 4;
-  return true;
-}
-
-static struct vt_buffer_t *
-backend_allocate_buffer_wl(struct vt_backend_t *backend, uint32_t width,
-                           uint32_t height, uint32_t format) {
-  size_t size;
-  if (!_wl_buffer_size(width, height, &size) ||
-      (format != DRM_FORMAT_XRGB8888 && format != DRM_FORMAT_ARGB8888))
-    return NULL;
-  struct wl_allocated_buffer *data = calloc(1, sizeof(*data));
-  if (!data)
-    return NULL;
-  data->pixels = calloc(1, size);
-  data->capacity = size;
-  data->format = format;
-  struct vt_buffer_t *buf =
-      data->pixels
-          ? vt_buffer_create(backend->comp, width, height, &wl_allocated_impl)
-          : NULL;
-  if (!buf || !vt_buffer_add_attachment(buf, &wl_allocator_owner, data,
-                                        &wl_allocator_impl)) {
-    if (buf)
-      vt_buffer_unref(&buf);
-    _wl_allocated_destroy(NULL, NULL, data);
-    return NULL;
-  }
-  return buf;
-}
-
-static bool backend_clear_buffer_wl(struct vt_backend_t *backend,
-                                    struct vt_buffer_t *buf, uint32_t color) {
-  (void)backend;
-  struct wl_allocated_buffer *data = buf ? _wl_allocated_data(buf) : NULL;
-  if (!data || buf->uses)
-    return false;
-  uint32_t *pixels = data->pixels;
-  size_t    count = data->capacity / sizeof(*pixels);
-  uint32_t  pixel = 0xff000000u | (color & 0xffffffu);
-  if (data->solid && data->clear_pixel == pixel)
-    return true;
-  for (size_t i = 0; i < count; ++i)
-    pixels[i] = pixel;
-  data->solid = true;
-  data->clear_pixel = pixel;
-  return true;
-}
-
-static bool backend_resize_buffer_wl(struct vt_backend_t *backend,
-                                     struct vt_buffer_t **buf, uint32_t width,
-                                     uint32_t height) {
-  size_t size;
-  if (!buf || !*buf || !_wl_buffer_size(width, height, &size))
-    return false;
-  struct wl_allocated_buffer *data = _wl_allocated_data(*buf);
-  if (!data)
-    return false;
-  if ((*buf)->width == width && (*buf)->height == height)
-    return true;
-  if ((*buf)->uses || (*buf)->refcount > 1) {
-    struct vt_buffer_t *replacement =
-        backend_allocate_buffer_wl(backend, width, height, data->format);
-    if (!replacement)
-      return false;
-    vt_buffer_unref(buf);
-    *buf = replacement;
-    return true;
-  }
-  if (size > data->capacity) {
-    size_t capacity = data->capacity;
-    while (capacity < size && capacity <= SIZE_MAX / 2)
-      capacity *= 2;
-    if (capacity < size)
-      capacity = size;
-    void *pixels = realloc(data->pixels, capacity);
-    if (!pixels)
-      return false;
-    if (data->solid) {
-      uint32_t *tail = pixels;
-      for (size_t i = data->capacity / 4; i < capacity / 4; ++i)
-        tail[i] = data->clear_pixel;
-    }
-    data->pixels = pixels;
-    data->capacity = capacity;
-  }
-  (*buf)->width = width;
-  (*buf)->height = height;
-  return true;
-}
 
 typedef struct {
   bool                    nested;
@@ -246,6 +108,24 @@ typedef struct {
   struct vt_output_mode_t *current_mode;
 } parent_physical_output_t;
 
+#define _vt_fourcc_code(a, b, c, d)                                            \
+  ((__u32)(a) | ((__u32)(b) << 8) | ((__u32)(c) << 16) | ((__u32)(d) << 24))
+#define _VT_DRM_FORMAT_ARGB8888                                                \
+  _vt_fourcc_code('A', 'R', '2', '4') /* [31:0] A:R:G:B 8:8:8:8 little endian  \
+                                       */
+#define _VT_DRM_FORMAT_XRGB8888                                                \
+  _vt_fourcc_code('X', 'R', '2', '4') /* [31:0] A:R:G:B 8:8:8:8 little endian  \
+                                       */
+
+static bool _wl_set_fake_output_mode(struct vt_output_t *output, int32_t width,
+                                     int32_t height, int32_t refresh);
+
+static void output_sync_callback(void *data, struct wl_callback *callback,
+                                 uint32_t unused);
+
+static void _wl_register_output(struct wl_registry      *reg,
+                                wayland_backend_state_t *backend, uint32_t id);
+
 static void _wl_parent_registry_add(void *data, struct wl_registry *reg,
                                     uint32_t id, const char *iface,
                                     uint32_t ver);
@@ -256,9 +136,8 @@ static void _wl_parent_registry_remove(void *data, struct wl_registry *reg,
 static void _wl_parent_xdg_wm_base_ping(void *data, struct xdg_wm_base *wm,
                                         uint32_t serial);
 
-static void _wl_parent_xdg_surface_configure(void               *data,
-                                             struct xdg_surface *surf,
-                                             uint32_t            serial);
+static void _output_handle_render_resize(struct vt_output_t *output, int32_t w,
+                                         int32_t h);
 
 static void _wl_parent_xdg_toplevel_configure(void                *data,
                                               struct xdg_toplevel *toplevel,
@@ -266,6 +145,10 @@ static void _wl_parent_xdg_toplevel_configure(void                *data,
                                               struct wl_array *states);
 
 static bool _wl_parent_flush(wayland_backend_state_t *wl);
+
+static void _wl_parent_xdg_surface_configure(void               *data,
+                                             struct xdg_surface *surf,
+                                             uint32_t            serial);
 
 static void _wl_parent_xdg_toplevel_close(void                *data,
                                           struct xdg_toplevel *toplevel);
@@ -275,55 +158,65 @@ static int _wl_parent_dispatch(int fd, uint32_t mask, void *data);
 static void _wl_parent_frame_done(void *data, struct wl_callback *wl_callback,
                                   uint32_t time);
 
-static bool _wl_backend_destroy_output(struct vt_backend_t *backend,
-                                       struct vt_output_t  *output);
-
-static bool _wl_init_dmabuf_feedback(struct vt_compositor_t      *comp,
-                                     struct vt_dmabuf_feedback_t *fb);
-
-static bool _wl_backend_create_output(struct vt_backend_t *backend,
-                                      struct vt_output_t *output, void *data);
-
-static bool _wl_set_fake_output_mode(struct vt_output_t *output, int32_t width,
-                                     int32_t height, int32_t refresh);
-
-static struct vt_output_mode_t *_wl_find_output_mode(struct wl_list *list,
-                                                     int32_t         width,
-                                                     int32_t         height,
-                                                     uint32_t        refresh);
-
-struct vt_output_implementation_t wl_output_impl = {.update_cursor_image = NULL,
-                                                    .move_cursor = NULL};
-
-static bool _wl_set_fake_output_mode(struct vt_output_t *output, int32_t width,
-                                     int32_t height, int32_t refresh) {
-  struct vt_output_mode_t *mode =
-      _wl_find_output_mode(&output->physical.modes, width, height, refresh);
-
-  if (!mode)
-    return false;
-
-  struct vt_output_mode_t *m;
-  wl_list_for_each(m, &output->physical.modes, link) {
-    m->flags &= ~(WL_OUTPUT_MODE_CURRENT | WL_OUTPUT_MODE_PREFERRED);
-  }
-
-  mode->flags = WL_OUTPUT_MODE_CURRENT | WL_OUTPUT_MODE_PREFERRED;
-
-  return true;
-}
-
 static bool _wl_backend_init_active_outputs(struct vt_backend_t *backend);
+
+static const char *wl_output_transform_name(int32_t transform);
 
 static void _wl_parent_output_geometry(
     void *data, struct wl_output *output_proxy, int32_t x, int32_t y,
     int32_t physical_width, int32_t physical_height, int32_t subpixel,
     const char *make, const char *model, int32_t transform);
 
+static struct vt_output_mode_t *_wl_find_output_mode(struct wl_list *list,
+                                                     int32_t         width,
+                                                     int32_t         height,
+                                                     uint32_t        refresh);
+
 static void _wl_parent_output_mode(void             *data,
                                    struct wl_output *wl_output_proxy,
                                    uint32_t flags, int32_t width,
                                    int32_t height, int32_t refresh);
+
+static bool _wl_backend_create_output(struct vt_backend_t *backend,
+                                      struct vt_output_t *output, void *data);
+
+static bool _wl_backend_destroy_output(struct vt_backend_t *backend,
+                                       struct vt_output_t  *output);
+
+static bool _wl_init_dmabuf_feedback(struct vt_compositor_t      *comp,
+                                     struct vt_dmabuf_feedback_t *fb);
+
+static void _wl_buffer_attachment_destroy(struct vt_buffer_t *buf,
+                                          const void *owner, void *ptr);
+
+static struct vt_wl_buffer_attachment_t *
+_wl_buffer_attachment_data(struct vt_buffer_t *buf);
+
+static bool _wl_buffer_attachment_get_shm(struct vt_buffer_t   *buf,
+                                          struct vt_shm_attr_t *attr);
+
+static bool _wl_buffer_check_size(uint32_t width, uint32_t height,
+                                  size_t *size);
+
+static struct vt_buffer_t *
+backend_allocate_buffer_wl(struct vt_backend_t *backend, uint32_t width,
+                           uint32_t height, uint32_t format);
+
+static bool backend_clear_buffer_wl(struct vt_backend_t *backend,
+                                    struct vt_buffer_t *buf, uint32_t color);
+
+static const char wl_allocator_owner;
+
+static const struct vt_buffer_attachment_implementation_t wl_allocator_impl = {
+    .destroy = _wl_buffer_attachment_destroy,
+};
+
+static const struct vt_buffer_implementation_t wl_allocated_impl = {
+    .get_shm = _wl_buffer_attachment_get_shm,
+};
+
+static struct vt_output_implementation_t wl_output_impl = {
+    .update_cursor_image = NULL, .move_cursor = NULL};
 
 static struct wl_callback_listener parent_surface_frame_listener = {
     .done = _wl_parent_frame_done};
@@ -350,6 +243,27 @@ static const struct xdg_toplevel_listener parent_toplevel_listener = {
 static const struct wl_output_listener output_listener = {
     .geometry = _wl_parent_output_geometry, .mode = _wl_parent_output_mode};
 
+static const struct wl_callback_listener output_sync_listener = {
+    output_sync_callback};
+
+static bool _wl_set_fake_output_mode(struct vt_output_t *output, int32_t width,
+                                     int32_t height, int32_t refresh) {
+  struct vt_output_mode_t *mode =
+      _wl_find_output_mode(&output->physical.modes, width, height, refresh);
+
+  if (!mode)
+    return false;
+
+  struct vt_output_mode_t *m;
+  wl_list_for_each(m, &output->physical.modes, link) {
+    m->flags &= ~(WL_OUTPUT_MODE_CURRENT | WL_OUTPUT_MODE_PREFERRED);
+  }
+
+  mode->flags = WL_OUTPUT_MODE_CURRENT | WL_OUTPUT_MODE_PREFERRED;
+
+  return true;
+}
+
 static void output_sync_callback(void *data, struct wl_callback *callback,
                                  uint32_t unused) {
   (void)unused;
@@ -359,9 +273,6 @@ static void output_sync_callback(void *data, struct wl_callback *callback,
   wl_callback_destroy(callback);
   output->sync_cb = NULL;
 }
-
-static const struct wl_callback_listener output_sync_listener = {
-    output_sync_callback};
 
 static void _wl_register_output(struct wl_registry      *reg,
                                 wayland_backend_state_t *backend, uint32_t id) {
@@ -388,8 +299,9 @@ static void _wl_register_output(struct wl_registry      *reg,
   wl_callback_add_listener(output->sync_cb, &output_sync_listener, output);
 }
 
-void _wl_parent_registry_add(void *data, struct wl_registry *reg, uint32_t id,
-                             const char *iface, uint32_t ver) {
+static void _wl_parent_registry_add(void *data, struct wl_registry *reg,
+                                    uint32_t id, const char *iface,
+                                    uint32_t ver) {
   wayland_backend_state_t *wl = data;
   if (strcmp(iface, wl_compositor_interface.name) == 0) {
     wl->parent_compositor =
@@ -406,16 +318,16 @@ void _wl_parent_registry_add(void *data, struct wl_registry *reg, uint32_t id,
   }
 }
 
-void _wl_parent_registry_remove(void *data, struct wl_registry *reg,
-                                uint32_t id) {
+static void _wl_parent_registry_remove(void *data, struct wl_registry *reg,
+                                       uint32_t id) {
   // who cares xd
   (void)data;
   (void)reg;
   (void)id;
 }
 
-void _wl_parent_xdg_wm_base_ping(void *data, struct xdg_wm_base *wm,
-                                 uint32_t serial) {
+static void _wl_parent_xdg_wm_base_ping(void *data, struct xdg_wm_base *wm,
+                                        uint32_t serial) {
   (void)data;
   // Pong that scheiße
   xdg_wm_base_pong(wm, serial);
@@ -441,9 +353,10 @@ static void _output_handle_render_resize(struct vt_output_t *output, int32_t w,
   vt_comp_schedule_repaint(r->comp, output);
 }
 
-void _wl_parent_xdg_toplevel_configure(void                *data,
-                                       struct xdg_toplevel *toplevel, int32_t w,
-                                       int32_t h, struct wl_array *states) {
+static void _wl_parent_xdg_toplevel_configure(void                *data,
+                                              struct xdg_toplevel *toplevel,
+                                              int32_t w, int32_t h,
+                                              struct wl_array *states) {
   (void)toplevel;
   (void)states;
   struct vt_output_t *output = data;
@@ -482,8 +395,9 @@ static bool _wl_parent_flush(wayland_backend_state_t *wl) {
   return false;
 }
 
-void _wl_parent_xdg_surface_configure(void *data, struct xdg_surface *surf,
-                                      uint32_t serial) {
+static void _wl_parent_xdg_surface_configure(void               *data,
+                                             struct xdg_surface *surf,
+                                             uint32_t            serial) {
   struct vt_output_t *output = data;
   // We must acknowledge the size from the request
   xdg_surface_ack_configure(surf, serial);
@@ -498,7 +412,8 @@ void _wl_parent_xdg_surface_configure(void *data, struct xdg_surface *surf,
   }
 }
 
-void _wl_parent_xdg_toplevel_close(void *data, struct xdg_toplevel *toplevel) {
+static void _wl_parent_xdg_toplevel_close(void                *data,
+                                          struct xdg_toplevel *toplevel) {
   (void)toplevel;
   struct vt_output_t *output = data;
   // destroying the output here leaves its pending frame callbacks dangling,
@@ -506,7 +421,7 @@ void _wl_parent_xdg_toplevel_close(void *data, struct xdg_toplevel *toplevel) {
   output->backend->comp->running = false;
 }
 
-int _wl_parent_dispatch(int fd, uint32_t mask, void *data) {
+static int _wl_parent_dispatch(int fd, uint32_t mask, void *data) {
   (void)fd;
 
   wayland_backend_state_t *wl = data;
@@ -533,8 +448,8 @@ int _wl_parent_dispatch(int fd, uint32_t mask, void *data) {
   return 0;
 }
 
-void _wl_parent_frame_done(void *data, struct wl_callback *wl_callback,
-                           uint32_t time) {
+static void _wl_parent_frame_done(void *data, struct wl_callback *wl_callback,
+                                  uint32_t time) {
   if (!wl_callback || !data)
     return;
   struct vt_output_t *output = (struct vt_output_t *)data;
@@ -559,7 +474,7 @@ void _wl_parent_frame_done(void *data, struct wl_callback *wl_callback,
     vt_comp_schedule_repaint(comp, output);
 }
 
-bool _wl_backend_init_active_outputs(struct vt_backend_t *backend) {
+static bool _wl_backend_init_active_outputs(struct vt_backend_t *backend) {
   if (!backend)
     return false;
 
@@ -713,8 +628,8 @@ static void _wl_parent_output_mode(void             *data,
   mode->flags = flags;
 }
 
-bool _wl_backend_create_output(struct vt_backend_t *backend,
-                               struct vt_output_t *output, void *data) {
+static bool _wl_backend_create_output(struct vt_backend_t *backend,
+                                      struct vt_output_t *output, void *data) {
   (void)data;
   if (!backend || !output)
     return false;
@@ -796,8 +711,8 @@ bool _wl_backend_create_output(struct vt_backend_t *backend,
   return true;
 }
 
-bool _wl_backend_destroy_output(struct vt_backend_t *backend,
-                                struct vt_output_t  *output) {
+static bool _wl_backend_destroy_output(struct vt_backend_t *backend,
+                                       struct vt_output_t  *output) {
   if (!output || !output->user_data)
     return false;
 
@@ -840,17 +755,8 @@ bool _wl_backend_destroy_output(struct vt_backend_t *backend,
   return true;
 }
 
-#define _vt_fourcc_code(a, b, c, d)                                            \
-  ((__u32)(a) | ((__u32)(b) << 8) | ((__u32)(c) << 16) | ((__u32)(d) << 24))
-
-#define _VT_DRM_FORMAT_ARGB8888                                                \
-  _vt_fourcc_code('A', 'R', '2', '4') /* [31:0] A:R:G:B 8:8:8:8 little endian  \
-                                       */
-#define _VT_DRM_FORMAT_XRGB8888                                                \
-  _vt_fourcc_code('X', 'R', '2', '4') /* [31:0] A:R:G:B 8:8:8:8 little endian  \
-                                       */
-bool _wl_init_dmabuf_feedback(struct vt_compositor_t      *comp,
-                              struct vt_dmabuf_feedback_t *fb) {
+static bool _wl_init_dmabuf_feedback(struct vt_compositor_t      *comp,
+                                     struct vt_dmabuf_feedback_t *fb) {
   fb->dev_main = calloc(1, sizeof(*fb->dev_main));
   dev_t       main_dev;
   struct stat st;
@@ -893,6 +799,54 @@ bool _wl_init_dmabuf_feedback(struct vt_compositor_t      *comp,
                                        DRM_FORMAT_MOD_INVALID))
       return false;
   }
+  return true;
+}
+
+static void _wl_buffer_attachment_destroy(struct vt_buffer_t *buf,
+                                          const void *owner, void *ptr) {
+  (void)buf;
+  (void)owner;
+  struct vt_wl_buffer_attachment_t *data = ptr;
+  free(data->pixels);
+  free(data);
+}
+
+static struct vt_wl_buffer_attachment_t *
+_wl_buffer_attachment_data(struct vt_buffer_t *buf) {
+  struct vt_buffer_attachment_t *a =
+      vt_buffer_find_attachment(buf, &wl_allocator_owner, &wl_allocator_impl);
+  return a ? a->data : NULL;
+}
+
+static bool _wl_buffer_attachment_get_shm(struct vt_buffer_t   *buf,
+                                          struct vt_shm_attr_t *attr) {
+  struct vt_wl_buffer_attachment_t *data = _wl_buffer_attachment_data(buf);
+  if (!data || !attr)
+    return false;
+
+  /* this just returns allocated, compositor owned pixel memory created by
+   * backend->impl->allocate_buffer. the compositor-owned buffers that implement
+   * get_shm are not really returning real shm that was retrieved by some
+   * external source, but the CPU-backed pixel buffers that got created by us.
+   */
+  *attr = (struct vt_shm_attr_t){
+      .data = data->pixels,
+      .size = data->capacity,
+      .width = buf->width,
+      .height = buf->height,
+      .stride = buf->width * 4,
+      .format = data->format == DRM_FORMAT_XRGB8888 ? WL_SHM_FORMAT_XRGB8888
+                                                    : WL_SHM_FORMAT_ARGB8888,
+  };
+  return true;
+}
+
+static bool _wl_buffer_check_size(uint32_t width, uint32_t height,
+                                  size_t *size) {
+  if (!width || !height || width > INT32_MAX / 4 || height > INT32_MAX ||
+      height > SIZE_MAX / ((size_t)width * 4))
+    return false;
+  *size = (size_t)width * height * 4;
   return true;
 }
 
@@ -1012,6 +966,62 @@ bool backend_init_wl(struct vt_backend_t *backend) {
   return true;
 }
 
+static struct vt_buffer_t *
+backend_allocate_buffer_wl(struct vt_backend_t *backend, uint32_t width,
+                           uint32_t height, uint32_t format) {
+  size_t size;
+  if (!_wl_buffer_check_size(width, height, &size) ||
+      (format != DRM_FORMAT_XRGB8888 && format != DRM_FORMAT_ARGB8888))
+    return NULL;
+
+  struct vt_wl_buffer_attachment_t *data = calloc(1, sizeof(*data));
+  if (!data)
+    return NULL;
+  data->pixels = calloc(1, size);
+  data->capacity = size;
+  data->format = format;
+
+  /* create buffer */
+  struct vt_buffer_t *buf =
+      data->pixels
+          ? vt_buffer_create(backend->comp, width, height, &wl_allocated_impl)
+          : NULL;
+
+  /* add wl attachment */
+  if (!buf || !vt_buffer_add_attachment(buf, &wl_allocator_owner, data,
+                                        &wl_allocator_impl)) {
+    if (buf)
+      vt_buffer_unref(&buf);
+    _wl_buffer_attachment_destroy(NULL, NULL, data);
+    return NULL;
+  }
+  return buf;
+}
+
+static bool backend_clear_buffer_wl(struct vt_backend_t *backend,
+                                    struct vt_buffer_t *buf, uint32_t color) {
+  (void)backend;
+  struct vt_wl_buffer_attachment_t *data =
+      buf ? _wl_buffer_attachment_data(buf) : NULL;
+
+  if (!data || buf->uses)
+    return false;
+  uint32_t *pixels = data->pixels;
+  size_t    count = data->capacity / sizeof(*pixels);
+
+  /* RGBA */
+  uint32_t pixel = 0xff000000u | (color & 0xffffffu);
+  if (data->solid && data->clear_pixel == pixel)
+    return true;
+
+  for (size_t i = 0; i < count; ++i)
+    pixels[i] = pixel;
+  data->solid = true;
+  data->clear_pixel = pixel;
+
+  return true;
+}
+
 bool backend_is_dmabuf_importable_wl(struct vt_backend_t     *backend,
                                      struct vt_dmabuf_attr_t *attr,
                                      int32_t                  device_fd) {
@@ -1032,7 +1042,6 @@ bool backend_implement_wl(struct vt_compositor_t *comp) {
       .init = backend_init_wl,
       .allocate_buffer = backend_allocate_buffer_wl,
       .clear_buffer = backend_clear_buffer_wl,
-      .resize_buffer = backend_resize_buffer_wl,
       .is_dmabuf_importable = backend_is_dmabuf_importable_wl,
       .handle_frame = backend_handle_frame_wl,
       .terminate = backend_terminate_wl,
@@ -1097,6 +1106,7 @@ bool backend_terminate_wl(struct vt_backend_t *backend) {
 
   return true;
 }
+
 bool backend_prepare_output_frame_wl(struct vt_backend_t *backend,
                                      struct vt_output_t  *output) {
   (void)backend;

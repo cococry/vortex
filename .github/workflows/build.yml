@@ -34,7 +34,7 @@ jobs:
             libxkbcommon pixman \
             mesa libglvnd libdrm \
             libinput systemd-libs seatd \
-            libliftoff libxcursor
+            libliftoff libxcursor libx11 libxcb libxkbcommon-x11
 
       - uses: actions/checkout@v4
 

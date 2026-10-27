@@ -606,8 +606,9 @@ bool _egl_pick_config(struct vt_compositor_t     *comp,
     return _egl_pick_config_from_format(comp, egl, fmt);
   }
 
+  case VT_BACKEND_X11:
   case VT_BACKEND_WAYLAND: {
-    // Wayland backend: use standard window attributes
+    // Nested backend: use standard window attributes
     EGLint attrs[] = {EGL_SURFACE_TYPE,
                       EGL_WINDOW_BIT,
                       EGL_RED_SIZE,
@@ -624,7 +625,7 @@ bool _egl_pick_config(struct vt_compositor_t     *comp,
     EGLint n = 0;
     if (!eglChooseConfig(egl->egl_dsp, attrs, &egl->egl_conf, 1, &n) ||
         n == 0) {
-      VT_ERROR(comp->log, "no valid configs for Wayland backend");
+      VT_ERROR(comp->log, "no valid configs for nested backend");
       return false;
     }
     eglGetConfigAttrib(egl->egl_dsp, egl->egl_conf, EGL_NATIVE_VISUAL_ID,
@@ -855,6 +856,9 @@ EGLDisplay _egl_create_display(struct vt_compositor_t    *comp,
     break;
   case VT_BACKEND_WAYLAND:
     egl_platform = EGL_PLATFORM_WAYLAND_KHR;
+    break;
+  case VT_BACKEND_X11:
+    egl_platform = EGL_PLATFORM_X11_EXT;
     break;
   case VT_BACKEND_SURFACELESS:
     egl_platform = EGL_PLATFORM_SURFACELESS_MESA;
@@ -1488,14 +1492,12 @@ bool renderer_resize_renderable_output_egl(struct vt_renderer_t *r,
   if (!r || !output || !output->native_window || w == 0 || h == 0)
     return false;
 
-  if (r->backend->platform != VT_BACKEND_WAYLAND)
+  if (r->backend->platform != VT_BACKEND_WAYLAND &&
+      r->backend->platform != VT_BACKEND_X11)
     return true;
 
-  struct wl_egl_window *egl_win = (struct wl_egl_window *)output->native_window;
-  if (!egl_win)
-    return false;
-
-  wl_egl_window_resize(egl_win, w, h, 0, 0);
+  if (r->backend->platform == VT_BACKEND_WAYLAND)
+    wl_egl_window_resize(output->native_window, w, h, 0, 0);
 
   if (!_egl_gl_create_output_fbo(output, w, h))
     return false;

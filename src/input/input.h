@@ -36,6 +36,7 @@ static inline uint32_t vt_input_xkb_mod_mask(struct xkb_keymap *keymap,
 enum vt_input_backend_platform_t {
   VT_INPUT_LIBINPUT = 0,
   VT_INPUT_WAYLAND,
+  VT_INPUT_X11,
   VT_INPUT_UNKNOWN
 };
 

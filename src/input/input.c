@@ -29,6 +29,10 @@
 #include "src/input/backends/wayland/wayland_input.h"
 #endif
 
+#if VT_HAS_X11_INPUT
+#include "src/input/backends/x11/x11_input.h"
+#endif
+
 #define _SUBSYS_NAME "INPUT"
 
 void vt_input_implement(struct vt_input_backend_t       *backend,
@@ -55,7 +59,14 @@ void vt_input_implement(struct vt_input_backend_t       *backend,
         .suspend = input_backend_suspend_wl};
   }
 #endif
-#if !VT_HAS_LIBINPUT && !VT_HAS_WAYLAND_INPUT
+#if VT_HAS_X11_INPUT
+  if (platform == VT_INPUT_X11) {
+    backend->impl = (struct vt_input_backend_interface_t){
+        .init = input_backend_init_x11,
+        .terminate = input_backend_terminate_x11};
+  }
+#endif
+#if !VT_HAS_LIBINPUT && !VT_HAS_WAYLAND_INPUT && !VT_HAS_X11_INPUT
 #error "You are not building any input backend."
 #endif
 }

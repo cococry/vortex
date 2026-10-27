@@ -1,7 +1,7 @@
 option('backends',
   type: 'combo',
   value: 'all',
-  choices: ['drm', 'wayland', 'all'],
+  choices: ['drm', 'wayland', 'x11', 'all'],
   description: 'Sink backends to build')
 
 option(
