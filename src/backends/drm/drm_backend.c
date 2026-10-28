@@ -3322,7 +3322,7 @@ _drm_prepare_test_composition_layer(struct vt_drm_backend_state_t *drm,
 static bool _drm_test_output_layers(struct vt_backend_t            *backend,
                                     struct vt_output_t             *output,
                                     struct vt_output_layer_state_t *layers,
-                                    size_t                          layer_count) {
+                                    size_t layer_count) {
   if (!backend || !backend->comp || !output || !output->user_data ||
       (layer_count > 0 && !layers)) {
     return false;
@@ -3547,8 +3547,8 @@ static bool _drm_test_output_layers(struct vt_backend_t            *backend,
       goto done_req;
     }
 
-    int ret = liftoff_output_apply(drm_output->liftoff_output,
-                                   req, flags, NULL);
+    int ret =
+        liftoff_output_apply(drm_output->liftoff_output, req, flags, NULL);
 
     if (ret < 0) {
       VT_TRACE(backend->comp->log,

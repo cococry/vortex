@@ -46,9 +46,9 @@
 #include <wayland-egl.h>
 #include <wayland-server.h>
 
+#include <glad/glad.h>
 #include <runara/opengl.h>
 #include <runara/runara.h>
-#include <glad/glad.h>
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>

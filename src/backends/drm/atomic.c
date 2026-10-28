@@ -314,9 +314,9 @@ _atomic_trace_liftoff_allocation(struct vt_drm_backend_state_t *drm,
     if (layer->role == VT_DRM_LAYER_COMPOSITED_SCENE)
       continue;
 
-    const char *status = layer->role == VT_DRM_LAYER_COMPOSITED
-                             ? "composited"
-                             : "direct scanout";
+    const char           *status = layer->role == VT_DRM_LAYER_COMPOSITED
+                                       ? "composited"
+                                       : "direct scanout";
     struct liftoff_layer *liftoff_layer =
         layer->role == VT_DRM_LAYER_COMPOSITED
             ? commit->output->liftoff_composition_layer
@@ -326,7 +326,7 @@ _atomic_trace_liftoff_allocation(struct vt_drm_backend_state_t *drm,
     const char *plane_name = liftoff_plane ? "unknown plane" : "no plane";
 
     if (liftoff_plane) {
-      uint32_t plane_id = liftoff_plane_get_id(liftoff_plane);
+      uint32_t               plane_id = liftoff_plane_get_id(liftoff_plane);
       struct vt_drm_plane_t *plane;
       wl_array_for_each(plane, &drm->planes) {
         if (plane->id != plane_id)

@@ -94,7 +94,6 @@ void vt_renderer_implement(struct vt_renderer_t       *renderer,
         .destroy = renderer_destroy_vk};
   }
 #elif !VT_HAS_OPENGL
-#error                                                                         \
-    "No renderer is enabled."
+#error "No renderer is enabled."
 #endif
 }

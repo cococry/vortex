@@ -186,4 +186,3 @@ struct vt_buffer_t *drm_gbm_buffer_allocator_alloc(struct vt_compositor_t *comp,
 
   return buffer;
 }
-

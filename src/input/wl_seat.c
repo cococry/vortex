@@ -1247,8 +1247,8 @@ void vt_seat_refresh_keymap(struct vt_seat_t *seat) {
     int fd = _wl_create_keymap_fd(kbd);
     if (fd < 0)
       continue;
-    wl_keyboard_send_keymap(kbd->res, WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1,
-                            fd, kbd->_keymap_size);
+    wl_keyboard_send_keymap(kbd->res, WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1, fd,
+                            kbd->_keymap_size);
     close(fd);
     _wl_keyboard_send_initial_state(kbd);
   }

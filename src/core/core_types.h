@@ -103,7 +103,6 @@ struct vt_backend_interface_t {
                                  struct vt_dmabuf_feedback_t *feedback);
 
   bool (*terminate)(struct vt_backend_t *backend);
-
 };
 
 struct vt_backend_t {
