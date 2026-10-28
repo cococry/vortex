@@ -1434,6 +1434,7 @@ bool renderer_setup_renderable_output_egl(struct vt_renderer_t *r,
     return false;
   }
 
+  /* intialize runara lazily here, because it needs a gl context. */
   if (!egl->runara) {
     struct rn_init_options_t opts = {
         .gl_load_proc = (rn_gl_load_proc)eglGetProcAddress,

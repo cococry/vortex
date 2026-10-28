@@ -42,7 +42,9 @@ struct vt_dmabuf_feedback_t;
 #include "session.h"
 #include "util.h"
 
-#if VT_HAVE_VULKAN
+#include "config.h"
+
+#if VT_HAS_VULKAN
 #include <vulkan/vulkan_core.h>
 #endif
 
@@ -107,8 +109,8 @@ struct vt_backend_interface_t {
   bool (*terminate)(struct vt_backend_t *backend);
 
 #if VT_HAS_VULKAN
-  const char *(*vk_get_instance_extensions)(void *user, uint32_t *count);
-  const char *(*vk_create_surface)(void *user, VkInstance instance,
+  const char *const *(*vk_get_instance_extensions)(void *user, uint32_t *count);
+  VkResult (*vk_create_surface)(void *user, VkInstance instance,
                                    VkSurfaceKHR *out_surface);
 #endif
 };

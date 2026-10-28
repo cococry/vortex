@@ -251,6 +251,7 @@ configure_file(
 # ============================================================
 
 vortex_inc = include_directories(
+  '.',
   'src',
 )
 

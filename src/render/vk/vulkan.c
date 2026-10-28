@@ -40,7 +40,12 @@ static bool _vk_create_renderer(struct vt_renderer_t      *r,
   wl_list_init(&vk->surface_textures);
 
   if (!vk->runara) {
-    struct rn_vk_init_options_t vk_opts = {0};
+    struct rn_vk_init_options_t vk_opts = {
+        .mode = RN_VK_TARGET_EXTERNAL,
+        .platform = {
+            .create_surface = r->backend->impl.vk_create_surface,
+            .instance_extensions = r->backend->impl.vk_get_instance_extensions,
+        }};
 
     struct rn_init_options_t opts = {.log = {.verbose = r->comp->log.verbose,
                                              .log_stream = r->comp->log.stream},
