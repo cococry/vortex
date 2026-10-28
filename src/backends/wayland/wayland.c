@@ -798,6 +798,12 @@ static bool _wl_init_dmabuf_feedback(struct vt_compositor_t      *comp,
   tranche->flags = 0;
   tranche->target_device = fb->dev_main;
 
+  if (comp->renderer->rendering_backend == VT_RENDERING_BACKEND_VULKAN) {
+    return comp->renderer->impl.query_dmabuf_formats_with_renderer(
+               comp->renderer, &tranche->formats) &&
+           vt_drm_format_array_count(&tranche->formats) > 0;
+  }
+
   /* Nested sessions must not depend on querying the host GPU's EGL format
    * table. Offer only the basic RGB formats with linear or implicit layout. */
   const uint32_t formats[] = {DRM_FORMAT_XRGB8888, DRM_FORMAT_ARGB8888};
@@ -902,8 +908,9 @@ bool backend_init_wl(struct vt_backend_t *backend) {
   if (!wl->parent_event_source)
     return false;
 
-  backend->comp->renderer->impl.init(c->backend, backend->comp->renderer,
-                                     wl->parent_display);
+  if (!backend->comp->renderer->impl.init(c->backend, backend->comp->renderer,
+                                          wl->parent_display))
+    return false;
 
   uint32_t *shm_formats = calloc(2, sizeof(uint32_t));
   shm_formats[0] = _VT_DRM_FORMAT_XRGB8888;
@@ -1034,10 +1041,9 @@ static bool backend_clear_buffer_wl(struct vt_backend_t *backend,
 static bool backend_is_dmabuf_importable_wl(struct vt_backend_t     *backend,
                                             struct vt_dmabuf_attr_t *attr,
                                             int32_t device_fd) {
-  (void)backend;
-  (void)attr;
   (void)device_fd;
-  return true;
+  struct vt_renderer_t *r = backend->comp->renderer;
+  return !r->impl.is_dmabuf_importable || r->impl.is_dmabuf_importable(r, attr);
 }
 
 bool backend_implement_wl(struct vt_compositor_t *comp) {

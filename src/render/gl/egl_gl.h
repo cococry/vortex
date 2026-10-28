@@ -25,7 +25,7 @@
 #include "../../core/core_types.h"
 #include "../renderer.h"
 #include "src/core/surface.h"
-#include "subprojects/runara/include/runara/runara.h"
+#include <runara/runara.h>
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>

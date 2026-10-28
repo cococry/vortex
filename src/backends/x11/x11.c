@@ -555,16 +555,25 @@ static bool _x11_init_dmabuf_feedback(struct vt_compositor_t *c) {
   if (!tranche)
     goto done;
 
-  /* Nested sessions must not depend on querying the host GPU's EGL format
-   * table. Offer only the basic RGB formats with linear or implicit layout. */
-  const uint32_t formats[] = {DRM_FORMAT_XRGB8888, DRM_FORMAT_ARGB8888};
-  for (size_t i = 0; i < sizeof(formats) / sizeof(formats[0]); ++i) {
-    if (!vt_drm_format_array_push_pair(&tranche->formats, formats[i],
-                                       DRM_FORMAT_MOD_LINEAR) ||
-        !vt_drm_format_array_push_pair(&tranche->formats, formats[i],
-                                       DRM_FORMAT_MOD_INVALID))
+  if (c->renderer->rendering_backend == VT_RENDERING_BACKEND_VULKAN) {
+    if (!c->renderer->impl.query_dmabuf_formats_with_renderer(
+            c->renderer, &tranche->formats) ||
+        !vt_drm_format_array_count(&tranche->formats))
       goto done;
+  } else {
+    /* Nested sessions must not depend on querying the host GPU's EGL format
+     * table. Offer only the basic RGB formats with linear or implicit layout.
+     */
+    const uint32_t formats[] = {DRM_FORMAT_XRGB8888, DRM_FORMAT_ARGB8888};
+    for (size_t i = 0; i < sizeof(formats) / sizeof(formats[0]); ++i) {
+      if (!vt_drm_format_array_push_pair(&tranche->formats, formats[i],
+                                         DRM_FORMAT_MOD_LINEAR) ||
+          !vt_drm_format_array_push_pair(&tranche->formats, formats[i],
+                                         DRM_FORMAT_MOD_INVALID))
+        goto done;
+    }
   }
+
   ok = vt_proto_linux_dmabuf_v1_init(c, fb, 4);
 done:
   vt_dmabuf_feedback_fini(fb);
@@ -842,11 +851,9 @@ fail:
 static bool backend_is_dmabuf_importable_x11(struct vt_backend_t     *backend,
                                              struct vt_dmabuf_attr_t *attr,
                                              int32_t device_fd) {
-  (void)backend;
-  (void)attr;
   (void)device_fd;
-  /* the renderer validates actual EGLImage import */
-  return true;
+  struct vt_renderer_t *r = backend->comp->renderer;
+  return !r->impl.is_dmabuf_importable || r->impl.is_dmabuf_importable(r, attr);
 }
 
 bool backend_implement_x11(struct vt_compositor_t *comp) {

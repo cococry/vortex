@@ -46,9 +46,9 @@
 #include <wayland-egl.h>
 #include <wayland-server.h>
 
-#include "subprojects/runara/include/runara/opengl.h"
-#include "subprojects/runara/include/runara/runara.h"
-#include "subprojects/runara/vendor/glad/include/glad/glad.h"
+#include <runara/opengl.h>
+#include <runara/runara.h>
+#include <glad/glad.h>
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -1440,7 +1440,7 @@ bool renderer_setup_renderable_output_egl(struct vt_renderer_t *r,
         .gl_load_proc = (rn_gl_load_proc)eglGetProcAddress,
         .log = {.verbose = r->comp->log.verbose,
                 .log_stream = r->comp->log.stream}};
-    egl->runara = rn_state_init(&opts, 0, 0);
+    egl->runara = rn_state_init(&opts);
 
     if (!egl->runara) {
       VT_ERROR(r->comp->log, "Failed to initialize Runara rendering engine.");

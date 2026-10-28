@@ -62,7 +62,8 @@ void vt_renderer_implement(struct vt_renderer_t       *renderer,
         .end_scene = renderer_end_scene_egl,
         .destroy = renderer_destroy_egl};
   }
-#elif VT_HAS_VULKAN
+#endif
+#if VT_HAS_VULKAN
   if (backend == VT_RENDERING_BACKEND_VULKAN) {
     renderer->impl = (struct vt_renderer_interface_t){
         .init = renderer_init_vk,
@@ -74,6 +75,7 @@ void vt_renderer_implement(struct vt_renderer_t       *renderer,
         .resize_renderable_output = renderer_resize_renderable_output_vk,
         .destroy_renderable_output = renderer_destroy_renderable_output_vk,
         .import_buffer = renderer_import_buffer_vk,
+        .is_dmabuf_importable = renderer_is_dmabuf_importable_vk,
         .drop_context = renderer_drop_context_vk,
         .supports_explicit_sync = renderer_supports_explicit_sync_vk,
         .set_vsync = renderer_set_vsync_vk,
@@ -91,8 +93,8 @@ void vt_renderer_implement(struct vt_renderer_t       *renderer,
         .end_scene = renderer_end_scene_vk,
         .destroy = renderer_destroy_vk};
   }
-#else
+#elif !VT_HAS_OPENGL
 #error                                                                         \
-    "You are not building any renderer, or you use Vulkan which is currently unsupported."
+    "No renderer is enabled."
 #endif
 }

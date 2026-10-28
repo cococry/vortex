@@ -33,12 +33,17 @@ runara_backends = renderers
 
 runara_sp = subproject(
   'runara',
+  version: '>=4.1.0',
   default_options: [
     'backends=' + runara_backends,
     'examples=false',
     'default_library=static',
   ],
 )
+
+if (build_vulkan and not runara_sp.get_variable('build_vulkan')) or (build_opengl and not runara_sp.get_variable('build_opengl'))
+  error('Runara is missing a requested renderer. Reconfigure with -Drunara:backends=' + renderers)
+endif
 
 runara_dep = runara_sp.get_variable('runara_dep')
 

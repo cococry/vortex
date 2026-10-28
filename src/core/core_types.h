@@ -44,10 +44,6 @@ struct vt_dmabuf_feedback_t;
 
 #include "config.h"
 
-#if VT_HAS_VULKAN
-#include <vulkan/vulkan_core.h>
-#endif
-
 #define BACKEND_DATA(b, type) ((type *)((b)->user_data))
 
 #define VT_ALLOC(c, size)       vt_util_alloc(&(c)->arena, (size))
@@ -108,11 +104,6 @@ struct vt_backend_interface_t {
 
   bool (*terminate)(struct vt_backend_t *backend);
 
-#if VT_HAS_VULKAN
-  const char *const *(*vk_get_instance_extensions)(void *user, uint32_t *count);
-  VkResult (*vk_create_surface)(void *user, VkInstance instance,
-                                   VkSurfaceKHR *out_surface);
-#endif
 };
 
 struct vt_backend_t {

@@ -27,6 +27,7 @@
 #include <wayland-util.h>
 
 struct vt_buffer_t;
+struct vt_dmabuf_attr_t;
 
 enum vt_rendering_backend_t {
   VT_RENDERING_BACKEND_EGL_OPENGL = 0,
@@ -51,6 +52,8 @@ struct vt_renderer_interface_t {
                                     struct vt_output_t   *output);
   bool (*import_buffer)(struct vt_renderer_t *r, struct vt_buffer_t *buf,
                         const pixman_region32_t *damage);
+  bool (*is_dmabuf_importable)(struct vt_renderer_t          *r,
+                               const struct vt_dmabuf_attr_t *attr);
   bool (*drop_context)(struct vt_renderer_t *r);
   // true when acquire fences are waited on and release fences produced
   bool (*supports_explicit_sync)(struct vt_renderer_t *r);
