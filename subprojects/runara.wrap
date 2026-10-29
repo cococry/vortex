@@ -2,7 +2,6 @@
 url = https://github.com/cococry/runara 
 revision = 4.3.1
 depth = 1
-diff_files = runara-vulkan-drm.patch
 
 [provide]
 dependency_names = runara 
