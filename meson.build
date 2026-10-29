@@ -90,6 +90,19 @@ deps = [
   runara_dep,
 ]
 
+if get_option('profiling')
+  # We build tracy only if profiling is specifically enabled  
+  tracy_sp = subproject(
+    'tracy',
+    default_options: [
+      'tracy_enable=true',
+      'default_library=static',
+      'cpp_std=c++17',
+    ],
+  )
+  deps += tracy_sp.get_variable('tracy_dep')
+endif
+
 if dep_xkbcommon.found()
   deps += dep_xkbcommon
 endif
@@ -378,6 +391,7 @@ summary(
     'GPU renderers': renderers,
     'OpenGL': build_opengl,
     'Vulkan': build_vulkan,
+    'CPU profiling (Tracy)': get_option('profiling'),
   },
   section: 'Vortex',
   bool_yn: true,

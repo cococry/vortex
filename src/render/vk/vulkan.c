@@ -1,7 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 #include "vulkan.h"
 #include "config.h"
-#include "src/core/compositor.h"
 #include "src/core/output.h"
 #include "src/core/scene.h"
 #include "src/core/surface_addon.h"
@@ -104,7 +103,7 @@ static const struct vt_buffer_attachment_implementation_t vk_buffer_impl = {
     .end_use = _vk_buffer_end_use,
 };
 
-static struct vk_texture *_vk_buffer_texture(struct vt_renderer_t *r,
+static struct vk_texture *_vk_buffer_texture_get_or_create(struct vt_renderer_t *r,
                                              struct vt_buffer_t   *buf,
                                              bool                  create) {
   struct vt_buffer_attachment_t *attachment =
@@ -363,7 +362,7 @@ static bool _vk_prepare_use(struct vt_renderer_t   *r,
   struct vt_shm_attr_t    shm;
 
   if (vt_buffer_get_dmabuf(use->buf, &dmabuf)) {
-    texture = _vk_buffer_texture(r, use->buf, true);
+    texture = _vk_buffer_texture_get_or_create(r, use->buf, true);
 
     if (!texture || !_vk_import_dmabuf(r, texture, &dmabuf, fd))
       return false;
@@ -390,7 +389,7 @@ static bool _vk_prepare_use(struct vt_renderer_t   *r,
       cached->valid = true;
       texture = &cached->texture;
     } else {
-      texture = _vk_buffer_texture(r, use->buf, true);
+      texture = _vk_buffer_texture_get_or_create(r, use->buf, true);
 
       if (!texture)
         return false;
@@ -658,7 +657,7 @@ bool renderer_import_buffer_vk(struct vt_renderer_t *r, struct vt_buffer_t *buf,
   if (vk->active)
     return false;
 
-  struct vk_texture *texture = _vk_buffer_texture(r, buf, true);
+  struct vk_texture *texture = _vk_buffer_texture_get_or_create(r, buf, true);
 
   if (!texture)
     return false;
