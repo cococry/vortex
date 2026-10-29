@@ -48,10 +48,7 @@ Vortex supports configuring which sink backends and rendering backends are built
 | `-Drenderers` | `opengl`, `vulkan`, `all` | `opengl` | Specify which rendering backends to build |
 | `-Dprofiling` | `true`, `false` | `false` | Build and link the Tracy client for CPU profiling |
 
-Profiling builds fetch Tracy v0.13.1 and require a C++ compiler for its client
-library. They expose `<tracy/TracyC.h>` and define `TRACY_ENABLE` for future C
-instrumentation; no profiling scopes are added yet. Use a matching Tracy viewer.
-With profiling disabled, Tracy is neither fetched nor built.
+The `profiling` option enables/disables CPU profiling with Tracy (v0.13.1) 
 
 The `backends` option controls which sink backend `.so` modules are compiled and installed.
 
