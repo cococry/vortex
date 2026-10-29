@@ -23,9 +23,9 @@ jobs:
       - name: Install runara dependencies
         run: |
           pacman -S --noconfirm --needed \
-            mesa libglvnd \
+            cglm mesa libglvnd \
             vulkan-headers vulkan-icd-loader \
-            glslang python
+            shaderc glslang python
 
       - name: Install vortex dependencies
         run: |
