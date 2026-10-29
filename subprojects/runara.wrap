@@ -1,6 +1,6 @@
 [wrap-git]
 url = https://github.com/cococry/runara 
-revision = 4.4.0
+revision = 4.4.1
 depth = 1
 
 [provide]
