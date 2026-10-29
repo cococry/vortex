@@ -6,8 +6,8 @@
 
 ## Overview
 
-Currently under active development as a high-performance, modern Wayland compositor
-focused on creating a visually appealing Wayland desktop experience.
+Currently under active development as a high-performance, independent Wayland compositor
+focused on creating a notoriously fast and visually appealing Wayland desktop experience.
 
 The project's goal is to create a self-contained platform dedicated entirely to desktop compositing.
 In other words, the compositor is responsible only for compositing and its related aspects (such as window animations and IPC),
@@ -44,38 +44,9 @@ Vortex supports configuring which sink backends and rendering backends are built
 
 | Option | Values | Default | Description |
 |--------|--------|---------|-------------|
-| `-Dbackends` | `drm`, `wayland`, `x11`, `all` | `all` | Specify which sink backends to build |
-| `-Drenderers` | `opengl`, `vulkan`, `all` | `opengl` | Specify which rendering backends to build |
-| `-Dprofiling` | `true`, `false` | `false` | Build and link the Tracy client for CPU profiling |
-
-The `profiling` option enables/disables CPU profiling with Tracy (v0.13.1) 
-
-The `backends` option controls which sink backend `.so` modules are compiled and installed.
-
-The `renderers` option controls which GPU rendering backends are compiled, including the corresponding backends in Runara.
-
-For example, build only the DRM sink backend with OpenGL rendering:
-
-```bash
-meson setup build --prefix="$HOME/.local" -Dbackends=drm -Drenderers=opengl
-```
-
-Build all sink backends and rendering backends:
-
-```bash
-meson setup build --prefix="$HOME/.local" -Dbackends=all -Drenderers=all
-```
-
-To change the options of an existing build:
-
-```bash
-meson configure build -Dbackends=wayland -Drenderers=opengl
-meson compile -C build
-meson install -C build
-```
-
-> [!IMPORTANT]
-> Vulkan rendering is TODO and not yet supported 
+| `backends` | `drm`, `wayland`, `x11`, `all` | `all` | Specify which sink backends to build |
+| `renderers` | `opengl`, `vulkan`, `all` | `opengl` | Specify which rendering backends to build |
+| `profiling` | `true`, `false` | `false` | Build and link the Tracy client for CPU profiling |
 
 Simple test of vortex:
 ```bash
