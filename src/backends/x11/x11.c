@@ -563,24 +563,10 @@ static bool _x11_init_dmabuf_feedback(struct vt_compositor_t *c) {
   if (!tranche)
     goto done;
 
-  if (c->renderer->rendering_backend == VT_RENDERING_BACKEND_VULKAN) {
-    if (!c->renderer->impl.query_dmabuf_formats_with_renderer(
-            c->renderer, &tranche->formats) ||
-        !vt_drm_format_array_count(&tranche->formats))
-      goto done;
-  } else {
-    /* Nested sessions must not depend on querying the host GPU's EGL format
-     * table. Offer only the basic RGB formats with linear or implicit layout.
-     */
-    const uint32_t formats[] = {DRM_FORMAT_XRGB8888, DRM_FORMAT_ARGB8888};
-    for (size_t i = 0; i < sizeof(formats) / sizeof(formats[0]); ++i) {
-      if (!vt_drm_format_array_push_pair(&tranche->formats, formats[i],
-                                         DRM_FORMAT_MOD_LINEAR) ||
-          !vt_drm_format_array_push_pair(&tranche->formats, formats[i],
-                                         DRM_FORMAT_MOD_INVALID))
-        goto done;
-    }
-  }
+  if (!c->renderer->impl.query_dmabuf_formats_with_renderer(
+          c->renderer, &tranche->formats) ||
+      !vt_drm_format_array_count(&tranche->formats))
+    goto done;
 
   ok = vt_proto_linux_dmabuf_v1_init(c, fb, 4);
 done:

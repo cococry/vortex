@@ -802,23 +802,9 @@ static bool _wl_init_dmabuf_feedback(struct vt_compositor_t      *comp,
   tranche->flags = 0;
   tranche->target_device = fb->dev_main;
 
-  if (comp->renderer->rendering_backend == VT_RENDERING_BACKEND_VULKAN) {
-    return comp->renderer->impl.query_dmabuf_formats_with_renderer(
-               comp->renderer, &tranche->formats) &&
-           vt_drm_format_array_count(&tranche->formats) > 0;
-  }
-
-  /* Nested sessions must not depend on querying the host GPU's EGL format
-   * table. Offer only the basic RGB formats with linear or implicit layout. */
-  const uint32_t formats[] = {DRM_FORMAT_XRGB8888, DRM_FORMAT_ARGB8888};
-  for (size_t i = 0; i < sizeof(formats) / sizeof(formats[0]); ++i) {
-    if (!vt_drm_format_array_push_pair(&tranche->formats, formats[i],
-                                       DRM_FORMAT_MOD_LINEAR) ||
-        !vt_drm_format_array_push_pair(&tranche->formats, formats[i],
-                                       DRM_FORMAT_MOD_INVALID))
-      return false;
-  }
-  return true;
+  return comp->renderer->impl.query_dmabuf_formats_with_renderer(
+             comp->renderer, &tranche->formats) &&
+         vt_drm_format_array_count(&tranche->formats) > 0;
 }
 
 static void _wl_buffer_attachment_destroy(struct vt_buffer_t *buf,
@@ -931,6 +917,10 @@ bool backend_init_wl(struct vt_backend_t *backend) {
 
   free(shm_formats);
 
+  /* Query import capabilities only after the renderer has a current context. */
+  if (!_wl_backend_init_active_outputs(backend))
+    return false;
+
   if (backend->comp->have_proto_dmabuf) {
     // initialize the dmabuf protocol with default feedback
     struct vt_dmabuf_feedback_t *default_feedback =
@@ -982,8 +972,6 @@ bool backend_init_wl(struct vt_backend_t *backend) {
           dmabuf_explicit_sync_ver);
     }
   }
-
-  _wl_backend_init_active_outputs(backend);
 
   VT_TRACE(c->log, "Successfully initialized Wayland backend.");
 

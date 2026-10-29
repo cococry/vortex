@@ -1396,9 +1396,15 @@ bool renderer_query_dmabuf_formats_with_renderer_egl(
 
   struct vt_drm_format_t *fmt;
   wl_array_for_each(fmt, &egl->formats) {
-    if (!vt_drm_format_array_push(formats, fmt)) {
-      vt_drm_format_array_free(formats);
-      return false;
+    struct vt_drm_format_modifier_t *mod;
+    wl_array_for_each(mod, &fmt->mods) {
+      /* Runara samples desktop GL_TEXTURE_2D, not external textures. */
+      if (mod->_egl_ext_only)
+        continue;
+      if (!vt_drm_format_array_push_pair(formats, fmt->format, mod->mod)) {
+        vt_drm_format_array_free(formats);
+        return false;
+      }
     }
   }
 

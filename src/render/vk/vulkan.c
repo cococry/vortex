@@ -303,18 +303,25 @@ static bool _vk_import_dmabuf(struct vt_renderer_t          *r,
       attr->num_planes > RN_VK_DMABUF_MAX_PLANES)
     return false;
 
-  if (texture->registered && !texture->dmabuf)
-    return false;
-
   struct vt_vk_backend_state_t *vk = r->user_data;
-  struct rn_vk_dmabuf_desc_t    desc = {
-         .width = attr->width,
-         .height = attr->height,
-         .format = attr->format,
-         .modifier = attr->mod,
-         .plane_count = attr->num_planes,
-         .acquire_fence_fd = acquire_fd,
-         .premultiplied = true,
+
+  /* already registered textures just acquire the new dmabuf and update the
+   * texture instead of creating a new rn_image_t. */
+  if (texture->registered)
+    return texture->dmabuf &&
+           _vk_runara_check(
+               r,
+               rn_vk_image_acquire_dmabuf(vk->runara, &texture->rn, acquire_fd),
+               "rn_vk_image_acquire_dmabuf");
+
+  struct rn_vk_dmabuf_desc_t desc = {
+      .width = attr->width,
+      .height = attr->height,
+      .format = attr->format,
+      .modifier = attr->mod,
+      .plane_count = attr->num_planes,
+      .acquire_fence_fd = acquire_fd,
+      .premultiplied = true,
   };
 
   for (int i = 0; i < attr->num_planes; ++i)
