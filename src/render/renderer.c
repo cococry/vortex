@@ -72,6 +72,7 @@ void vt_renderer_implement(struct vt_renderer_t       *renderer,
   if (backend == VT_RENDERING_BACKEND_VULKAN) {
     renderer->impl = (struct vt_renderer_interface_t){
         .init = renderer_init_vk,
+        .query_render_formats = renderer_query_render_formats_vk,
         .is_handle_renderable = renderer_is_handle_renderable_vk,
         .query_dmabuf_formats = renderer_query_dmabuf_formats_vk,
         .query_dmabuf_formats_with_renderer =

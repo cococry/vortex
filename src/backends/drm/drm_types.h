@@ -24,6 +24,7 @@
 
 #include "core/buffer.h"
 #include "core/core_types.h"
+#include "core/output.h"
 #include "core/scene.h"
 #include "core/session.h"
 #include "props.h"
@@ -100,6 +101,7 @@ enum vt_drm_layer_role_t {
 struct vt_drm_layer_state_t {
   struct vt_drm_framebuffer_t fb;
   bool                        has_fb;
+  struct vt_output_render_buffer_t *pool_buffer;
 
   struct vt_box_t src;
   struct vt_box_t dst;
@@ -248,6 +250,11 @@ struct vt_drm_output_state_t {
   } frame_stats;
   bool modeset_bootstrapped;
   bool renderable_setup;
+
+  struct vt_output_render_buffer_t render_buffers[3];
+  struct gbm_bo                   *render_bos[3];
+  struct vt_drm_framebuffer_t      render_fbs[3];
+  unsigned                         render_next;
   bool connector_seen;
   bool allow_tearing;
 

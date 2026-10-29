@@ -1,17 +1,23 @@
 #define _POSIX_C_SOURCE 200809L
-#include "src/core/profiling.h"
 #include "vulkan.h"
 #include "config.h"
 #include "src/core/output.h"
+#include "src/core/profiling.h"
 #include "src/core/scene.h"
 #include "src/core/surface_addon.h"
 #include "src/input/wl_seat.h"
 #include "src/render/drm_format.h"
 #include <assert.h>
+#include <drm/drm_fourcc.h>
 #include <errno.h>
+#include <fcntl.h>
+#include <inttypes.h>
 #include <poll.h>
 #include <runara/vulkan.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/sysmacros.h>
+#include <unistd.h>
 #if VT_HAS_X11_INPUT
 #include <X11/Xlib.h>
 #include <vulkan/vulkan_xlib.h>
@@ -47,14 +53,24 @@ struct vk_pending_frame_t {
   size_t count, capacity;
 };
 
+struct vk_render_target_t {
+  VkImage               image;
+  VkDeviceMemory        memory;
+  rn_vk_target_handle_t handle;
+  bool                  registered;
+};
+
 struct vk_output_t {
   rn_color_t clear_color;
+  struct vk_render_target_t *targets;
 };
 
 struct vt_vk_backend_state_t {
   struct wl_array      formats;
   struct wl_list       surface_textures;
   struct rn_state_t   *runara;
+  struct rn_vk_native_handles_t native;
+  bool                          external;
   void                *native_display;
   bool                 vsync, active, failed;
   struct vt_output_t  *output;
@@ -536,10 +552,308 @@ static void _vk_framebuffer_size(void *user, uint32_t *width,
   *height = output->height;
 }
 
+static bool _vk_accept_device(void *user, VkInstance instance,
+                              VkPhysicalDevice physical) {
+  struct vt_renderer_t                 *r = user;
+  PFN_vkGetPhysicalDeviceProperties2KHR properties =
+      (PFN_vkGetPhysicalDeviceProperties2KHR)vkGetInstanceProcAddr(
+          instance, "vkGetPhysicalDeviceProperties2KHR");
+  uint32_t count = 0;
+
+  if (!properties || vkEnumerateDeviceExtensionProperties(
+                         physical, NULL, &count, NULL) != VK_SUCCESS)
+    return false;
+
+  VkExtensionProperties *extensions = calloc(count, sizeof(*extensions));
+
+  if (!extensions)
+    return false;
+
+  bool supported = false;
+
+  if (vkEnumerateDeviceExtensionProperties(physical, NULL, &count,
+                                           extensions) == VK_SUCCESS) {
+    for (uint32_t i = 0; i < count; ++i) {
+      if (!strcmp(extensions[i].extensionName,
+                  VK_EXT_PHYSICAL_DEVICE_DRM_EXTENSION_NAME))
+        supported = true;
+    }
+  }
+
+  free(extensions);
+
+  if (!supported)
+    return false;
+
+  VkPhysicalDeviceDrmPropertiesEXT drm = {
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRM_PROPERTIES_EXT,
+  };
+  VkPhysicalDeviceProperties2 props = {
+      .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2,
+      .pNext = &drm,
+  };
+  properties(physical, &props);
+  return (drm.hasPrimary &&
+          makedev(drm.primaryMajor, drm.primaryMinor) == r->device) ||
+         (drm.hasRender &&
+          makedev(drm.renderMajor, drm.renderMinor) == r->device);
+}
+
+bool renderer_query_render_formats_vk(struct vt_renderer_t *r,
+                                      struct wl_array      *formats) {
+  struct vt_vk_backend_state_t               *vk = r->user_data;
+  PFN_vkGetPhysicalDeviceFormatProperties2KHR format_properties =
+      (PFN_vkGetPhysicalDeviceFormatProperties2KHR)vkGetInstanceProcAddr(
+          vk->native.instance, "vkGetPhysicalDeviceFormatProperties2KHR");
+  PFN_vkGetPhysicalDeviceImageFormatProperties2KHR image_properties =
+      (PFN_vkGetPhysicalDeviceImageFormatProperties2KHR)vkGetInstanceProcAddr(
+          vk->native.instance, "vkGetPhysicalDeviceImageFormatProperties2KHR");
+
+  if (!format_properties || !image_properties ||
+      !vkGetDeviceProcAddr(vk->native.device, "vkGetMemoryFdPropertiesKHR"))
+    return false;
+
+  VkDrmFormatModifierPropertiesListEXT list = {
+      .sType = VK_STRUCTURE_TYPE_DRM_FORMAT_MODIFIER_PROPERTIES_LIST_EXT,
+  };
+  VkFormatProperties2 props = {
+      .sType = VK_STRUCTURE_TYPE_FORMAT_PROPERTIES_2,
+      .pNext = &list,
+  };
+  format_properties(vk->native.physical_device, VK_FORMAT_B8G8R8A8_UNORM,
+                    &props);
+
+  if (!list.drmFormatModifierCount)
+    return false;
+
+  VkDrmFormatModifierPropertiesEXT *mods =
+      calloc(list.drmFormatModifierCount, sizeof(*mods));
+
+  if (!mods)
+    return false;
+
+  list.pDrmFormatModifierProperties = mods;
+  format_properties(vk->native.physical_device, VK_FORMAT_B8G8R8A8_UNORM,
+                    &props);
+  bool ok = true;
+
+  for (uint32_t i = 0; ok && i < list.drmFormatModifierCount; ++i) {
+    if (!mods[i].drmFormatModifierPlaneCount ||
+        mods[i].drmFormatModifierPlaneCount > VT_DMABUF_PLANES_CAP ||
+        !(mods[i].drmFormatModifierTilingFeatures &
+          VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT))
+      continue;
+
+    VkPhysicalDeviceImageDrmFormatModifierInfoEXT modifier = {
+        .sType =
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_DRM_FORMAT_MODIFIER_INFO_EXT,
+        .drmFormatModifier = mods[i].drmFormatModifier,
+        .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+    };
+    VkPhysicalDeviceExternalImageFormatInfo external = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_IMAGE_FORMAT_INFO,
+        .pNext = &modifier,
+        .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+    };
+    VkPhysicalDeviceImageFormatInfo2 info = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_IMAGE_FORMAT_INFO_2,
+        .pNext = &external,
+        .format = VK_FORMAT_B8G8R8A8_UNORM,
+        .type = VK_IMAGE_TYPE_2D,
+        .tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT,
+        .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+    };
+    VkExternalImageFormatProperties external_props = {
+        .sType = VK_STRUCTURE_TYPE_EXTERNAL_IMAGE_FORMAT_PROPERTIES,
+    };
+    VkImageFormatProperties2 result = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_FORMAT_PROPERTIES_2,
+        .pNext = &external_props,
+    };
+
+    if (image_properties(vk->native.physical_device, &info, &result) !=
+            VK_SUCCESS ||
+        !(external_props.externalMemoryProperties.externalMemoryFeatures &
+          VK_EXTERNAL_MEMORY_FEATURE_IMPORTABLE_BIT))
+      continue;
+
+    ok = vt_drm_format_array_push_pair(formats, DRM_FORMAT_XRGB8888,
+                                       mods[i].drmFormatModifier) &&
+         vt_drm_format_array_push_pair(formats, DRM_FORMAT_ARGB8888,
+                                       mods[i].drmFormatModifier);
+  }
+
+  free(mods);
+  return ok && vt_drm_format_array_count(formats) > 0;
+}
+
+static void _vk_target_finish(struct vt_renderer_t      *r,
+                              struct vk_render_target_t *target) {
+  struct vt_vk_backend_state_t *vk = r->user_data;
+
+  if (target->registered)
+    rn_vk_target_unregister(vk->runara, target->handle);
+
+  if (target->image)
+    vkDestroyImage(vk->native.device, target->image, NULL);
+
+  if (target->memory)
+    vkFreeMemory(vk->native.device, target->memory, NULL);
+
+  memset(target, 0, sizeof(*target));
+}
+
+static bool _vk_target_import(struct vt_renderer_t          *r,
+                              const struct vt_dmabuf_attr_t *attr,
+                              struct vk_render_target_t     *target) {
+  struct vt_vk_backend_state_t *vk = r->user_data;
+  VkDevice                      device = vk->native.device;
+  struct stat                   backing;
+
+  if (attr->num_planes < 1 || attr->num_planes > VT_DMABUF_PLANES_CAP ||
+      (attr->format != DRM_FORMAT_XRGB8888 &&
+       attr->format != DRM_FORMAT_ARGB8888) ||
+      attr->mod == DRM_FORMAT_MOD_INVALID || fstat(attr->fds[0], &backing) < 0)
+    return false;
+
+  VkSubresourceLayout layouts[VT_DMABUF_PLANES_CAP] = {0};
+
+  for (int p = 0; p < attr->num_planes; ++p) {
+    struct stat plane;
+
+    if (fstat(attr->fds[p], &plane) < 0 || plane.st_ino != backing.st_ino ||
+        plane.st_dev != backing.st_dev)
+      return false;
+
+    layouts[p].offset = attr->offsets[p];
+    layouts[p].rowPitch = attr->strides[p];
+  }
+
+  VkImageDrmFormatModifierExplicitCreateInfoEXT modifier = {
+      .sType =
+          VK_STRUCTURE_TYPE_IMAGE_DRM_FORMAT_MODIFIER_EXPLICIT_CREATE_INFO_EXT,
+      .drmFormatModifier = attr->mod,
+      .drmFormatModifierPlaneCount = attr->num_planes,
+      .pPlaneLayouts = layouts,
+  };
+  VkExternalMemoryImageCreateInfo external = {
+      .sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO,
+      .pNext = &modifier,
+      .handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+  };
+  VkImageCreateInfo info = {
+      .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
+      .pNext = &external,
+      .imageType = VK_IMAGE_TYPE_2D,
+      .format = VK_FORMAT_B8G8R8A8_UNORM,
+      .extent = {attr->width, attr->height, 1},
+      .mipLevels = 1,
+      .arrayLayers = 1,
+      .samples = VK_SAMPLE_COUNT_1_BIT,
+      .tiling = VK_IMAGE_TILING_DRM_FORMAT_MODIFIER_EXT,
+      .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+      .sharingMode = VK_SHARING_MODE_EXCLUSIVE,
+  };
+  VkResult result = vkCreateImage(device, &info, NULL, &target->image);
+
+  if (result != VK_SUCCESS)
+    goto fail;
+
+  VkMemoryRequirements requirements;
+  vkGetImageMemoryRequirements(device, target->image, &requirements);
+  PFN_vkGetMemoryFdPropertiesKHR fd_properties =
+      (PFN_vkGetMemoryFdPropertiesKHR)vkGetDeviceProcAddr(
+          device, "vkGetMemoryFdPropertiesKHR");
+  VkMemoryFdPropertiesKHR properties = {
+      .sType = VK_STRUCTURE_TYPE_MEMORY_FD_PROPERTIES_KHR};
+
+  if (!fd_properties) {
+    result = VK_ERROR_EXTENSION_NOT_PRESENT;
+    goto fail;
+  }
+
+  result = fd_properties(device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+                         attr->fds[0], &properties);
+
+  if (result != VK_SUCCESS)
+    goto fail;
+
+  uint32_t bits = requirements.memoryTypeBits & properties.memoryTypeBits;
+
+  if (!bits || backing.st_size <= 0 ||
+      (uint64_t)backing.st_size < requirements.size) {
+    result = VK_ERROR_INVALID_EXTERNAL_HANDLE;
+    goto fail;
+  }
+
+  int fd = fcntl(attr->fds[0], F_DUPFD_CLOEXEC, 0);
+
+  if (fd < 0) {
+    result = VK_ERROR_OUT_OF_HOST_MEMORY;
+    goto fail;
+  }
+
+  VkMemoryDedicatedAllocateInfo dedicated = {
+      .sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO,
+      .image = target->image,
+  };
+  VkImportMemoryFdInfoKHR import = {
+      .sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_FD_INFO_KHR,
+      .pNext = &dedicated,
+      .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_DMA_BUF_BIT_EXT,
+      .fd = fd,
+  };
+  VkMemoryAllocateInfo allocation = {
+      .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO,
+      .pNext = &import,
+      .allocationSize = backing.st_size,
+      .memoryTypeIndex = __builtin_ctz(bits),
+  };
+  result = vkAllocateMemory(device, &allocation, NULL, &target->memory);
+
+  if (result != VK_SUCCESS) {
+    close(fd);
+    goto fail;
+  }
+
+  result = vkBindImageMemory(device, target->image, target->memory, 0);
+
+  if (result != VK_SUCCESS)
+    goto fail;
+
+  struct rn_vk_external_target_desc_t desc = {
+      .image = target->image,
+      .format = VK_FORMAT_B8G8R8A8_UNORM,
+      .width = attr->width,
+      .height = attr->height,
+      .foreign = true,
+  };
+
+  if (!_vk_runara_check(
+          r, rn_vk_target_register(vk->runara, &desc, &target->handle),
+          "rn_vk_target_register")) {
+    result = VK_ERROR_INITIALIZATION_FAILED;
+    goto fail;
+  }
+
+  target->registered = true;
+  VT_TRACE(r->comp->log,
+           "imported output target: %dx%d format=0x%08x modifier=0x%016" PRIx64
+           ".",
+           attr->width, attr->height, attr->format, attr->mod);
+  return true;
+
+fail:
+  VT_ERROR(r->comp->log, "output target import failed: VkResult=%d.", result);
+  _vk_target_finish(r, target);
+  return false;
+}
+
 static bool _vk_create_renderer(struct vt_renderer_t      *r,
                                 enum vt_backend_platform_t platform,
                                 void                      *native_handle) {
-  if (platform != VT_BACKEND_X11 && platform != VT_BACKEND_WAYLAND) {
+  if (platform != VT_BACKEND_X11 && platform != VT_BACKEND_WAYLAND &&
+      platform != VT_BACKEND_DRM_GBM) {
     VT_ERROR(r->comp->log,
              "Vulkan presentation currently requires X11 or Wayland.");
     return false;
@@ -552,13 +866,16 @@ static bool _vk_create_renderer(struct vt_renderer_t      *r,
 
   r->user_data = vk;
   vk->native_display = native_handle;
+  vk->external = platform == VT_BACKEND_DRM_GBM;
   vk->vsync = platform == VT_BACKEND_WAYLAND;
   wl_array_init(&vk->formats);
   wl_list_init(&vk->surface_textures);
   struct rn_vk_init_options_t options = {
-      .mode = RN_VK_TARGET_MANAGED,
+      .mode = vk->external ? RN_VK_TARGET_EXTERNAL : RN_VK_TARGET_MANAGED,
+      .accept_device = vk->external ? _vk_accept_device : NULL,
+      .external_format = VK_FORMAT_B8G8R8A8_UNORM,
       .user = r,
-      .instance_extensions = _vk_instance_extensions,
+      .instance_extensions = vk->external ? NULL : _vk_instance_extensions,
       .enable_dmabuf_import = true,
   };
 
@@ -577,6 +894,10 @@ static bool _vk_create_renderer(struct vt_renderer_t      *r,
     r->user_data = NULL;
     return false;
   }
+
+  if (!_vk_runara_check(r, rn_vk_get_native_handles(vk->runara, &vk->native),
+                        "rn_vk_get_native_handles"))
+    goto fail;
 
   if (!_vk_query_formats(r))
     goto fail;
@@ -620,7 +941,15 @@ bool renderer_init_vk(struct vt_backend_t *backend, struct vt_renderer_t *r,
 
 bool renderer_is_handle_renderable_vk(struct vt_renderer_t *r,
                                       void                 *native_handle) {
-  return r && r->user_data && native_handle;
+  if (!r || !native_handle)
+    return false;
+
+  if (r->comp->backend->platform == VT_BACKEND_DRM_GBM && !r->user_data) {
+    r->backend = r->comp->backend;
+    return _vk_create_renderer(r, VT_BACKEND_DRM_GBM, native_handle);
+  }
+
+  return r->user_data != NULL;
 }
 
 bool renderer_query_dmabuf_formats_vk(struct vt_compositor_t *comp,
@@ -643,11 +972,12 @@ bool renderer_query_dmabuf_formats_with_renderer_vk(struct vt_renderer_t *r,
 bool renderer_setup_renderable_output_vk(struct vt_renderer_t *r,
                                          struct vt_output_t   *output) {
   if (!r || !r->user_data || !output || output->backend != r->backend ||
-      !output->native_window)
+      (!output->native_window && !output->n_render_buffers))
     return false;
 
   if (r->backend->platform != VT_BACKEND_X11 &&
-      r->backend->platform != VT_BACKEND_WAYLAND)
+      r->backend->platform != VT_BACKEND_WAYLAND &&
+      r->backend->platform != VT_BACKEND_DRM_GBM)
     return false;
 
   if (output->render_surface)
@@ -661,6 +991,37 @@ bool renderer_setup_renderable_output_vk(struct vt_renderer_t *r,
 
   state->clear_color = (rn_color_t){0, 0, 0, 1};
   output->user_data_render = state;
+  if (vk->external) {
+    /* in external mode, we need to manage render targets (outputs)
+     * ourselves. external mode is only used for DRM, where we cannot get a
+     * VkSurfaceKHR from a windowing system */
+    state->targets = calloc(output->n_render_buffers, sizeof(*state->targets));
+
+    if (!state->targets)
+      goto external_fail;
+
+    for (uint32_t i = 0; i < output->n_render_buffers; ++i) {
+      if (!_vk_target_import(r, &output->render_buffers[i].attr,
+                             &state->targets[i]))
+        goto external_fail;
+    }
+
+    output->render_surface = state;
+    vt_output_damage_whole(output);
+    return true;
+
+  external_fail:
+    if (state->targets) {
+      for (uint32_t i = 0; i < output->n_render_buffers; ++i)
+        _vk_target_finish(r, &state->targets[i]);
+    }
+
+    free(state->targets);
+    free(state);
+    output->user_data_render = NULL;
+    return false;
+  }
+
   struct rn_vk_surface_impl_t impl = {
       .user = output,
       .create_vk_surface = _vk_create_surface,
@@ -691,6 +1052,12 @@ bool renderer_resize_renderable_output_vk(struct vt_renderer_t *r,
       h <= 0)
     return false;
 
+  struct vt_vk_backend_state_t *vk = r->user_data;
+
+  if (vk->external &&
+      (output->width != (uint32_t)w || output->height != (uint32_t)h))
+    return false;
+
   /* runara observes framebuffer dimensions and recreates the swapchain */
   output->width = w;
   output->height = h;
@@ -709,9 +1076,21 @@ bool renderer_destroy_renderable_output_vk(struct vt_renderer_t *r,
 
   struct vt_vk_backend_state_t *vk = r->user_data;
 
-  if (!_vk_runara_check(
-          r, rn_vk_surface_destroy(vk->runara, output->render_surface),
-          "rn_vk_surface_destroy"))
+  if (vk->external) {
+    // TODO: remove
+    if (!_vk_runara_check(r, rn_vk_wait_for_render(vk->runara),
+                          "rn_vk_wait_for_render(targets)"))
+      return false;
+
+    struct vk_output_t *state = output->user_data_render;
+
+    for (uint32_t i = 0; i < output->n_render_buffers; ++i)
+      _vk_target_finish(r, &state->targets[i]);
+
+    free(state->targets);
+  } else if (!_vk_runara_check(
+                 r, rn_vk_surface_destroy(vk->runara, output->render_surface),
+                 "rn_vk_surface_destroy"))
     return false;
 
   output->render_surface = NULL;
@@ -797,7 +1176,7 @@ void renderer_set_vsync_vk(struct vt_renderer_t *r, bool vsync) {
 
   struct vt_vk_backend_state_t *vk = r->user_data;
 
-  if (vk->vsync == vsync || vk->active)
+  if (vk->external || vk->vsync == vsync || vk->active)
     return;
 
   vk->vsync = vsync;
@@ -882,8 +1261,28 @@ void renderer_begin_frame_vk(struct vt_renderer_t *r,
   if (vk->failed)
     return;
 
+  vk->output = NULL;
+
+  if (vk->external) {
+    /* acquire the new render buffer from DRM in external mode */
+    output->render_buffer = output->impl->acquire_render_buffer(output);
+
+    if (!output->render_buffer)
+      return;
+
+    struct vk_output_t *state = output->user_data_render;
+    uint32_t            index = output->render_buffer - output->render_buffers;
+
+    if (!_vk_runara_check(
+            r, rn_vk_target_set(vk->runara, state->targets[index].handle),
+            "rn_vk_target_set"))
+      return;
+  } else {
+    /* in managed mode, we set the current runara surface to render to */
+    rn_vk_surface_set_current(vk->runara, output->render_surface);
+  }
+
   vk->output = output;
-  rn_vk_surface_set_current(vk->runara, output->render_surface);
   const struct rn_box_u32_t canvas = {0, 0, output->width, output->height};
   rn_canvas_set_bounds(vk->runara, &canvas);
   /* imports and uploads must precede rn_begin, which opens the render pass */
@@ -1028,6 +1427,16 @@ void renderer_end_scene_vk(struct vt_renderer_t *r,
 
   bool ended = _vk_runara_check(r, rn_end(vk->runara), "rn_end");
   vk->active = false;
+
+  if (ended && vk->external) {
+    ended = _vk_runara_check(r, rn_vk_wait_for_render(vk->runara),
+                             "rn_vk_wait_for_render(scanout)");
+
+    /* if we are in external mode and we successfully completed a draw, the render buffer is
+     * ready to be scanned out by DRM */
+    if (ended && output->render_buffer)
+      output->render_buffer->ready = true;
+  }
 
   if (!ended)
     vk->failed = true;

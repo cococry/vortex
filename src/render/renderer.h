@@ -24,6 +24,7 @@
 
 #include "../core/core_types.h"
 #include "../core/util.h"
+#include <sys/types.h>
 #include <wayland-util.h>
 
 struct vt_buffer_t;
@@ -44,6 +45,10 @@ struct vt_renderer_interface_t {
                                void *native_handle, struct wl_array *formats);
   bool (*query_dmabuf_formats_with_renderer)(struct vt_renderer_t *renderer,
                                              struct wl_array      *formats);
+  /* enumerate importable color-attachment formats and modifiers (we use this
+   * for rendering into output buffers). */
+  bool (*query_render_formats)(struct vt_renderer_t *r,
+                               struct wl_array      *formats);
   bool (*setup_renderable_output)(struct vt_renderer_t *r,
                                   struct vt_output_t   *output);
   bool (*resize_renderable_output)(struct vt_renderer_t *r,
@@ -96,6 +101,7 @@ struct vt_renderer_t {
   struct vt_backend_t *backend;
 
   uint32_t _desired_render_buffer_format;
+  dev_t    device;
 
   struct wl_list buffer_attachments;
 };

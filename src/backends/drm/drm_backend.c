@@ -156,7 +156,11 @@ _drm_output_cursor_update_visibility(struct vt_output_t           *output,
 
 static bool _added_global_keybinds = false;
 
+static struct vt_output_render_buffer_t *
+_drm_acquire_render_buffer(struct vt_output_t *output);
+
 static struct vt_output_implementation_t drm_output_impl = {
+    .acquire_render_buffer = _drm_acquire_render_buffer,
     .move_cursor = _drm_output_move_cursor,
     .update_cursor_image = _drm_output_update_cursor_image};
 
@@ -233,7 +237,12 @@ static void _drm_layer_finish(struct vt_drm_output_state_t *drm_output,
     vt_buffer_use_set_release_fence_fd(layer->use, release_fence_fd);
   }
 
-  if (layer->has_fb) {
+  if (layer->pool_buffer) {
+    layer->pool_buffer->busy = false;
+    layer->pool_buffer->ready = false;
+  }
+
+  if (layer->has_fb && !layer->pool_buffer) {
     drm_fb_finish(drm_output->drm_backend, &layer->fb);
     layer->has_fb = false;
   }
@@ -679,6 +688,9 @@ _drm_build_dmabuf_feedback(struct vt_drm_backend_master_state_t *master,
     _log_dmabuf_tranche(master->comp, main_tranche, dev->path);
   }
 
+  if (master->comp->renderer->impl.query_render_formats)
+    goto formats_done;
+
   struct vt_dmabuf_tranche_t *fallback_tranche =
       vt_dmabuf_feedback_add_tranche(feedback, feedback->dev_main, 0);
   wl_array_init(&fallback_tranche->formats);
@@ -699,6 +711,7 @@ _drm_build_dmabuf_feedback(struct vt_drm_backend_master_state_t *master,
 
   vt_drm_format_fini(&fallback_fmt);
 
+formats_done:
   drmFreeDevice(&dev_main_drm);
 
   for (uint32_t i = 0; i < n_devs; i++) {
@@ -958,10 +971,15 @@ static bool _drm_init_for_device(struct vt_compositor_t        *comp,
   _drm_update_tearing_cap(drm);
 
   /* Renderer is only initialized on the main DRM device */
-  if (!drm_master->main_drm && comp->renderer->impl.is_handle_renderable(
-                                   comp->renderer, drm->native_handle)) {
-    comp->renderer->impl.init(comp->backend, comp->renderer,
-                              drm->native_handle);
+  if (!drm_master->main_drm) {
+    comp->renderer->device = dev->dev;
+  }
+
+  if (!drm_master->main_drm &&
+      comp->renderer->impl.is_handle_renderable(comp->renderer,
+                                                drm->native_handle) &&
+      comp->renderer->impl.init(comp->backend, comp->renderer,
+                                drm->native_handle)) {
     drm_master->main_drm = drm;
 
     VT_TRACE(comp->log, "Chose DRM main device: GPU %s (FD: %i).", dev->path,
@@ -1624,6 +1642,157 @@ static bool _drm_atomic_output_supported(struct vt_drm_output_state_t *output) {
          plane->props[VT_DRM_PLANE_SRC_H] != 0;
 }
 
+static struct vt_output_render_buffer_t *
+_drm_acquire_render_buffer(struct vt_output_t *output) {
+  struct vt_drm_output_state_t *state = output->user_data;
+
+  if (state->flip_inflight || state->pending_valid)
+    return NULL;
+
+  for (uint32_t i = 0; i < output->n_render_buffers; ++i) {
+    uint32_t index = (state->render_next + i) % output->n_render_buffers;
+    struct vt_output_render_buffer_t *buffer = &output->render_buffers[index];
+
+    if (!buffer->busy) {
+      state->render_next = (index + 1) % output->n_render_buffers;
+      buffer->ready = false;
+      return buffer;
+    }
+  }
+
+  return NULL;
+}
+
+static void _drm_render_pool_finish(struct vt_drm_output_state_t *state) {
+  for (unsigned i = 0; i < 3; ++i) {
+    struct vt_dmabuf_attr_t *attr = &state->render_buffers[i].attr;
+
+    for (int p = 0; p < attr->num_planes; ++p) {
+      if (attr->fds[p] >= 0)
+        close(attr->fds[p]);
+    }
+
+    drm_fb_finish(state->drm_backend, &state->render_fbs[i]);
+
+    if (state->render_bos[i])
+      gbm_bo_destroy(state->render_bos[i]);
+
+    state->render_bos[i] = NULL;
+    memset(&state->render_buffers[i], 0, sizeof(state->render_buffers[i]));
+  }
+
+  state->base->render_buffers = NULL;
+  state->base->render_buffer = NULL;
+  state->base->n_render_buffers = 0;
+}
+
+static bool _drm_render_pool_create(struct vt_drm_output_state_t *state) {
+  struct vt_drm_backend_state_t *drm = state->drm_backend;
+  struct vt_output_t            *output = state->base;
+  struct vt_renderer_t          *renderer = drm->comp->renderer;
+  struct wl_array                formats;
+  wl_array_init(&formats);
+
+  /* vulkan supplies renderable format layouts, we filters them against the
+   * primary plane’s scanout capabilities. GBM then chooses a layout from that
+   * shared list. We do that for all 3 output render buffers */
+  if (!renderer->impl.query_render_formats(renderer, &formats))
+    goto fail;
+
+  struct vt_drm_format_t *fmt;
+  wl_array_for_each(fmt, &formats) {
+    size_t    count = vt_drm_format_mod_count(fmt);
+    uint64_t *mods = calloc(count, sizeof(*mods));
+
+    if (!mods)
+      goto fail;
+
+    size_t                           n = 0;
+    struct vt_drm_format_modifier_t *mod;
+    wl_array_for_each(mod, &fmt->mods) {
+      if (!drm->caps[VT_DRM_CAP_ADDFB2_MODIFIERS] &&
+          mod->mod != DRM_FORMAT_MOD_LINEAR)
+        continue;
+
+      if (_drm_plane_has_format(state->crtc->plane_primary, fmt->format,
+                                mod->mod) ||
+          (mod->mod == DRM_FORMAT_MOD_LINEAR &&
+           _drm_plane_has_format(state->crtc->plane_primary, fmt->format,
+                                 DRM_FORMAT_MOD_INVALID)))
+        mods[n++] = mod->mod;
+    }
+
+    bool complete = n > 0;
+
+    for (unsigned i = 0; complete && i < 3; ++i) {
+      struct gbm_bo *bo = gbm_bo_create_with_modifiers2(
+          drm->gbm_dev, state->mode.hdisplay, state->mode.vdisplay, fmt->format,
+          mods, n, GBM_BO_USE_RENDERING | GBM_BO_USE_SCANOUT);
+      state->render_bos[i] = bo;
+
+      if (!bo) {
+        complete = false;
+        break;
+      }
+
+      struct vt_dmabuf_attr_t *attr = &state->render_buffers[i].attr;
+      *attr = (struct vt_dmabuf_attr_t){
+          .width = gbm_bo_get_width(bo),
+          .height = gbm_bo_get_height(bo),
+          .format = gbm_bo_get_format(bo),
+          .mod = gbm_bo_get_modifier(bo),
+      };
+      int planes = gbm_bo_get_plane_count(bo);
+
+      if (planes < 1 || planes > VT_DMABUF_PLANES_CAP ||
+          attr->mod == DRM_FORMAT_MOD_INVALID) {
+        complete = false;
+        break;
+      }
+
+      for (int p = 0; p < planes; ++p) {
+        attr->fds[p] = gbm_bo_get_fd_for_plane(bo, p);
+        attr->num_planes++;
+        attr->offsets[p] = gbm_bo_get_offset(bo, p);
+        attr->strides[p] = gbm_bo_get_stride_for_plane(bo, p);
+
+        if (attr->fds[p] < 0) {
+          complete = false;
+          break;
+        }
+      }
+
+      if (complete &&
+          !drm_fb_init_from_gbm(drm, &state->render_fbs[i], bo, NULL))
+        complete = false;
+    }
+
+    free(mods);
+
+    if (complete) {
+      output->render_buffers = state->render_buffers;
+      output->n_render_buffers = 3;
+      output->format = fmt->format;
+      VT_TRACE(drm->comp->log,
+               "allocated 3 output buffers: format=0x%08" PRIx32
+               " modifier=0x%016" PRIx64 ".",
+               fmt->format, state->render_buffers[0].attr.mod);
+      vt_drm_format_array_free(&formats);
+      return true;
+    }
+
+    _drm_render_pool_finish(state);
+  }
+
+fail:
+  vt_drm_format_array_free(&formats);
+  _drm_render_pool_finish(state);
+  VT_ERROR(drm->comp->log,
+           "no shared render/scanout buffer layout for connector %u.",
+           state->conn_id);
+  return false;
+}
+
 static bool _drm_create_output_for_device(struct vt_drm_backend_state_t *drm,
                                           struct vt_output_t            *output,
                                           void                          *data) {
@@ -1643,6 +1812,8 @@ static bool _drm_create_output_for_device(struct vt_drm_backend_state_t *drm,
 
   struct vt_drm_output_state_t *drm_output =
       BACKEND_DATA(output, struct vt_drm_output_state_t);
+  drm_output->base = output;
+  drm_output->drm_backend = drm;
   wl_array_init(&drm_output->current_layers);
   wl_array_init(&drm_output->pending_layers);
   wl_array_init(&drm_output->layer_plan);
@@ -1686,8 +1857,6 @@ static bool _drm_create_output_for_device(struct vt_drm_backend_state_t *drm,
 
   selected->flags |= WL_OUTPUT_MODE_CURRENT;
 
-  drm_output->base = output;
-  drm_output->drm_backend = drm;
   drm_output->conn_id = conn->connector_id;
   drm_output->mode = *selected_drm;
   drm_output->needs_modeset = true;
@@ -1750,17 +1919,23 @@ static bool _drm_create_output_for_device(struct vt_drm_backend_state_t *drm,
 
   /* We create all GBM surfaces with the main DRM device, we do not support
    * setups where multiple GPUs render to separate outputs */
-  drm_output->gbm_surf = gbm_surface_create(
-      drm_master->main_drm->gbm_dev, drm_output->mode.hdisplay,
-      drm_output->mode.vdisplay, desired_format, usage);
+  if (comp->renderer->impl.query_render_formats) {
+    if (drm != drm_master->main_drm || !_drm_render_pool_create(drm_output))
+      return false;
+  } else {
+    drm_output->gbm_surf = gbm_surface_create(
+        drm_master->main_drm->gbm_dev, drm_output->mode.hdisplay,
+        drm_output->mode.vdisplay, desired_format, usage);
 
-  if (!drm_output->gbm_surf) {
-    VT_ERROR(comp->log,
-             "cannot create GBM surface (%ux%u@%u) for output on connector %i "
-             "for rendering.",
-             drm_output->mode.hdisplay, drm_output->mode.vdisplay,
-             drm_output->mode.vrefresh, drm_output->conn_id);
-    return false;
+    if (!drm_output->gbm_surf) {
+      VT_ERROR(
+          comp->log,
+          "cannot create GBM surface (%ux%u@%u) for output on connector %i "
+          "for rendering.",
+          drm_output->mode.hdisplay, drm_output->mode.vdisplay,
+          drm_output->mode.vrefresh, drm_output->conn_id);
+      return false;
+    }
   }
 
   VT_TRACE(comp->log, "Acknowledged connector: %u, CRTC %u, mode %ux%u@%u (%p)",
@@ -1775,7 +1950,8 @@ static bool _drm_create_output_for_device(struct vt_drm_backend_state_t *drm,
   output->needs_repaint = true;
   output->refresh_rate = selected->refresh;
   output->native_window = drm_output->gbm_surf;
-  output->format = desired_format;
+  if (!output->n_render_buffers)
+    output->format = desired_format;
   output->id = drm_output->conn_id;
 
   output->physical.mm_width = conn->mmWidth;
@@ -1929,6 +2105,10 @@ static bool _drm_scan_connectors(struct vt_drm_backend_state_t *drm) {
       VT_ERROR(drm->comp->log, "Failed to initialize connector %u.",
                connector_id);
       drmModeFreeConnector(conn);
+
+      if (output->user_data)
+        _drm_destroy_output_for_device(drm, output);
+
       continue;
     }
 
@@ -2381,7 +2561,7 @@ static bool _drm_destroy_output_for_device(struct vt_drm_backend_state_t *drm,
   if (drm_output->crtc)
     drm_output->crtc->in_use = false;
 
-  if (drm_output->gbm_surf) {
+  if (drm_output->gbm_surf || output->n_render_buffers) {
     if (drm_output->renderable_setup && drm->comp->renderer &&
         drm->comp->renderer->impl.destroy_renderable_output &&
         !drm->comp->renderer->impl.destroy_renderable_output(
@@ -2391,7 +2571,10 @@ static bool _drm_destroy_output_for_device(struct vt_drm_backend_state_t *drm,
     }
     drm_output->renderable_setup = false;
 
-    gbm_surface_destroy(drm_output->gbm_surf);
+    _drm_render_pool_finish(drm_output);
+
+    if (drm_output->gbm_surf)
+      gbm_surface_destroy(drm_output->gbm_surf);
     drm_output->gbm_surf = NULL;
   }
 
@@ -2635,7 +2818,42 @@ _drm_output_add_composition_layer(struct vt_drm_backend_state_t *drm,
                                   struct vt_drm_output_state_t  *drm_output,
                                   struct vt_output_t            *output) {
   VT_PROFILE_SCOPE();
-  if (!drm || !drm_output || !output || !drm_output->gbm_surf)
+  if (!drm || !drm_output || !output)
+    return false;
+
+  if (output->n_render_buffers) {
+    struct vt_output_render_buffer_t *buffer = output->render_buffer;
+
+    if (!buffer || !buffer->ready || buffer->busy)
+      return false;
+
+    struct vt_drm_layer_state_t *layer =
+        wl_array_add(&drm_output->layer_plan, sizeof(*layer));
+
+    if (!layer)
+      return false;
+
+    /* when using the render buffer pool, we simply submit the currently
+     * rendered output buffer as a layer, instead of locking the front buffer
+     * and initializing a drm FB from the GBM buffer that the renderer rendered
+     * to.
+     */
+    *layer = (struct vt_drm_layer_state_t){
+        .fb = drm_output->render_fbs[buffer - output->render_buffers],
+        .has_fb = true,
+        .pool_buffer = buffer,
+        .role = VT_DRM_LAYER_COMPOSITED_SCENE,
+        .acquire_fence_fd = -1,
+        .src = {.width = output->width, .height = output->height},
+        .dst = {.width = output->width, .height = output->height},
+    };
+    buffer->busy = true;
+    buffer->ready = false;
+    output->render_buffer = NULL;
+    return true;
+  }
+
+  if (!drm_output->gbm_surf)
     return false;
 
   struct gbm_bo *bo = gbm_surface_lock_front_buffer(drm_output->gbm_surf);
@@ -2710,7 +2928,8 @@ static bool _drm_handle_frame_for_device(struct vt_drm_backend_state_t *drm,
 
   struct vt_drm_output_state_t *drm_output =
       BACKEND_DATA(output, struct vt_drm_output_state_t);
-  if (!drm_output || drm_output->drm_backend != drm || !drm_output->gbm_surf ||
+  if (!drm_output || drm_output->drm_backend != drm ||
+      (!drm_output->gbm_surf && !output->n_render_buffers) ||
       drm_output->flip_inflight || drm_output->pending_valid) {
     return false;
   }
@@ -3295,6 +3514,16 @@ _drm_prepare_test_composition_layer(struct vt_drm_backend_state_t *drm,
   VT_PROFILE_SCOPE();
   struct vt_drm_framebuffer_t *fb = &drm_output->composition_test_fb;
   uint32_t                     format = output->format;
+
+  if (output->n_render_buffers) {
+    struct vt_output_layer_state_t layer = {
+        .src = {.width = output->width, .height = output->height},
+        .dst = {.width = output->width, .height = output->height},
+    };
+    return drm_liftoff_set_layer_props(drm_output->liftoff_composition_layer,
+                                       &layer, drm_output->render_fbs[0].id, -1,
+                                       0);
+  }
 
   /* prefer the real swapchain layout once a composed frame exists. */
   struct vt_drm_layer_state_t *current;

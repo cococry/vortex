@@ -24,6 +24,7 @@
 
 #include "buffer.h"
 #include "protocols/vt_background.h"
+#include "render/dmabuf_attr.h"
 #include "scene.h"
 #include "util.h"
 #include <pixman.h>
@@ -41,7 +42,17 @@ enum vt_cursor_mode_t {
   VT_CURSOR_MODE_HARDWARE,
 };
 
+struct vt_output_render_buffer_t {
+  /* we borrow the backend's fds for the lifetime of the output targets. */
+  struct vt_dmabuf_attr_t attr;
+  /* we reserve busy buffers through scanout and mark completed renders ready.
+   */
+  bool busy, ready;
+};
+
 struct vt_output_implementation_t {
+  struct vt_output_render_buffer_t *(*acquire_render_buffer)(
+      struct vt_output_t *output);
   bool (*update_cursor_image)(struct vt_output_t     *output,
                               struct vt_buffer_use_t *use);
   void (*move_cursor)(struct vt_output_t *output, int32_t x, int32_t y);
@@ -73,6 +84,9 @@ struct vt_output_t {
   struct vt_backend_t *backend;
   void                *native_window;
   void                *render_surface;
+
+  struct vt_output_render_buffer_t *render_buffers, *render_buffer;
+  uint32_t                          n_render_buffers;
 
   uint32_t width, height;
   int32_t  x, y;

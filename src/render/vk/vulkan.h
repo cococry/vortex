@@ -26,6 +26,9 @@
 #include "../renderer.h"
 #include "src/core/surface.h"
 
+bool renderer_query_render_formats_vk(struct vt_renderer_t *r,
+                                      struct wl_array      *formats);
+
 bool renderer_init_vk(struct vt_backend_t *backend, struct vt_renderer_t *r,
                       void *native_handle);
 
