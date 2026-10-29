@@ -20,6 +20,7 @@
  * SOFTWARE.
  */
 
+#include "src/core/profiling.h"
 #include "surface.h"
 #include "../input/wl_seat.h"
 #include "src/core/buffer.h"
@@ -37,6 +38,7 @@
 #define _SUBSYS_NAME "SURFACE"
 
 bool vt_surface_init(struct vt_surface_t *surf) {
+  VT_PROFILE_SCOPE();
   if (!surf)
     return false;
 
@@ -67,6 +69,7 @@ bool vt_surface_init(struct vt_surface_t *surf) {
 }
 
 void vt_surface_set_mapped(struct vt_surface_t *surf, bool mapped) {
+  VT_PROFILE_SCOPE();
   if (!surf || !surf->comp || surf->mapped == mapped)
     return;
 
@@ -98,6 +101,7 @@ void vt_surface_set_mapped(struct vt_surface_t *surf, bool mapped) {
 }
 
 struct vt_surface_t *focus_stack_pop(struct vt_compositor_t *comp) {
+  VT_PROFILE_SCOPE();
   if (!comp || !comp->seat)
     return NULL;
 
@@ -113,6 +117,7 @@ struct vt_surface_t *focus_stack_pop(struct vt_compositor_t *comp) {
 
 bool vt_surface_apply_buffer_use(struct vt_surface_t    *surf,
                                  struct vt_buffer_use_t *new_use) {
+  VT_PROFILE_SCOPE();
   if (!surf)
     return false;
 
@@ -128,6 +133,7 @@ bool vt_surface_apply_buffer_use(struct vt_surface_t    *surf,
 
 void vt_surface_apply_pending_frame_callbacks(
     struct vt_surface_t *surf, struct vt_surface_state_pending_t *state) {
+  VT_PROFILE_SCOPE();
   if (wl_list_empty(&state->frame_callbacks))
     return;
 
@@ -137,6 +143,7 @@ void vt_surface_apply_pending_frame_callbacks(
 }
 
 void vt_surface_pending_state_init(struct vt_surface_state_pending_t *state) {
+  VT_PROFILE_SCOPE();
   if (!state)
     return;
 
@@ -153,6 +160,7 @@ void vt_surface_pending_state_init(struct vt_surface_state_pending_t *state) {
 
 void vt_surface_pending_state_defaults(
     struct vt_surface_state_pending_t *state) {
+  VT_PROFILE_SCOPE();
   if (!state)
     return;
 
@@ -163,6 +171,7 @@ void vt_surface_pending_state_defaults(
 }
 
 void vt_surface_applied_state_init(struct vt_surface_state_applied_t *state) {
+  VT_PROFILE_SCOPE();
   if (!state)
     return;
 
@@ -176,6 +185,7 @@ void vt_surface_applied_state_init(struct vt_surface_state_applied_t *state) {
 
 void vt_surface_applied_state_defaults(
     struct vt_surface_state_applied_t *state) {
+  VT_PROFILE_SCOPE();
   if (!state)
     return;
 
@@ -187,6 +197,7 @@ void vt_surface_applied_state_defaults(
 
 void vt_surface_pending_state_move(struct vt_surface_state_pending_t *dst,
                                    struct vt_surface_state_pending_t *src) {
+  VT_PROFILE_SCOPE();
   if (!dst || !src || dst == src)
     return;
 
@@ -247,6 +258,7 @@ void vt_surface_pending_state_move(struct vt_surface_state_pending_t *dst,
 }
 
 void vt_surface_pending_state_fini(struct vt_surface_state_pending_t *state) {
+  VT_PROFILE_SCOPE();
   if (!state)
     return;
 
@@ -270,6 +282,7 @@ void vt_surface_pending_state_fini(struct vt_surface_state_pending_t *state) {
 }
 
 void vt_surface_applied_state_fini(struct vt_surface_state_applied_t *state) {
+  VT_PROFILE_SCOPE();
   if (!state)
     return;
 
@@ -280,6 +293,7 @@ void vt_surface_applied_state_fini(struct vt_surface_state_applied_t *state) {
 }
 
 bool vt_surface_validate_commit(struct vt_surface_t *surf) {
+  VT_PROFILE_SCOPE();
   if (!surf)
     return false;
 
@@ -301,6 +315,7 @@ bool vt_surface_validate_commit(struct vt_surface_t *surf) {
 }
 
 bool vt_surface_effectively_synchronized(struct vt_surface_t *surf) {
+  VT_PROFILE_SCOPE();
   if (!surf)
     return false;
 
@@ -323,6 +338,7 @@ bool vt_surface_effectively_synchronized(struct vt_surface_t *surf) {
 }
 
 bool vt_surface_effectively_mapped(struct vt_surface_t *surf) {
+  VT_PROFILE_SCOPE();
   if (!surf || !surf->mapped)
     return false;
 
@@ -342,6 +358,7 @@ bool vt_surface_effectively_mapped(struct vt_surface_t *surf) {
 }
 
 static bool _content_update_enqueue(struct vt_content_update_t *cu) {
+  VT_PROFILE_SCOPE();
   if (!cu || !cu->surf || cu->queued)
     return false;
 
@@ -363,6 +380,7 @@ static bool _content_update_enqueue(struct vt_content_update_t *cu) {
 
 static bool
 _content_update_add_child_dependencies(struct vt_content_update_t *cu) {
+  VT_PROFILE_SCOPE();
   if (!cu || !cu->surf)
     return false;
 
@@ -391,6 +409,7 @@ _content_update_add_child_dependencies(struct vt_content_update_t *cu) {
 }
 
 bool vt_surface_emit_content_update(struct vt_surface_t *surf) {
+  VT_PROFILE_SCOPE();
   if (!surf)
     return false;
 
@@ -444,6 +463,7 @@ fail:
 }
 
 struct vt_content_update_t *vt_surface_last_scu(struct vt_surface_t *surf) {
+  VT_PROFILE_SCOPE();
   if (!surf)
     return NULL;
 
@@ -458,6 +478,7 @@ struct vt_content_update_t *vt_surface_last_scu(struct vt_surface_t *surf) {
 
 void vt_surface_set_pending_buffer_release(
     struct vt_surface_t *surf, struct vt_buffer_release_t *release) {
+  VT_PROFILE_SCOPE();
   if (!surf)
     return;
 
@@ -466,6 +487,7 @@ void vt_surface_set_pending_buffer_release(
 
 void vt_surface_frame_done(struct vt_surface_t *surf,
                            uint32_t             frame_time_msec) {
+  VT_PROFILE_SCOPE();
   if (!surf)
     return;
 
@@ -484,6 +506,7 @@ bool vt_surface_compute_final_size(const struct vt_surface_t *surf,
                                    uint32_t                   buffer_scale,
                                    uint32_t buffer_transform, int32_t *o_w,
                                    int32_t *o_h) {
+  VT_PROFILE_SCOPE();
   if (!surf || !o_w || !o_h)
     return false;
 
@@ -529,6 +552,7 @@ bool vt_surface_compute_final_size(const struct vt_surface_t *surf,
 bool vt_surface_set_role(struct vt_surface_t                 *surf,
                          const struct vt_surface_role_impl_t *impl,
                          void                                *data) {
+  VT_PROFILE_SCOPE();
   if (!surf || !impl)
     return false;
 
@@ -550,12 +574,14 @@ bool vt_surface_set_role(struct vt_surface_t                 *surf,
 
 bool vt_surface_has_role(struct vt_surface_t        *surf,
                          enum vt_surface_role_type_t type) {
+  VT_PROFILE_SCOPE();
   if (!surf)
     return false;
   return surf->role.impl && surf->role.impl->type == type;
 }
 
 struct vt_buffer_t *vt_surface_get_buffer(const struct vt_surface_t *surf) {
+  VT_PROFILE_SCOPE();
   if (!surf)
     return NULL;
   return surf->current_buf_use ? surf->current_buf_use->buf : NULL;

@@ -1,4 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
+#include "src/core/profiling.h"
 #include "vulkan.h"
 #include "config.h"
 #include "src/core/output.h"
@@ -58,6 +59,7 @@ struct vt_vk_backend_state_t {
 
 static bool _vk_runara_check(struct vt_renderer_t *r, rn_result_t result,
                              const char *operation) {
+  VT_PROFILE_SCOPE();
   if (result == RN_OK)
     return true;
 
@@ -66,12 +68,14 @@ static bool _vk_runara_check(struct vt_renderer_t *r, rn_result_t result,
 }
 
 static rn_color_t _vk_color(uint32_t col) {
+  VT_PROFILE_SCOPE();
   return (rn_color_t){((col >> 16) & 255) / 255.0f,
                       ((col >> 24) & 255) / 255.0f, ((col >> 8) & 255) / 255.0f,
                       (col & 255) / 255.0f};
 }
 
 static void _vk_texture_finish(struct vk_texture *texture) {
+  VT_PROFILE_SCOPE();
   struct vt_vk_backend_state_t *vk = texture->renderer->user_data;
 
   if (texture->registered)
@@ -83,6 +87,7 @@ static void _vk_texture_finish(struct vk_texture *texture) {
 
 static void _vk_buffer_destroy(struct vt_buffer_t *buf, const void *owner,
                                void *data) {
+  VT_PROFILE_SCOPE();
   (void)buf;
   (void)owner;
   struct vk_texture *texture = data;
@@ -92,6 +97,7 @@ static void _vk_buffer_destroy(struct vt_buffer_t *buf, const void *owner,
 
 static void _vk_buffer_end_use(struct vt_buffer_t *buf, const void *owner,
                                void *data) {
+  VT_PROFILE_SCOPE();
   (void)buf;
   (void)owner;
   struct vk_texture *texture = data;
@@ -106,6 +112,7 @@ static const struct vt_buffer_attachment_implementation_t vk_buffer_impl = {
 static struct vk_texture *_vk_buffer_texture_get_or_create(struct vt_renderer_t *r,
                                              struct vt_buffer_t   *buf,
                                              bool                  create) {
+  VT_PROFILE_SCOPE();
   struct vt_buffer_attachment_t *attachment =
       vt_buffer_find_attachment(buf, r, &vk_buffer_impl);
 
@@ -133,6 +140,7 @@ static struct vk_texture *_vk_buffer_texture_get_or_create(struct vt_renderer_t 
 }
 
 static void _vk_surface_texture_destroy(struct vt_surface_addon_t *addon) {
+  VT_PROFILE_SCOPE();
   struct vk_surface_texture *texture = wl_container_of(addon, texture, addon);
   _vk_texture_finish(&texture->texture);
   wl_list_remove(&texture->link);
@@ -142,6 +150,7 @@ static void _vk_surface_texture_destroy(struct vt_surface_addon_t *addon) {
 static struct vk_surface_texture *
 _vk_surface_texture(struct vt_renderer_t *r, struct vt_surface_t *surface,
                     bool create) {
+  VT_PROFILE_SCOPE();
   struct vt_surface_addon_t *addon;
 
   wl_list_for_each(addon, &surface->addons, link) {
@@ -174,6 +183,7 @@ _vk_surface_texture(struct vt_renderer_t *r, struct vt_surface_t *surface,
 static bool _vk_import_shm(struct vt_renderer_t *r, struct vk_texture *texture,
                            const struct vt_shm_attr_t *shm,
                            const pixman_region32_t    *damage) {
+  VT_PROFILE_SCOPE();
   struct vt_vk_backend_state_t *vk = r->user_data;
 
   if (!shm->data || shm->width <= 0 || shm->height <= 0 || shm->stride <= 0 ||
@@ -257,6 +267,7 @@ static bool _vk_import_shm(struct vt_renderer_t *r, struct vk_texture *texture,
 }
 
 static bool _vk_query_formats(struct vt_renderer_t *r) {
+  VT_PROFILE_SCOPE();
   struct vt_vk_backend_state_t       *vk = r->user_data;
   const struct rn_vk_dmabuf_format_t *formats;
   size_t                              count;
@@ -278,6 +289,7 @@ static bool _vk_import_dmabuf(struct vt_renderer_t          *r,
                               struct vk_texture             *texture,
                               const struct vt_dmabuf_attr_t *attr,
                               int                            acquire_fd) {
+  VT_PROFILE_SCOPE();
   if (attr->width <= 0 || attr->height <= 0 || attr->num_planes <= 0 ||
       attr->num_planes > RN_VK_DMABUF_MAX_PLANES)
     return false;
@@ -311,6 +323,7 @@ static bool _vk_import_dmabuf(struct vt_renderer_t          *r,
 }
 
 static bool _vk_wait_fd(struct vt_renderer_t *r, int fd) {
+  VT_PROFILE_SCOPE();
   struct pollfd wait = {.fd = fd, .events = POLLIN};
   int           result;
 
@@ -326,6 +339,7 @@ static bool _vk_wait_fd(struct vt_renderer_t *r, int fd) {
 }
 
 static void _vk_frame_uses_finish(struct vt_vk_backend_state_t *vk) {
+  VT_PROFILE_SCOPE();
   for (size_t i = 0; i < vk->use_count; ++i)
     vt_buffer_use_unref(&vk->uses[i].use);
 
@@ -335,6 +349,7 @@ static void _vk_frame_uses_finish(struct vt_vk_backend_state_t *vk) {
 static bool _vk_prepare_use(struct vt_renderer_t   *r,
                             struct vt_buffer_use_t *use,
                             struct vt_surface_t    *surface) {
+  VT_PROFILE_SCOPE();
   struct vt_vk_backend_state_t *vk = r->user_data;
 
   if (!use || !use->buf)
@@ -415,6 +430,7 @@ static bool _vk_prepare_use(struct vt_renderer_t   *r,
 }
 
 static const char *const *_vk_instance_extensions(void *user, uint32_t *count) {
+  VT_PROFILE_SCOPE();
   struct vt_renderer_t    *r = user;
   static const char *const x11[] = {VK_KHR_SURFACE_EXTENSION_NAME,
                                     "VK_KHR_xlib_surface"};
@@ -426,6 +442,7 @@ static const char *const *_vk_instance_extensions(void *user, uint32_t *count) {
 
 static VkResult _vk_create_surface(void *user, VkInstance instance,
                                    VkSurfaceKHR *surface) {
+  VT_PROFILE_SCOPE();
   struct vt_output_t   *output = user;
   struct vt_renderer_t *r = output->backend->comp->renderer;
 
@@ -463,6 +480,7 @@ static VkResult _vk_create_surface(void *user, VkInstance instance,
 
 static void _vk_framebuffer_size(void *user, uint32_t *width,
                                  uint32_t *height) {
+  VT_PROFILE_SCOPE();
   struct vt_output_t *output = user;
   *width = output->width;
   *height = output->height;
@@ -471,6 +489,7 @@ static void _vk_framebuffer_size(void *user, uint32_t *width,
 static bool _vk_create_renderer(struct vt_renderer_t      *r,
                                 enum vt_backend_platform_t platform,
                                 void                      *native_handle) {
+  VT_PROFILE_SCOPE();
   if (platform != VT_BACKEND_X11 && platform != VT_BACKEND_WAYLAND) {
     VT_ERROR(r->comp->log,
              "Vulkan presentation currently requires X11 or Wayland.");
@@ -523,6 +542,7 @@ fail:
 
 bool renderer_init_vk(struct vt_backend_t *backend, struct vt_renderer_t *r,
                       void *native_handle) {
+  VT_PROFILE_SCOPE();
   if (!backend || !r || !native_handle)
     return false;
 
@@ -547,12 +567,14 @@ bool renderer_init_vk(struct vt_backend_t *backend, struct vt_renderer_t *r,
 
 bool renderer_is_handle_renderable_vk(struct vt_renderer_t *r,
                                       void                 *native_handle) {
+  VT_PROFILE_SCOPE();
   return r && r->user_data && native_handle;
 }
 
 bool renderer_query_dmabuf_formats_vk(struct vt_compositor_t *comp,
                                       void                   *native_handle,
                                       struct wl_array        *formats) {
+  VT_PROFILE_SCOPE();
   return comp && native_handle &&
          renderer_query_dmabuf_formats_with_renderer_vk(comp->renderer,
                                                         formats);
@@ -560,6 +582,7 @@ bool renderer_query_dmabuf_formats_vk(struct vt_compositor_t *comp,
 
 bool renderer_query_dmabuf_formats_with_renderer_vk(struct vt_renderer_t *r,
                                                     struct wl_array *formats) {
+  VT_PROFILE_SCOPE();
   if (!r || !r->user_data || !formats)
     return false;
 
@@ -569,6 +592,7 @@ bool renderer_query_dmabuf_formats_with_renderer_vk(struct vt_renderer_t *r,
 
 bool renderer_setup_renderable_output_vk(struct vt_renderer_t *r,
                                          struct vt_output_t   *output) {
+  VT_PROFILE_SCOPE();
   if (!r || !r->user_data || !output || output->backend != r->backend ||
       !output->native_window)
     return false;
@@ -614,6 +638,7 @@ bool renderer_setup_renderable_output_vk(struct vt_renderer_t *r,
 bool renderer_resize_renderable_output_vk(struct vt_renderer_t *r,
                                           struct vt_output_t *output, int32_t w,
                                           int32_t h) {
+  VT_PROFILE_SCOPE();
   if (!r || !r->user_data || !output || !output->render_surface || w <= 0 ||
       h <= 0)
     return false;
@@ -628,6 +653,7 @@ bool renderer_resize_renderable_output_vk(struct vt_renderer_t *r,
 
 bool renderer_destroy_renderable_output_vk(struct vt_renderer_t *r,
                                            struct vt_output_t   *output) {
+  VT_PROFILE_SCOPE();
   if (!r || !r->user_data || !output)
     return false;
 
@@ -649,6 +675,7 @@ bool renderer_destroy_renderable_output_vk(struct vt_renderer_t *r,
 
 bool renderer_import_buffer_vk(struct vt_renderer_t *r, struct vt_buffer_t *buf,
                                const pixman_region32_t *damage) {
+  VT_PROFILE_SCOPE();
   if (!r || !r->user_data || !buf)
     return false;
 
@@ -682,6 +709,7 @@ bool renderer_import_buffer_vk(struct vt_renderer_t *r, struct vt_buffer_t *buf,
 
 bool renderer_is_dmabuf_importable_vk(struct vt_renderer_t          *r,
                                       const struct vt_dmabuf_attr_t *attr) {
+  VT_PROFILE_SCOPE();
   if (!r || !r->user_data || !attr)
     return false;
 
@@ -697,6 +725,7 @@ bool renderer_is_dmabuf_importable_vk(struct vt_renderer_t          *r,
 }
 
 bool renderer_drop_context_vk(struct vt_renderer_t *r) {
+  VT_PROFILE_SCOPE();
   if (!r || !r->user_data)
     return false;
 
@@ -710,12 +739,14 @@ bool renderer_drop_context_vk(struct vt_renderer_t *r) {
 }
 
 bool renderer_supports_explicit_sync_vk(struct vt_renderer_t *r) {
+  VT_PROFILE_SCOPE();
   /* acquire fences are waited on before sampling, releases follow gpu
    * completion */
   return r && r->user_data;
 }
 
 void renderer_set_vsync_vk(struct vt_renderer_t *r, bool vsync) {
+  VT_PROFILE_SCOPE();
   if (!r || !r->user_data)
     return;
 
@@ -746,6 +777,7 @@ void renderer_set_vsync_vk(struct vt_renderer_t *r, bool vsync) {
 
 void renderer_set_clear_color_vk(struct vt_renderer_t *r,
                                  struct vt_output_t *output, uint32_t col) {
+  VT_PROFILE_SCOPE();
   if (!r || !r->user_data || !output || !output->user_data_render)
     return;
 
@@ -755,6 +787,7 @@ void renderer_set_clear_color_vk(struct vt_renderer_t *r,
 
 void renderer_clear_color_buffer_vk(struct vt_renderer_t *r,
                                     struct vt_output_t   *output) {
+  VT_PROFILE_SCOPE();
   if (!r || !r->user_data)
     return;
 
@@ -771,6 +804,7 @@ void renderer_clear_color_buffer_vk(struct vt_renderer_t *r,
 
 void renderer_stencil_damage_pass_vk(struct vt_renderer_t *r,
                                      struct vt_output_t   *output) {
+  VT_PROFILE_SCOPE();
   (void)r;
   /* swapchain images have no preserved contents, so composite the entire scene
    */
@@ -781,6 +815,7 @@ void renderer_stencil_damage_pass_vk(struct vt_renderer_t *r,
 
 void renderer_composite_pass_vk(struct vt_renderer_t *r,
                                 struct vt_output_t   *output) {
+  VT_PROFILE_SCOPE();
   (void)r;
   (void)output;
   /* runara owns the render pass and blending state */
@@ -788,6 +823,7 @@ void renderer_composite_pass_vk(struct vt_renderer_t *r,
 
 void renderer_begin_frame_vk(struct vt_renderer_t *r,
                              struct vt_output_t   *output) {
+  VT_PROFILE_SCOPE();
   if (!r || !r->user_data || !output || !output->render_surface ||
       !output->width || !output->height)
     return;
@@ -829,6 +865,7 @@ void renderer_begin_frame_vk(struct vt_renderer_t *r,
 
 void renderer_begin_scene_vk(struct vt_renderer_t *r,
                              struct vt_output_t   *output) {
+  VT_PROFILE_SCOPE();
   if (!r || !r->user_data)
     return;
 
@@ -844,6 +881,7 @@ static bool _vk_draw_use(struct vt_renderer_t *r, struct vt_output_t *output,
                          struct vt_buffer_use_t *use, uint32_t width,
                          uint32_t height, struct vt_box_t *src,
                          struct vt_box_t *dst) {
+  VT_PROFILE_SCOPE();
   if (!r || !r->user_data || !use || !src || !dst || !width || !height)
     return false;
 
@@ -879,6 +917,7 @@ void renderer_draw_buffer_vk(struct vt_renderer_t   *r,
                              struct vt_output_t     *output,
                              struct vt_buffer_use_t *use, struct vt_box_t *src,
                              struct vt_box_t *dst) {
+  VT_PROFILE_SCOPE();
   if (use && use->buf)
     _vk_draw_use(r, output, use, use->buf->width, use->buf->height, src, dst);
 }
@@ -887,6 +926,7 @@ void renderer_draw_surface_vk(struct vt_renderer_t *r,
                               struct vt_output_t   *output,
                               struct vt_surface_t  *surface,
                               struct vt_box_t *src, struct vt_box_t *dst) {
+  VT_PROFILE_SCOPE();
   if (!surface ||
       !_vk_draw_use(r, output, surface->current_buf_use, surface->applied.width,
                     surface->applied.height, src, dst))
@@ -900,6 +940,7 @@ void renderer_draw_surface_simple_vk(struct vt_renderer_t *r,
                                      struct vt_output_t   *output,
                                      struct vt_surface_t *surface, float x,
                                      float y) {
+  VT_PROFILE_SCOPE();
   if (!surface)
     return;
 
@@ -912,6 +953,7 @@ void renderer_draw_surface_simple_vk(struct vt_renderer_t *r,
 
 void renderer_draw_rect_vk(struct vt_renderer_t *r, float x, float y, float w,
                            float h, uint32_t col) {
+  VT_PROFILE_SCOPE();
   if (!r || !r->user_data)
     return;
 
@@ -926,6 +968,7 @@ void renderer_draw_rect_vk(struct vt_renderer_t *r, float x, float y, float w,
 
 void renderer_end_scene_vk(struct vt_renderer_t *r,
                            struct vt_output_t   *output) {
+  VT_PROFILE_SCOPE();
   if (!r || !r->user_data)
     return;
 
@@ -943,6 +986,7 @@ void renderer_end_scene_vk(struct vt_renderer_t *r,
 
 void renderer_end_frame_vk(struct vt_renderer_t *r, struct vt_output_t *output,
                            const pixman_box32_t *damaged, int32_t n_damaged) {
+  VT_PROFILE_SCOPE();
   (void)damaged;
   (void)n_damaged;
 
@@ -969,6 +1013,7 @@ void renderer_end_frame_vk(struct vt_renderer_t *r, struct vt_output_t *output,
 }
 
 bool renderer_destroy_vk(struct vt_renderer_t *r) {
+  VT_PROFILE_SCOPE();
   if (!r)
     return false;
 

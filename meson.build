@@ -90,6 +90,7 @@ deps = [
   runara_dep,
 ]
 
+dep_profiling_headers = declare_dependency()
 if get_option('profiling')
   # We build tracy only if profiling is specifically enabled  
   tracy_sp = subproject(
@@ -100,7 +101,14 @@ if get_option('profiling')
       'cpp_std=c++17',
     ],
   )
-  deps += tracy_sp.get_variable('tracy_dep')
+  tracy_dep = tracy_sp.get_variable('tracy_dep')
+  deps += tracy_dep
+  # Backend modules use the client exported by Vortex, rather than embedding
+  # separate Tracy clients in each module.
+  dep_profiling_headers = tracy_dep.partial_dependency(
+    compile_args: true,
+    includes: true,
+  )
 endif
 
 if dep_xkbcommon.found()

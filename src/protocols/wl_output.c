@@ -20,6 +20,7 @@
  * SOFTWARE.
  */
 
+#include "src/core/profiling.h"
 #include "wl_output.h"
 #include "src/core/core_types.h"
 
@@ -27,11 +28,13 @@
 
 static void output_release(struct wl_client   *client,
                            struct wl_resource *resource) {
+  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
 
 static void unbind_resource(struct wl_resource *resource) {
+  VT_PROFILE_SCOPE();
   wl_list_remove(wl_resource_get_link(resource));
 }
 
@@ -41,6 +44,7 @@ static const struct wl_output_interface output_interface = {
 
 static void _bind_output(struct wl_client *client, void *data, uint32_t version,
                          uint32_t id) {
+  VT_PROFILE_SCOPE();
 
   struct wl_resource *res =
       wl_resource_create(client, &wl_output_interface, version, id);
@@ -106,6 +110,7 @@ static void _bind_output(struct wl_client *client, void *data, uint32_t version,
 }
 
 bool vt_proto_wl_output_init(struct vt_output_t *output) {
+  VT_PROFILE_SCOPE();
   if (!output || !output->backend)
     return false;
   output->proto.global =

@@ -20,6 +20,7 @@
  * SOFTWARE.
  */
 
+#include "src/core/profiling.h"
 #include "x11_input.h"
 #include "src/core/compositor.h"
 #include "src/input/wl_seat.h"
@@ -34,6 +35,7 @@ struct x11_input {
 };
 
 bool input_backend_terminate_x11(struct vt_input_backend_t *backend) {
+  VT_PROFILE_SCOPE();
   assert(backend);
 
   xkb_state_unref(backend->kb_state);
@@ -49,6 +51,7 @@ bool input_backend_terminate_x11(struct vt_input_backend_t *backend) {
 
 bool input_backend_init_x11(struct vt_input_backend_t *backend,
                             void                      *native_handle) {
+  VT_PROFILE_SCOPE();
   if (!native_handle)
     return false;
 
@@ -111,6 +114,7 @@ bool input_backend_init_x11(struct vt_input_backend_t *backend,
 }
 
 void input_backend_sync_x11(struct vt_input_backend_t *backend) {
+  VT_PROFILE_SCOPE();
   struct x11_input *input = backend->user_data;
   if (!input || !backend->keymap)
     return;
@@ -125,6 +129,7 @@ void input_backend_sync_x11(struct vt_input_backend_t *backend) {
 
 bool input_backend_handle_event_x11(struct vt_input_backend_t *backend,
                                     void                      *event) {
+  VT_PROFILE_SCOPE();
   struct x11_input *input = backend->user_data;
   XkbEvent         *xkb = event;
 

@@ -21,6 +21,7 @@
  */
 
 #define _GNU_SOURCE
+#include "src/core/profiling.h"
 #include "session_drm.h"
 #include <string.h>
 
@@ -61,6 +62,7 @@ static int  _vt_session_drm_ioctl(int fd, unsigned long request, void *arg);
 // https://chromium.googlesource.com/chromiumos/third_party/libdrm/+/df21b293e9cf550ec8d6a3e49461350dbdf14260/xf86drm.c,
 // line 174
 int _vt_session_drm_ioctl(int fd, unsigned long request, void *arg) {
+  VT_PROFILE_SCOPE();
   int ret;
   do {
     ret = ioctl(fd, request, arg);
@@ -69,6 +71,7 @@ int _vt_session_drm_ioctl(int fd, unsigned long request, void *arg) {
 }
 
 bool _vt_session_drm_card_is_kms(int32_t fd) {
+  VT_PROFILE_SCOPE();
   struct drm_mode_card_res res = {0};
   // If we can get DRM resoruces from the FD, it's a DRM card
   if (_vt_session_drm_ioctl(fd, DRM_IOCTL_MODE_GETRESOURCES, &res) == 0)
@@ -93,6 +96,7 @@ static const struct libseat_seat_listener _seat_listener = {
 
 void _vt_session_seat_log_func(enum libseat_log_level level, const char *format,
                                va_list args) {
+  VT_PROFILE_SCOPE();
   if (!_log_comp_ptr)
     return;
   char buf[512];
@@ -113,6 +117,7 @@ void _vt_session_seat_log_func(enum libseat_log_level level, const char *format,
 }
 
 void _vt_session_seat_enable(struct libseat *seat, void *userdata) {
+  VT_PROFILE_SCOPE();
   (void)seat;
   if (!userdata)
     return;
@@ -130,6 +135,7 @@ void _vt_session_seat_enable(struct libseat *seat, void *userdata) {
 }
 
 void _vt_session_seat_disable(struct libseat *seat, void *userdata) {
+  VT_PROFILE_SCOPE();
   if (!userdata)
     return;
   struct vt_session_t     *session = (struct vt_session_t *)userdata;
@@ -147,6 +153,7 @@ void _vt_session_seat_disable(struct libseat *seat, void *userdata) {
 }
 
 int32_t _vt_session_seat_dispatch(int fd, uint32_t mask, void *data) {
+  VT_PROFILE_SCOPE();
   (void)fd;
   (void)mask;
   if (!data)
@@ -165,6 +172,7 @@ int32_t _vt_session_seat_dispatch(int fd, uint32_t mask, void *data) {
 
 // Taken from lé wlroots
 bool _vt_session_drm_card_valid(const char *sysname) {
+  VT_PROFILE_SCOPE();
   const char prefix[] = _VT_DRM_PRIMARY_MINOR_NAME;
   // Check if the sysname starts with "card" (_VT_DRM_PRIMARY_MINOR_NAME)
   if (strncmp(sysname, prefix, strlen(prefix)) != 0) {
@@ -181,6 +189,7 @@ bool _vt_session_drm_card_valid(const char *sysname) {
 
 struct udev_enumerate *
 _vt_session_drm_udev_enumerate_cards(struct vt_session_t *session) {
+  VT_PROFILE_SCOPE();
   struct vt_session_drm_t *session_drm =
       BACKEND_DATA(session, struct vt_session_drm_t);
 
@@ -210,6 +219,7 @@ _vt_session_drm_udev_enumerate_cards(struct vt_session_t *session) {
 struct vt_device_t *
 _vt_session_drm_open_device_if_kms(struct vt_session_t *session,
                                    const char          *path) {
+  VT_PROFILE_SCOPE();
   if (!path)
     return NULL;
   struct vt_session_drm_t *session_drm =
@@ -227,6 +237,7 @@ _vt_session_drm_open_device_if_kms(struct vt_session_t *session,
 }
 
 int32_t _vt_session_drm_udev_dispatch(int fd, uint32_t mask, void *data) {
+  VT_PROFILE_SCOPE();
   (void)fd;
   (void)mask;
   if (!data)
@@ -296,6 +307,7 @@ int32_t _vt_session_drm_udev_dispatch(int fd, uint32_t mask, void *data) {
 // =================== PUBLIC API ====================
 // ===================================================
 bool vt_session_init_drm(struct vt_session_t *session) {
+  VT_PROFILE_SCOPE();
   if (!session || !session->comp)
     return false;
 
@@ -391,6 +403,7 @@ bool vt_session_init_drm(struct vt_session_t *session) {
   return true;
 }
 bool vt_session_terminate_drm(struct vt_session_t *session) {
+  VT_PROFILE_SCOPE();
   if (!session || !session->comp)
     return false;
 
@@ -419,6 +432,7 @@ bool vt_session_terminate_drm(struct vt_session_t *session) {
 
 bool vt_session_open_device_drm(struct vt_session_t *session,
                                 struct vt_device_t *dev, const char *path) {
+  VT_PROFILE_SCOPE();
   if (!dev || !session || !session->comp)
     return false;
 
@@ -454,6 +468,7 @@ bool vt_session_open_device_drm(struct vt_session_t *session,
 
 bool vt_session_manage_device_drm(struct vt_session_t *session,
                                   struct vt_device_t  *dev) {
+  VT_PROFILE_SCOPE();
   if (!dev || !session || !session->user_data)
     return false;
   struct vt_session_drm_t *session_drm =
@@ -464,6 +479,7 @@ bool vt_session_manage_device_drm(struct vt_session_t *session,
 
 bool vt_session_close_device_drm(struct vt_session_t *session,
                                  struct vt_device_t  *dev) {
+  VT_PROFILE_SCOPE();
   if (!session || !dev)
     return false;
 
@@ -484,6 +500,7 @@ bool vt_session_close_device_drm(struct vt_session_t *session,
 
 bool vt_session_unmanage_device_drm(struct vt_session_t *session,
                                     struct vt_device_t  *dev) {
+  VT_PROFILE_SCOPE();
   if (!dev || !session || !session->user_data)
     return false;
   wl_list_remove(&dev->link);
@@ -492,6 +509,7 @@ bool vt_session_unmanage_device_drm(struct vt_session_t *session,
 
 void *vt_session_get_native_handle_drm(struct vt_session_t *session,
                                        struct vt_device_t  *dev) {
+  VT_PROFILE_SCOPE();
   if (!session || !dev)
     return NULL;
   drmDevice *device = NULL;
@@ -507,6 +525,7 @@ void *vt_session_get_native_handle_drm(struct vt_session_t *session,
 
 bool vt_session_finish_native_handle_drm(struct vt_session_t *session,
                                          void                *handle) {
+  VT_PROFILE_SCOPE();
   if (!session || !handle)
     return false;
   drmFreeDevice((drmDevice **)&handle);
@@ -516,6 +535,7 @@ bool vt_session_finish_native_handle_drm(struct vt_session_t *session,
 const char *
 vt_session_get_native_handle_render_node(struct vt_session_t *session,
                                          void                *handle) {
+  VT_PROFILE_SCOPE();
   if (!session || !handle)
     return NULL;
   drmDevice *native = (drmDevice *)handle;
@@ -528,6 +548,7 @@ vt_session_get_native_handle_render_node(struct vt_session_t *session,
 
 struct vt_device_t *vt_session_device_from_fd_drm(struct vt_session_t *session,
                                                   int32_t              fd) {
+  VT_PROFILE_SCOPE();
   if (!session || !session->user_data)
     return NULL;
   struct vt_session_drm_t *session_drm =
@@ -542,6 +563,7 @@ struct vt_device_t *vt_session_device_from_fd_drm(struct vt_session_t *session,
 }
 
 static void on_found_gpu(struct wl_listener *listener, void *data) {
+  VT_PROFILE_SCOPE();
   (void)data;
   struct wait_for_gpu_handler_t *handler =
       wl_container_of(listener, handler, listener);
@@ -552,6 +574,7 @@ static void on_found_gpu(struct wl_listener *listener, void *data) {
 uint32_t vt_session_enumerate_cards_drm(struct vt_session_t *session,
                                         struct vt_device_t **devs,
                                         const uint32_t       max_devs) {
+  VT_PROFILE_SCOPE();
   if (!session)
     return false;
 
@@ -664,6 +687,7 @@ uint32_t vt_session_enumerate_cards_drm(struct vt_session_t *session,
 }
 
 bool vt_session_switch_vt_drm(struct vt_session_t *session, uint32_t vt) {
+  VT_PROFILE_SCOPE();
   if (!session)
     return false;
   struct vt_session_drm_t *session_drm =

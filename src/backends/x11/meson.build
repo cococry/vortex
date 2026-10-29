@@ -9,6 +9,7 @@ shared_module(
     dep_pixman,
     dep_libdrm,
     dep_runara_headers,
+    dep_profiling_headers,
   ],
   include_directories: [vortex_inc, include_directories('../../..')],
   install: true,

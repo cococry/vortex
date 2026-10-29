@@ -1,7 +1,9 @@
+#include "src/core/profiling.h"
 #include "kms.h"
 #include "cursor.h"
 
 void drm_kms_commit_snapshot_cursor(struct vt_drm_kms_commit_t *commit) {
+  VT_PROFILE_SCOPE();
   assert(commit && commit->output);
 
   if (commit->cursor_submitted)
@@ -19,6 +21,7 @@ void drm_kms_commit_snapshot_cursor(struct vt_drm_kms_commit_t *commit) {
 }
 
 void drm_kms_commit_release_cursor(struct vt_drm_kms_commit_t *commit) {
+  VT_PROFILE_SCOPE();
   if (!commit)
     return;
 

@@ -20,6 +20,7 @@
  * SOFTWARE.
  */
 
+#include "src/core/profiling.h"
 #include "libinput.h"
 
 #include "src/core/core_types.h"
@@ -68,6 +69,7 @@ static const struct libinput_interface input_interface = {
 
 int32_t _vt_li_open_restricted(const char *path, int32_t flags,
                                void *user_data) {
+  VT_PROFILE_SCOPE();
   (void)flags;
   struct vt_session_t *session = (struct vt_session_t *)user_data;
 
@@ -86,6 +88,7 @@ int32_t _vt_li_open_restricted(const char *path, int32_t flags,
 }
 
 void _vt_li_close_restricted(int32_t fd, void *user_data) {
+  VT_PROFILE_SCOPE();
   struct vt_session_t *session = (struct vt_session_t *)user_data;
   struct vt_device_t  *dev = session->impl.device_from_fd(session, fd);
   if (dev) {
@@ -96,6 +99,7 @@ void _vt_li_close_restricted(int32_t fd, void *user_data) {
 }
 
 int32_t _vt_li_input_dispatch(int fd, uint32_t mask, void *data) {
+  VT_PROFILE_SCOPE();
   (void)fd;
   (void)mask;
   struct vt_input_backend_li_t *li = (struct vt_input_backend_li_t *)data;
@@ -139,6 +143,7 @@ int32_t _vt_li_input_dispatch(int fd, uint32_t mask, void *data) {
 
 bool _vt_li_input_handle_key_event(struct vt_input_backend_li_t   *li,
                                    struct libinput_event_keyboard *kbev) {
+  VT_PROFILE_SCOPE();
   if (!li || !kbev) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return false;
@@ -157,6 +162,7 @@ bool _vt_li_input_handle_key_event(struct vt_input_backend_li_t   *li,
 }
 bool _vt_li_input_handle_pointer_motion_event(
     struct vt_input_backend_li_t *li, struct libinput_event_pointer *ptrev) {
+  VT_PROFILE_SCOPE();
   if (!li || !li->comp || !ptrev) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return false;
@@ -209,6 +215,7 @@ bool _vt_li_input_handle_pointer_motion_event(
 
 bool _vt_li_input_handle_pointer_button_event(
     struct vt_input_backend_li_t *li, struct libinput_event_pointer *ptrev) {
+  VT_PROFILE_SCOPE();
   if (!li || !li->comp || !ptrev) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return false;
@@ -227,6 +234,7 @@ bool _vt_li_input_handle_pointer_button_event(
 
 bool _vt_li_input_handle_pointer_scroll_event(
     struct vt_input_backend_li_t *li, struct libinput_event_pointer *ptrev) {
+  VT_PROFILE_SCOPE();
   if (!li || !li->comp || !ptrev) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return false;
@@ -283,6 +291,7 @@ bool _vt_li_input_handle_pointer_scroll_event(
 }
 
 bool _vt_li_init_xkb(struct vt_input_backend_li_t *li) {
+  VT_PROFILE_SCOPE();
   // NULL fields make xkbcommon read XKB_DEFAULT_*, then evdev/pc105/us
   struct xkb_rule_names rules = {0};
 
@@ -323,6 +332,7 @@ bool _vt_li_init_xkb(struct vt_input_backend_li_t *li) {
 
 enum vt_input_key_state_t
 _vt_li_key_state_to_vt_key_state(enum libinput_key_state state) {
+  VT_PROFILE_SCOPE();
   switch (state) {
   case LIBINPUT_KEY_STATE_PRESSED:
     return VT_KEY_STATE_PRESSED;
@@ -334,6 +344,7 @@ _vt_li_key_state_to_vt_key_state(enum libinput_key_state state) {
 }
 
 static void _vt_li_log_devices(struct vt_input_backend_li_t *li) {
+  VT_PROFILE_SCOPE();
   struct libinput_event *event;
 
   bool printed = false;
@@ -371,6 +382,7 @@ static void _vt_li_log_devices(struct vt_input_backend_li_t *li) {
 
 bool input_backend_init_li(struct vt_input_backend_t *backend,
                            void                      *native_handle) {
+  VT_PROFILE_SCOPE();
   if (!backend || !native_handle)
     return false;
   if (backend->comp->backend->platform != VT_BACKEND_DRM_GBM) {
@@ -439,6 +451,7 @@ bool input_backend_init_li(struct vt_input_backend_t *backend,
 }
 
 bool input_backend_terminate_li(struct vt_input_backend_t *backend) {
+  VT_PROFILE_SCOPE();
   if (!backend || !backend->user_data)
     return false;
   struct vt_input_backend_li_t *li =
@@ -452,6 +465,7 @@ bool input_backend_terminate_li(struct vt_input_backend_t *backend) {
 }
 
 bool input_backend_suspend_li(struct vt_input_backend_t *backend) {
+  VT_PROFILE_SCOPE();
   if (!backend || !backend->user_data)
     return false;
   struct vt_input_backend_li_t *li =
@@ -462,6 +476,7 @@ bool input_backend_suspend_li(struct vt_input_backend_t *backend) {
 }
 
 bool input_backend_resume_li(struct vt_input_backend_t *backend) {
+  VT_PROFILE_SCOPE();
   if (!backend || !backend->user_data)
     return false;
   struct vt_input_backend_li_t *li =

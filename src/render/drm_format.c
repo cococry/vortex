@@ -20,11 +20,13 @@
  * SOFTWARE.
  */
 
+#include "src/core/profiling.h"
 #include "drm_format.h"
 #include <assert.h>
 #include <wayland-util.h>
 
 void vt_drm_format_init(struct vt_drm_format_t *fmt, uint32_t format) {
+  VT_PROFILE_SCOPE();
   assert(fmt);
 
   wl_array_init(&fmt->mods);
@@ -33,6 +35,7 @@ void vt_drm_format_init(struct vt_drm_format_t *fmt, uint32_t format) {
 
 struct vt_drm_format_modifier_t *
 vt_drm_format_get_mod(struct vt_drm_format_t *fmt, uint64_t mod) {
+  VT_PROFILE_SCOPE();
   /* 1. Validate input */
   if (!fmt)
     return NULL;
@@ -48,6 +51,7 @@ vt_drm_format_get_mod(struct vt_drm_format_t *fmt, uint64_t mod) {
 
 struct vt_drm_format_modifier_t *
 vt_drm_format_add_mod(struct vt_drm_format_t *fmt, uint64_t mod) {
+  VT_PROFILE_SCOPE();
   assert(fmt);
 
   struct vt_drm_format_modifier_t *present = vt_drm_format_get_mod(fmt, mod);
@@ -65,6 +69,7 @@ vt_drm_format_add_mod(struct vt_drm_format_t *fmt, uint64_t mod) {
 }
 
 void vt_drm_format_fini(struct vt_drm_format_t *fmt) {
+  VT_PROFILE_SCOPE();
   assert(fmt);
 
   wl_array_release(&fmt->mods);
@@ -72,6 +77,7 @@ void vt_drm_format_fini(struct vt_drm_format_t *fmt) {
 
 bool vt_drm_format_add_mods(struct vt_drm_format_t *fmt,
                             const struct wl_array  *mods) {
+  VT_PROFILE_SCOPE();
   assert(fmt && mods);
 
   struct vt_drm_format_modifier_t *it;
@@ -86,12 +92,14 @@ bool vt_drm_format_add_mods(struct vt_drm_format_t *fmt,
 }
 
 size_t vt_drm_format_mod_count(const struct vt_drm_format_t *fmt) {
+  VT_PROFILE_SCOPE();
   assert(fmt);
 
   return fmt->mods.size / sizeof(struct vt_drm_format_modifier_t);
 }
 
 size_t vt_drm_format_array_count(const struct wl_array *formats) {
+  VT_PROFILE_SCOPE();
   assert(formats);
 
   return formats->size / sizeof(struct vt_drm_format_t);
@@ -100,6 +108,7 @@ size_t vt_drm_format_array_count(const struct wl_array *formats) {
 struct vt_drm_format_t *
 vt_drm_format_array_push(struct wl_array              *formats,
                          const struct vt_drm_format_t *fmt) {
+  VT_PROFILE_SCOPE();
   assert(formats && fmt);
 
   struct vt_drm_format_t *present =
@@ -130,6 +139,7 @@ vt_drm_format_array_push(struct wl_array              *formats,
 struct vt_drm_format_t *vt_drm_format_array_push_pair(struct wl_array *formats,
                                                       uint32_t         format,
                                                       uint64_t         mod) {
+  VT_PROFILE_SCOPE();
   assert(formats);
 
   struct vt_drm_format_t fmt = {0};
@@ -150,6 +160,7 @@ struct vt_drm_format_t *vt_drm_format_array_push_pair(struct wl_array *formats,
 struct vt_drm_format_t *
 vt_drm_format_array_get_format(struct wl_array              *formats,
                                const struct vt_drm_format_t *find) {
+  VT_PROFILE_SCOPE();
 
   assert(formats);
 
@@ -167,6 +178,7 @@ vt_drm_format_array_get_format(struct wl_array              *formats,
 }
 
 void vt_drm_format_array_free(struct wl_array *formats) {
+  VT_PROFILE_SCOPE();
   /* 1. Validate input parameter */
   if (!formats)
     return;
@@ -183,6 +195,7 @@ void vt_drm_format_array_free(struct wl_array *formats) {
  * lookups must return NULL instead of the cursor */
 static const struct vt_drm_format_t *
 _drm_format_array_find(const struct wl_array *formats, uint32_t format) {
+  VT_PROFILE_SCOPE();
   const struct vt_drm_format_t *fmt;
   wl_array_for_each(fmt, formats) {
     if (fmt->format == format)
@@ -193,6 +206,7 @@ _drm_format_array_find(const struct wl_array *formats, uint32_t format) {
 
 static const struct vt_drm_format_modifier_t *
 _drm_format_find_mod(const struct vt_drm_format_t *fmt, uint64_t mod) {
+  VT_PROFILE_SCOPE();
   const struct vt_drm_format_modifier_t *it;
   wl_array_for_each(it, &fmt->mods) {
     if (it->mod == mod)
@@ -204,6 +218,7 @@ _drm_format_find_mod(const struct vt_drm_format_t *fmt, uint64_t mod) {
 bool vt_drm_format_array_intersect(struct wl_array       *dst,
                                    const struct wl_array *a,
                                    const struct wl_array *b) {
+  VT_PROFILE_SCOPE();
   struct wl_array out;
   wl_array_init(&out);
 
@@ -261,6 +276,7 @@ bool vt_drm_format_array_intersect(struct wl_array       *dst,
 
 bool vt_drm_format_array_copy(struct wl_array       *dst,
                               const struct wl_array *src) {
+  VT_PROFILE_SCOPE();
   assert(dst && src);
 
   struct wl_array out;
@@ -282,6 +298,7 @@ bool vt_drm_format_array_copy(struct wl_array       *dst,
 
 bool vt_drm_format_array_union(struct wl_array *dst, const struct wl_array *a,
                                const struct wl_array *b) {
+  VT_PROFILE_SCOPE();
   assert(dst && a && b);
 
   struct wl_array out;

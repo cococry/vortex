@@ -20,6 +20,7 @@
  * SOFTWARE.
  */
 
+#include "src/core/profiling.h"
 #include "drm_types.h"
 #include "kms.h"
 
@@ -31,6 +32,7 @@
 
 static bool _legacy_commit_cursor(struct vt_drm_backend_state_t *drm,
                                   struct vt_drm_kms_commit_t    *commit) {
+  VT_PROFILE_SCOPE();
   assert(drm && commit && commit->output && commit->output->crtc);
 
   struct vt_drm_output_state_t *output = commit->output;
@@ -89,6 +91,7 @@ fail:
 
 static bool _legacy_commit(struct vt_drm_backend_state_t *drm,
                            struct vt_drm_kms_commit_t    *commit) {
+  VT_PROFILE_SCOPE();
   if (!drm || !commit || !commit->output || !commit->output->crtc)
     return false;
 
@@ -198,6 +201,7 @@ static bool _legacy_commit(struct vt_drm_backend_state_t *drm,
 
 static bool _legacy_disable(struct vt_drm_backend_state_t *drm,
                             struct vt_drm_output_state_t  *output) {
+  VT_PROFILE_SCOPE();
   if (!drm || !output || !output->crtc)
     return false;
 

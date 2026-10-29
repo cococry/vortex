@@ -20,6 +20,7 @@
  * SOFTWARE.
  */
 
+#include "src/core/profiling.h"
 #include "root_cursor.h"
 #include "wl_seat.h"
 
@@ -35,6 +36,7 @@
 
 static void _root_cursor_pixels_destroy(struct vt_buffer_t *buf,
                                         const void *owner, void *data) {
+  VT_PROFILE_SCOPE();
   (void)buf;
   (void)owner;
   XcursorImageDestroy(data);
@@ -45,6 +47,7 @@ static const struct vt_buffer_attachment_implementation_t root_pixels_impl = {
 
 static bool _root_cursor_get_shm(struct vt_buffer_t   *buf,
                                  struct vt_shm_attr_t *attr) {
+  VT_PROFILE_SCOPE();
   struct vt_buffer_attachment_t *pixels =
       vt_buffer_find_attachment(buf, NULL, &root_pixels_impl);
   if (!pixels || !attr)
@@ -66,6 +69,7 @@ static const struct vt_buffer_implementation_t root_buffer_impl = {
     .get_shm = _root_cursor_get_shm};
 
 bool vt_seat_root_cursor_init(struct vt_seat_t *seat) {
+  VT_PROFILE_SCOPE();
   if (!seat || !seat->comp)
     return false;
 
@@ -134,6 +138,7 @@ fail:
 }
 
 void vt_seat_root_cursor_finish(struct vt_seat_t *seat) {
+  VT_PROFILE_SCOPE();
   if (!seat || !seat->comp || !seat->comp->root_cursor)
     return;
 

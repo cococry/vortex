@@ -20,6 +20,7 @@
  * SOFTWARE.
  */
 
+#include "src/core/profiling.h"
 #include "src/core/buffer.h"
 #include "src/core/buffer_orchestrator.h"
 #include <stdlib.h>
@@ -102,6 +103,7 @@ struct vt_proto_linux_explicit_sync_v1_t {
 
 static bool _linux_explicit_sync_addon_commit(struct vt_surface_t        *surf,
                                               struct vt_content_update_t *cu) {
+  VT_PROFILE_SCOPE();
   if (!surf || !cu)
     return false;
   struct vt_linux_explicit_sync_v1_surface_state_t *sync =
@@ -131,6 +133,7 @@ static struct vt_proto_linux_explicit_sync_v1_t _proto;
 
 struct vt_linux_explicit_sync_v1_surface_state_t *
 _linux_explicit_sync_v1_from_surf(struct vt_surface_t *surf) {
+  VT_PROFILE_SCOPE();
   if (!surf) {
     VT_PARAM_CHECK_FAIL(_proto.comp);
     return NULL;
@@ -163,6 +166,7 @@ _linux_explicit_sync_v1_from_surf(struct vt_surface_t *surf) {
 void _linux_explicit_sync_v1_get_synchronization(
     struct wl_client *client, struct wl_resource *resource, uint32_t id,
     struct wl_resource *surface_resource) {
+  VT_PROFILE_SCOPE();
 
   struct vt_surface_t *surf =
       surface_resource ? wl_resource_get_user_data(surface_resource) : NULL;
@@ -212,6 +216,7 @@ void _linux_explicit_sync_v1_get_synchronization(
 
 void _linux_explicit_sync_v1_destroy(struct wl_client   *client,
                                      struct wl_resource *resource) {
+  VT_PROFILE_SCOPE();
   (void)client;
   /* Destroy the global explicit sync interface resource */
   wl_resource_destroy(resource);
@@ -219,6 +224,7 @@ void _linux_explicit_sync_v1_destroy(struct wl_client   *client,
 
 static void _linux_explicit_sync_v1_bind(struct wl_client *client, void *data,
                                          uint32_t version, uint32_t id) {
+  VT_PROFILE_SCOPE();
   struct vt_compositor_t *comp = (struct vt_compositor_t *)data;
   struct wl_resource     *res = wl_resource_create(
       client, &zwp_linux_explicit_synchronization_v1_interface, version, id);
@@ -237,6 +243,7 @@ static void _linux_explicit_sync_v1_bind(struct wl_client *client, void *data,
 
 void _linux_surface_sync_v1_destroy(struct wl_client   *client,
                                     struct wl_resource *resource) {
+  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
@@ -244,6 +251,7 @@ void _linux_surface_sync_v1_destroy(struct wl_client   *client,
 void _linux_surface_sync_v1_set_acquire_fence(struct wl_client   *client,
                                               struct wl_resource *resource,
                                               int32_t             fd) {
+  VT_PROFILE_SCOPE();
   (void)client;
   struct vt_linux_explicit_sync_v1_surface_state_t *state =
       resource ? wl_resource_get_user_data(resource) : NULL;
@@ -282,6 +290,7 @@ void _linux_surface_sync_v1_set_acquire_fence(struct wl_client   *client,
 static struct vt_wayland_buffer_release_t *
 _get_or_create_buffer_release(struct vt_compositor_t            *comp,
                               struct vt_surface_state_pending_t *state) {
+  VT_PROFILE_SCOPE();
   if (!state || !comp) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return NULL;
@@ -313,6 +322,7 @@ _get_or_create_buffer_release(struct vt_compositor_t            *comp,
 void _linux_surface_sync_v1_get_release(struct wl_client   *client,
                                         struct wl_resource *resource,
                                         uint32_t            id) {
+  VT_PROFILE_SCOPE();
   struct vt_linux_explicit_sync_v1_surface_state_t *state =
       resource ? wl_resource_get_user_data(resource) : NULL;
 
@@ -374,6 +384,7 @@ void _linux_surface_sync_v1_get_release(struct wl_client   *client,
 }
 
 void _linux_surface_sync_handle_destroy(struct wl_resource *resource) {
+  VT_PROFILE_SCOPE();
   struct vt_linux_explicit_sync_v1_surface_state_t *state =
       resource ? wl_resource_get_user_data(resource) : NULL;
 
@@ -387,6 +398,7 @@ void _linux_surface_sync_handle_destroy(struct wl_resource *resource) {
 }
 
 static void _handle_explict_release_destroy(struct wl_resource *resource) {
+  VT_PROFILE_SCOPE();
   struct vt_wayland_buffer_release_t *wl_release =
       resource ? wl_resource_get_user_data(resource) : NULL;
 
@@ -402,6 +414,7 @@ static void _handle_explict_release_destroy(struct wl_resource *resource) {
  * =================================================== */
 bool vt_proto_linux_explicit_sync_v1_init(struct vt_compositor_t *comp,
                                           uint32_t                version) {
+  VT_PROFILE_SCOPE();
   /* 1. Register global for linux-explicit-synchronization interface */
   if (!wl_global_create(comp->wl.dsp,
                         &zwp_linux_explicit_synchronization_v1_interface,
@@ -418,6 +431,7 @@ bool vt_proto_linux_explicit_sync_v1_init(struct vt_compositor_t *comp,
 
 void vt_proto_linux_explicit_sync_v1_err(struct wl_resource *resource,
                                          const char         *msg) {
+  VT_PROFILE_SCOPE();
   /* 1. Retrieve relevant context and client */
   uint32_t id = wl_resource_get_id(resource);
   const char *class = wl_resource_get_class(resource);
@@ -443,6 +457,7 @@ void vt_proto_linux_explicit_sync_v1_err(struct wl_resource *resource,
 
 static void
 _linux_explicit_sync_destroy_addon(struct vt_surface_addon_t *addon) {
+  VT_PROFILE_SCOPE();
   struct vt_linux_explicit_sync_v1_surface_state_t *state =
       wl_container_of(addon, state, addon);
 
@@ -465,6 +480,7 @@ _linux_explicit_sync_destroy_addon(struct vt_surface_addon_t *addon) {
 
 static bool
 _buffer_release_needs_release_fence(struct vt_buffer_release_t *base) {
+  VT_PROFILE_SCOPE();
   struct vt_wayland_buffer_release_t *release =
       wl_container_of(base, release, base);
 
@@ -473,6 +489,7 @@ _buffer_release_needs_release_fence(struct vt_buffer_release_t *base) {
 
 static void _buffer_release_finish(struct vt_buffer_release_t *base,
                                    int release_fence_fd) {
+  VT_PROFILE_SCOPE();
   struct vt_wayland_buffer_release_t *release =
       wl_container_of(base, release, base);
 
@@ -492,6 +509,7 @@ static void _buffer_release_finish(struct vt_buffer_release_t *base,
 }
 
 static void _buffer_release_destroy(struct vt_buffer_release_t *base) {
+  VT_PROFILE_SCOPE();
   struct vt_wayland_buffer_release_t *release =
       wl_container_of(base, release, base);
 

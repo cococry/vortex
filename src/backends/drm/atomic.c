@@ -20,6 +20,7 @@
  * SOFTWARE.
  */
 
+#include "src/core/profiling.h"
 #include "cursor.h"
 #include "drm_types.h"
 #include "fb.h"
@@ -40,6 +41,7 @@
 static bool _atomic_add_prop(struct vt_drm_backend_state_t *drm,
                              drmModeAtomicReq *req, uint32_t obj, uint32_t prop,
                              uint64_t value) {
+  VT_PROFILE_SCOPE();
   if (!drm || !req || prop == 0)
     return false;
 
@@ -55,6 +57,7 @@ static bool _atomic_add_prop(struct vt_drm_backend_state_t *drm,
 
 static bool _atomic_disable(struct vt_drm_backend_state_t *drm,
                             struct vt_drm_output_state_t  *output) {
+  VT_PROFILE_SCOPE();
   if (!drm || !output || !output->crtc)
     return false;
 
@@ -107,6 +110,7 @@ static bool _atomic_disable(struct vt_drm_backend_state_t *drm,
 
 static uint32_t _atomic_commit_flags(const struct vt_drm_kms_commit_t *commit,
                                      bool                              async) {
+  VT_PROFILE_SCOPE();
   uint32_t flags = 0;
 
   if (commit->test_only) {
@@ -127,6 +131,7 @@ static uint32_t _atomic_commit_flags(const struct vt_drm_kms_commit_t *commit,
 static bool _liftoff_set_drm_layer_props(
     struct vt_drm_backend_state_t *drm, struct liftoff_layer *liftoff_layer,
     const struct vt_drm_layer_state_t *layer, bool composited) {
+  VT_PROFILE_SCOPE();
   if (!drm || !liftoff_layer || !layer)
     return false;
 
@@ -183,6 +188,7 @@ static bool _liftoff_set_drm_layer_props(
 
 static bool _atomic_prepare_liftoff(struct vt_drm_backend_state_t *drm,
                                     struct vt_drm_kms_commit_t    *commit) {
+  VT_PROFILE_SCOPE();
   if (!drm || !commit || !commit->output)
     return false;
 
@@ -236,6 +242,7 @@ static bool _atomic_prepare_liftoff(struct vt_drm_backend_state_t *drm,
 static bool
 _atomic_validate_liftoff_allocation(struct vt_drm_backend_state_t *drm,
                                     struct vt_drm_kms_commit_t    *commit) {
+  VT_PROFILE_SCOPE();
   struct vt_drm_output_state_t *output = commit->output;
 
   struct vt_drm_layer_state_t *layer;
@@ -304,6 +311,7 @@ _atomic_validate_liftoff_allocation(struct vt_drm_backend_state_t *drm,
 static void
 _atomic_trace_liftoff_allocation(struct vt_drm_backend_state_t *drm,
                                  struct vt_drm_kms_commit_t    *commit) {
+  VT_PROFILE_SCOPE();
   if (!drm || !drm->comp || !commit || !commit->output)
     return;
 
@@ -360,6 +368,7 @@ _atomic_trace_liftoff_allocation(struct vt_drm_backend_state_t *drm,
 static bool _atomic_add_cursor(struct vt_drm_backend_state_t *drm,
                                struct vt_drm_kms_commit_t    *commit,
                                drmModeAtomicReq              *req) {
+  VT_PROFILE_SCOPE();
   struct vt_drm_output_state_t *output = commit->output;
   struct vt_drm_plane_t        *plane = output->crtc->plane_cursor;
 
@@ -407,6 +416,7 @@ static drmModeAtomicReq *_atomic_build_req(struct vt_drm_backend_state_t *drm,
                                            struct vt_drm_kms_commit_t *commit,
                                            uint32_t flags, uint32_t *mode_blob,
                                            int *out_fence_fd) {
+  VT_PROFILE_SCOPE();
   if (!drm || !commit || !commit->output || !commit->output->crtc ||
       !mode_blob || !out_fence_fd) {
     return NULL;
@@ -497,6 +507,7 @@ fail:
 
 static bool _atomic_commit(struct vt_drm_backend_state_t *drm,
                            struct vt_drm_kms_commit_t    *commit) {
+  VT_PROFILE_SCOPE();
   if (!drm || !commit || !commit->output || !commit->output->crtc)
     return false;
 
@@ -596,6 +607,7 @@ drmModeAtomicReq *
 drm_atomic_create_test_req(struct vt_drm_backend_state_t *drm,
                            struct vt_drm_output_state_t  *output,
                            uint32_t *mode_blob, uint32_t *flags) {
+  VT_PROFILE_SCOPE();
   assert(drm && output && output->crtc);
   assert(mode_blob && flags);
 
@@ -648,6 +660,7 @@ bool drm_liftoff_set_layer_props(struct liftoff_layer *liftoff_layer,
                                  const struct vt_output_layer_state_t *layer,
                                  uint32_t fb_id, int in_fence_fd,
                                  uint64_t zpos) {
+  VT_PROFILE_SCOPE();
   assert(liftoff_layer && layer);
 
   if (fb_id == 0)
@@ -695,6 +708,7 @@ bool drm_liftoff_set_layer_props(struct liftoff_layer *liftoff_layer,
 bool drm_liftoff_set_layer_props_composited(
     struct liftoff_layer                 *liftoff_layer,
     const struct vt_output_layer_state_t *layer, uint64_t zpos) {
+  VT_PROFILE_SCOPE();
   if (!liftoff_layer || !layer || layer->dst.width == 0 ||
       layer->dst.height == 0)
     return false;
@@ -718,6 +732,7 @@ bool drm_liftoff_set_layer_props_composited(
 void drm_liftoff_testing_finish(struct vt_drm_backend_state_t      *drm,
                                 struct vt_drm_liftoff_test_layer_t *test_layers,
                                 size_t layer_count) {
+  VT_PROFILE_SCOPE();
   if (!drm || !test_layers)
     return;
 

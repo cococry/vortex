@@ -20,6 +20,7 @@
  * SOFTWARE.
  */
 
+#include "src/core/profiling.h"
 #include "wl_surface.h"
 #include "pixman.h"
 #include "src/core/buffer.h"
@@ -122,6 +123,7 @@ static struct vt_proto_wl_surface_t _proto;
 
 void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
                         struct wl_resource *buffer, int32_t x, int32_t y) {
+  VT_PROFILE_SCOPE();
   struct vt_surface_t *surf =
       resource ? wl_resource_get_user_data(resource) : NULL;
   if (!surf) {
@@ -187,6 +189,7 @@ void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
 
 void _wl_surface_commit(struct wl_client   *client,
                         struct wl_resource *resource) {
+  VT_PROFILE_SCOPE();
   (void)client;
   struct vt_surface_t *surf = wl_resource_get_user_data(resource);
   if (!surf) {
@@ -212,6 +215,7 @@ void _wl_surface_commit(struct wl_client   *client,
 }
 
 static void _surface_frame_callback_destroy(struct wl_resource *resource) {
+  VT_PROFILE_SCOPE();
   struct vt_surface_frame_callback_t *cb = wl_resource_get_user_data(resource);
 
   if (!cb)
@@ -225,6 +229,7 @@ static void _surface_frame_callback_destroy(struct wl_resource *resource) {
 
 void _wl_surface_frame(struct wl_client *client, struct wl_resource *resource,
                        uint32_t callback) {
+  VT_PROFILE_SCOPE();
   struct vt_surface_t *surf =
       resource ? wl_resource_get_user_data(resource) : NULL;
   if (!surf) {
@@ -262,6 +267,7 @@ void _wl_surface_frame(struct wl_client *client, struct wl_resource *resource,
 }
 void _wl_surface_damage(struct wl_client *client, struct wl_resource *resource,
                         int32_t x, int32_t y, int32_t width, int32_t height) {
+  VT_PROFILE_SCOPE();
   (void)client;
   struct vt_surface_t *surf =
       resource ? wl_resource_get_user_data(resource) : NULL;
@@ -286,6 +292,7 @@ void _wl_surface_damage(struct wl_client *client, struct wl_resource *resource,
 void _wl_surface_damage_buffer(struct wl_client   *client,
                                struct wl_resource *resource, int32_t x,
                                int32_t y, int32_t width, int32_t height) {
+  VT_PROFILE_SCOPE();
   (void)client;
   struct vt_surface_t *surf =
       resource ? wl_resource_get_user_data(resource) : NULL;
@@ -309,6 +316,7 @@ void _wl_surface_damage_buffer(struct wl_client   *client,
 void _wl_surface_set_opaque_region(struct wl_client   *client,
                                    struct wl_resource *resource,
                                    struct wl_resource *region) {
+  VT_PROFILE_SCOPE();
   (void)client;
   struct vt_surface_t *surf = wl_resource_get_user_data(resource);
   if (!surf) {
@@ -341,6 +349,7 @@ void _wl_surface_set_opaque_region(struct wl_client   *client,
 void _wl_surface_set_input_region(struct wl_client   *client,
                                   struct wl_resource *resource,
                                   struct wl_resource *region) {
+  VT_PROFILE_SCOPE();
   (void)client;
   struct vt_surface_t *surf = wl_resource_get_user_data(resource);
   if (!surf) {
@@ -374,6 +383,7 @@ void _wl_surface_set_input_region(struct wl_client   *client,
 void _wl_surface_set_buffer_transform(struct wl_client   *client,
                                       struct wl_resource *resource,
                                       int32_t             transform) {
+  VT_PROFILE_SCOPE();
   (void)client;
   struct vt_surface_t *surf =
       resource ? wl_resource_get_user_data(resource) : NULL;
@@ -402,6 +412,7 @@ void _wl_surface_set_buffer_transform(struct wl_client   *client,
 
 void _wl_surface_set_buffer_scale(struct wl_client   *client,
                                   struct wl_resource *resource, int32_t scale) {
+  VT_PROFILE_SCOPE();
   (void)client;
   /* [0]: Sets buffer scale for HiDPi displays. This needs to be
    * applied when rendering. */
@@ -431,6 +442,7 @@ void _wl_surface_set_buffer_scale(struct wl_client   *client,
 
 void _wl_surface_offset(struct wl_client *client, struct wl_resource *resource,
                         int32_t x, int32_t y) {
+  VT_PROFILE_SCOPE();
   (void)client;
   struct vt_surface_t *surf = wl_resource_get_user_data(resource);
   if (!surf) {
@@ -449,6 +461,7 @@ void _wl_surface_offset(struct wl_client *client, struct wl_resource *resource,
 
 void _wl_surface_destroy(struct wl_client   *client,
                          struct wl_resource *resource) {
+  VT_PROFILE_SCOPE();
   (void)client;
   struct vt_surface_t *surf =
       ((struct vt_surface_t *)wl_resource_get_user_data(resource));
@@ -465,6 +478,7 @@ void _wl_surface_destroy(struct wl_client   *client,
 }
 
 void _wl_surface_handle_resource_destroy(struct wl_resource *resource) {
+  VT_PROFILE_SCOPE();
   struct vt_surface_t *surf = wl_resource_get_user_data(resource);
 
   if (!surf || !surf->comp) {
@@ -532,6 +546,7 @@ void _wl_surface_handle_resource_destroy(struct wl_resource *resource) {
 static struct vt_buffer_attachment_t *
 _wayland_buffer_attachment_get_or_create(struct vt_buffer_t *buf,
                                          struct wl_resource *res) {
+  VT_PROFILE_SCOPE();
   struct vt_buffer_attachment_t *wl_attachment =
       vt_buffer_find_attachment(buf, NULL, &wayland_buffer_attachment_impl);
 
@@ -565,6 +580,7 @@ _wayland_buffer_attachment_get_or_create(struct vt_buffer_t *buf,
 
 static void _wayland_buffer_attachment_destroy(struct vt_buffer_t *buf,
                                                const void *owner, void *data) {
+  VT_PROFILE_SCOPE();
   (void)buf;
   (void)owner;
 
@@ -577,6 +593,7 @@ static void _wayland_buffer_attachment_destroy(struct vt_buffer_t *buf,
 
 static void _wayland_buffer_attachment_end_use(struct vt_buffer_t *buf,
                                                const void *owner, void *data) {
+  VT_PROFILE_SCOPE();
   (void)buf;
   (void)owner;
 
@@ -590,6 +607,7 @@ static void _wayland_buffer_attachment_end_use(struct vt_buffer_t *buf,
 
 static void _wayland_buffer_handle_res_destroy(struct wl_listener *listener,
                                                void               *data) {
+  VT_PROFILE_SCOPE();
   (void)data;
 
   struct vt_wayland_buffer_attachment_t *wl_buf =
@@ -604,6 +622,7 @@ static void _wayland_buffer_handle_res_destroy(struct wl_listener *listener,
 bool vt_proto_wl_surface_init(struct vt_surface_t *surf,
                               struct wl_client *client, uint32_t id,
                               uint32_t version) {
+  VT_PROFILE_SCOPE();
   if (!surf) {
     return false;
   }

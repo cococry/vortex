@@ -20,6 +20,7 @@
  * SOFTWARE.
  */
 
+#include "src/core/profiling.h"
 #include "prime.h"
 
 #include <string.h>
@@ -27,6 +28,7 @@
 #include <xf86drm.h>
 
 void drm_prime_close_handles(int drm_fd, uint32_t handles[4]) {
+  VT_PROFILE_SCOPE();
   if (drm_fd < 0 || !handles)
     return;
 
@@ -49,6 +51,7 @@ void drm_prime_close_handles(int drm_fd, uint32_t handles[4]) {
 
 bool drm_prime_import_dmabuf(int drm_fd, struct vt_dmabuf_attr_t *attr,
                              uint32_t handles[4]) {
+  VT_PROFILE_SCOPE();
   if (drm_fd < 0 || !attr || !handles || attr->num_planes <= 0 ||
       attr->num_planes > 4) {
     return false;
@@ -69,6 +72,7 @@ bool drm_prime_import_dmabuf(int drm_fd, struct vt_dmabuf_attr_t *attr,
 }
 
 bool drm_prime_test_import(int drm_fd, struct vt_dmabuf_attr_t *attr) {
+  VT_PROFILE_SCOPE();
   uint32_t handles[4] = {0};
   if (!drm_prime_import_dmabuf(drm_fd, attr, handles))
     return false;
@@ -79,6 +83,7 @@ bool drm_prime_test_import(int drm_fd, struct vt_dmabuf_attr_t *attr) {
 
 bool drm_prime_import_gbm_bo(int drm_fd, struct gbm_bo *bo,
                              uint32_t handles[4]) {
+  VT_PROFILE_SCOPE();
   if (drm_fd < 0 || !bo || !handles)
     return false;
 

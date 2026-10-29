@@ -1,3 +1,4 @@
+#include "src/core/profiling.h"
 #include "vt_background.h"
 #include "core/output.h"
 #include "core/surface.h"
@@ -7,6 +8,7 @@
 
 static bool background_apply(struct vt_surface_t        *surf,
                              struct vt_content_update_t *cu) {
+  VT_PROFILE_SCOPE();
   (void)cu;
   struct vt_background_t *bg = surf->role.data;
   if (bg)
@@ -16,6 +18,7 @@ static bool background_apply(struct vt_surface_t        *surf,
 
 static void background_surface_destroy(struct wl_listener *listener,
                                        void               *data) {
+  VT_PROFILE_SCOPE();
   (void)data;
   struct vt_background_t *bg = wl_container_of(listener, bg, surface_destroy);
   wl_resource_destroy(bg->resource);
@@ -23,6 +26,7 @@ static void background_surface_destroy(struct wl_listener *listener,
 
 static void background_destroy(struct wl_client   *client,
                                struct wl_resource *resource) {
+  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
@@ -36,6 +40,7 @@ static const struct vt_surface_role_impl_t background_role_impl = {
 };
 
 static void background_resource_destroy(struct wl_resource *resource) {
+  VT_PROFILE_SCOPE();
   struct vt_background_t *bg = wl_resource_get_user_data(resource);
 
   if (bg->output && bg->output->background.owner == bg) {
@@ -55,6 +60,7 @@ static const struct vt_background_v1_interface background_impl = {
 static void get_background(struct wl_client *client, struct wl_resource *shell,
                            uint32_t id, struct wl_resource *surface_resource,
                            struct wl_resource *output_resource) {
+  VT_PROFILE_SCOPE();
   struct vt_surface_t *surf = wl_resource_get_user_data(surface_resource);
 
   struct vt_output_t *output = wl_resource_get_user_data(output_resource);
@@ -116,6 +122,7 @@ static const struct vt_background_shell_v1_interface shell_impl = {
 
 static void bind_shell(struct wl_client *client, void *data, uint32_t version,
                        uint32_t id) {
+  VT_PROFILE_SCOPE();
   struct wl_resource *res = wl_resource_create(
       client, &vt_background_shell_v1_interface, version, id);
 
@@ -128,6 +135,7 @@ static void bind_shell(struct wl_client *client, void *data, uint32_t version,
 }
 
 bool vt_proto_vt_background_init(struct vt_compositor_t *comp) {
+  VT_PROFILE_SCOPE();
   if (!comp)
     return false;
 

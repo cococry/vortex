@@ -22,6 +22,7 @@
 
 #define _GNU_SOURCE
 
+#include "src/core/profiling.h"
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -42,18 +43,21 @@
 // =================== PUBLIC API ====================
 // ===================================================
 uint64_t vt_util_get_time_msec(void) {
+  VT_PROFILE_SCOPE();
   struct timespec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
   return (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
 }
 
 void vt_util_arena_init(struct vt_arena_t *a, size_t capacity) {
+  VT_PROFILE_SCOPE();
   a->base = (uint8_t *)malloc(capacity);
   a->offset = 0;
   a->capacity = capacity;
 }
 
 void *vt_util_alloc(struct vt_arena_t *a, size_t size) {
+  VT_PROFILE_SCOPE();
   size = (size + 7u) & ~7u;
   if (a->offset + size > a->capacity) {
     fprintf(stderr, "[vortex]: warning: arena violated.\n");
@@ -66,15 +70,20 @@ void *vt_util_alloc(struct vt_arena_t *a, size_t size) {
   return ptr;
 }
 
-void vt_util_arena_reset(struct vt_arena_t *a) { a->offset = 0; }
+void vt_util_arena_reset(struct vt_arena_t *a) {
+  VT_PROFILE_SCOPE();
+  a->offset = 0;
+}
 
 void vt_util_arena_destroy(struct vt_arena_t *a) {
+  VT_PROFILE_SCOPE();
   free(a->base);
   a->base = NULL;
   a->capacity = a->offset = 0;
 }
 
 char *vt_util_log_get_filepath() {
+  VT_PROFILE_SCOPE();
   static char path[PATH_MAX];
   char       *state_home = getenv("XDG_STATE_HOME");
   const char *home = getenv("HOME");
@@ -121,6 +130,7 @@ char *vt_util_log_get_filepath() {
 }
 
 void vt_util_log_header(FILE *stream, log_level_t lvl) {
+  VT_PROFILE_SCOPE();
   static const char *lvl_str[VT_LL_COUNT] = {"TRACE", "INFO", "WARNING",
                                              "ERROR", "FATAL"};
   static const char *lvl_clr[VT_LL_COUNT] = {
@@ -158,10 +168,12 @@ void vt_util_log_header(FILE *stream, log_level_t lvl) {
 // handle_noop + vt_util_emit_signal =>
 // https://github.com/swaywm/wlroots/blob/master/util/signal.c#L7
 static void handle_noop(struct wl_listener *listener, void *data) {
+  VT_PROFILE_SCOPE();
   (void)listener;
   (void)data;
 }
 void vt_util_emit_signal(struct wl_signal *signal, void *data) {
+  VT_PROFILE_SCOPE();
 
   struct wl_listener cursor;
   struct wl_listener end;
@@ -192,6 +204,7 @@ void vt_util_emit_signal(struct wl_signal *signal, void *data) {
 }
 
 int vt_util_allocate_shm_file(struct vt_compositor_t *comp, size_t size) {
+  VT_PROFILE_SCOPE();
   int fd;
   if ((fd = memfd_create("vortex-shm", MFD_CLOEXEC | MFD_ALLOW_SEALING)) < 0) {
     VT_ERROR(comp->log, "memfd_create() failed: %s", strerror(errno));
@@ -207,6 +220,7 @@ int vt_util_allocate_shm_file(struct vt_compositor_t *comp, size_t size) {
 
 bool vt_util_allocate_shm_rwro_pair(struct vt_compositor_t *comp, size_t size,
                                     int *rw_fd, int *ro_fd) {
+  VT_PROFILE_SCOPE();
   *rw_fd = -1;
   *ro_fd = -1;
 
@@ -235,6 +249,7 @@ bool vt_util_allocate_shm_rwro_pair(struct vt_compositor_t *comp, size_t size,
   fourcc_code('A', 'R', '2', '4') /* [31:0] A:R:G:B 8:8:8:8 little endian */
 
 uint32_t vt_util_convert_wl_shm_format_to_drm(enum wl_shm_format fmt) {
+  VT_PROFILE_SCOPE();
   switch (fmt) {
   case WL_SHM_FORMAT_XRGB8888:
     return DRM_FORMAT_XRGB8888;
@@ -246,6 +261,7 @@ uint32_t vt_util_convert_wl_shm_format_to_drm(enum wl_shm_format fmt) {
 }
 
 enum wl_shm_format vt_util_convert_drm_format_to_wl_shm(uint32_t fmt) {
+  VT_PROFILE_SCOPE();
   switch (fmt) {
   case DRM_FORMAT_XRGB8888:
     return WL_SHM_FORMAT_XRGB8888;
@@ -257,6 +273,7 @@ enum wl_shm_format vt_util_convert_drm_format_to_wl_shm(uint32_t fmt) {
 }
 bool vt_util_box_intersects_output(const struct vt_box_t    *box,
                                    const struct vt_output_t *output) {
+  VT_PROFILE_SCOPE();
   return box->x + (int32_t)box->width > output->x &&
          box->x < output->x + (int32_t)output->width &&
          box->y + (int32_t)box->height > output->y &&
@@ -264,6 +281,7 @@ bool vt_util_box_intersects_output(const struct vt_box_t    *box,
 }
 struct vt_box_t vt_util_transform_box(struct vt_box_t box, uint32_t transform,
                                       int32_t width, int32_t height) {
+  VT_PROFILE_SCOPE();
   struct vt_box_t out = box;
   switch (transform & 3) {
   case WL_OUTPUT_TRANSFORM_NORMAL:

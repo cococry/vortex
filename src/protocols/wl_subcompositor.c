@@ -20,6 +20,7 @@
  * SOFTWARE.
  */
 
+#include "src/core/profiling.h"
 #include "wl_subcompositor.h"
 #include "src/core/content_update.h"
 #include "src/core/core_types.h"
@@ -78,6 +79,7 @@ static const struct vt_surface_role_impl_t subsurface_role_impl = {
 
 static void _subcompositor_bind(struct wl_client *client, void *data,
                                 uint32_t version, uint32_t id) {
+  VT_PROFILE_SCOPE();
   (void)version;
 
   struct vt_compositor_t *comp = data;
@@ -94,12 +96,14 @@ static void _subcompositor_bind(struct wl_client *client, void *data,
 
 static void _subcompositor_destroy(struct wl_client   *client,
                                    struct wl_resource *resource) {
+  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
 
 static bool _surface_has_ancestor(struct vt_surface_t *surf,
                                   struct vt_surface_t *ancestor) {
+  VT_PROFILE_SCOPE();
   while (surf && vt_surface_has_role(surf, VT_SURFACE_ROLE_SUBSURFACE)) {
     struct vt_subsurface_t *sub = surf->role.data;
     if (!sub)
@@ -114,6 +118,7 @@ static bool _surface_has_ancestor(struct vt_surface_t *surf,
 }
 
 static void _destroy_subsurface(struct vt_subsurface_t *sub) {
+  VT_PROFILE_SCOPE();
   if (!sub)
     return;
 
@@ -126,6 +131,7 @@ static void _destroy_subsurface(struct vt_subsurface_t *sub) {
 }
 
 static void _subsurface_resource_destroy(struct wl_resource *resource) {
+  VT_PROFILE_SCOPE();
   struct vt_subsurface_t *sub = wl_resource_get_user_data(resource);
 
   if (sub)
@@ -137,6 +143,7 @@ static void _subcompositor_get_subsurface(struct wl_client   *client,
                                           uint32_t            id,
                                           struct wl_resource *surface_resource,
                                           struct wl_resource *parent_resource) {
+  VT_PROFILE_SCOPE();
   struct vt_surface_t *surf = wl_resource_get_user_data(surface_resource);
 
   struct vt_surface_t *parent = wl_resource_get_user_data(parent_resource);
@@ -223,6 +230,7 @@ static void _subcompositor_get_subsurface(struct wl_client   *client,
 
 static void _subsurface_destroy(struct wl_client   *client,
                                 struct wl_resource *resource) {
+  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
@@ -230,6 +238,7 @@ static void _subsurface_destroy(struct wl_client   *client,
 static void _subsurface_set_position(struct wl_client   *client,
                                      struct wl_resource *resource, int32_t x,
                                      int32_t y) {
+  VT_PROFILE_SCOPE();
   (void)client;
 
   struct vt_subsurface_t *sub = wl_resource_get_user_data(resource);
@@ -244,6 +253,7 @@ static void _subsurface_set_position(struct wl_client   *client,
 static void _subsurface_place(struct wl_resource *resource,
                               struct wl_resource *sibling_resource,
                               bool                above) {
+  VT_PROFILE_SCOPE();
   struct vt_subsurface_t *sub = wl_resource_get_user_data(resource);
   struct vt_surface_t    *sibling = wl_resource_get_user_data(sibling_resource);
   if (!sub || !sub->parent)
@@ -285,6 +295,7 @@ static void _subsurface_place(struct wl_resource *resource,
 static void _subsurface_place_above(struct wl_client   *client,
                                     struct wl_resource *resource,
                                     struct wl_resource *sibling_resource) {
+  VT_PROFILE_SCOPE();
   (void)client;
   _subsurface_place(resource, sibling_resource, true);
 }
@@ -292,11 +303,13 @@ static void _subsurface_place_above(struct wl_client   *client,
 static void _subsurface_place_below(struct wl_client   *client,
                                     struct wl_resource *resource,
                                     struct wl_resource *sibling_resource) {
+  VT_PROFILE_SCOPE();
   (void)client;
   _subsurface_place(resource, sibling_resource, false);
 }
 
 bool vt_subsurface_capture_stacking(struct vt_content_update_t *cu) {
+  VT_PROFILE_SCOPE();
   size_t count = wl_list_length(&cu->surf->subsurface.childs);
   if (!count)
     return true;
@@ -313,6 +326,7 @@ bool vt_subsurface_capture_stacking(struct vt_content_update_t *cu) {
 }
 
 void vt_subsurface_apply_stacking(struct vt_content_update_t *cu) {
+  VT_PROFILE_SCOPE();
   /* IDs let queued parent commits safely outlive destroyed subsurfaces. */
   struct wl_list *position = &cu->surf->subsurface.stacking;
   for (size_t i = 0; i < cu->subsurface_stack_count; i++) {
@@ -333,6 +347,7 @@ void vt_subsurface_apply_stacking(struct vt_content_update_t *cu) {
 }
 
 void vt_subsurface_surface_destroy(struct vt_surface_t *surf) {
+  VT_PROFILE_SCOPE();
   struct vt_subsurface_t *sub, *tmp;
   wl_list_for_each_safe(sub, tmp, &surf->subsurface.childs, link) {
     wl_resource_set_user_data(sub->resource, NULL);
@@ -348,6 +363,7 @@ void vt_subsurface_surface_destroy(struct vt_surface_t *surf) {
 
 static void _subsurface_set_sync(struct wl_client   *client,
                                  struct wl_resource *resource) {
+  VT_PROFILE_SCOPE();
   (void)client;
 
   struct vt_subsurface_t *sub = wl_resource_get_user_data(resource);
@@ -358,6 +374,7 @@ static void _subsurface_set_sync(struct wl_client   *client,
 
 static void _subsurface_set_desync(struct wl_client   *client,
                                    struct wl_resource *resource) {
+  VT_PROFILE_SCOPE();
   (void)client;
 
   struct vt_subsurface_t *sub = wl_resource_get_user_data(resource);
@@ -367,6 +384,7 @@ static void _subsurface_set_desync(struct wl_client   *client,
 }
 
 bool vt_proto_wl_subcompositor_init(struct vt_compositor_t *comp) {
+  VT_PROFILE_SCOPE();
 
   if (!wl_global_create(comp->wl.dsp, &wl_subcompositor_interface, 1, comp,
                         _subcompositor_bind)) {
