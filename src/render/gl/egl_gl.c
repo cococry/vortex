@@ -777,22 +777,22 @@ bool _egl_record_surface_release_fences(struct vt_renderer_t *renderer,
     }
   }
 
-  struct egl_rendered_buffer_use_t *entry;
+  struct egl_rendered_buffer_use_t *entry, *tmp;
 
-  wl_list_for_each(entry, &egl_output->rendered_buffer_uses, link) {
+  wl_list_for_each_safe(entry, tmp, &egl_output->rendered_buffer_uses, link) {
     struct vt_buffer_use_t *use = entry->use;
 
-    if (!use)
-      continue;
-
-    if (fence_fd >= 0 && vt_buffer_release_needs_fence(use->release)) {
+    if (use && fence_fd >= 0 && vt_buffer_release_needs_fence(use->release)) {
 
       if (!vt_buffer_use_set_release_fence_fd(use, fence_fd)) {
         // TODO: handle dup failure
       }
     }
 
-    vt_buffer_use_unref(&entry->use);
+    if (use)
+      vt_buffer_use_unref(&entry->use);
+    wl_list_remove(&entry->link);
+    free(entry);
   }
 
   if (fence_fd >= 0)
