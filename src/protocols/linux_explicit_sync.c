@@ -166,7 +166,6 @@ _linux_explicit_sync_v1_from_surf(struct vt_surface_t *surf) {
 void _linux_explicit_sync_v1_get_synchronization(
     struct wl_client *client, struct wl_resource *resource, uint32_t id,
     struct wl_resource *surface_resource) {
-  VT_PROFILE_SCOPE();
 
   struct vt_surface_t *surf =
       surface_resource ? wl_resource_get_user_data(surface_resource) : NULL;
@@ -216,7 +215,6 @@ void _linux_explicit_sync_v1_get_synchronization(
 
 void _linux_explicit_sync_v1_destroy(struct wl_client   *client,
                                      struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   (void)client;
   /* Destroy the global explicit sync interface resource */
   wl_resource_destroy(resource);
@@ -224,7 +222,6 @@ void _linux_explicit_sync_v1_destroy(struct wl_client   *client,
 
 static void _linux_explicit_sync_v1_bind(struct wl_client *client, void *data,
                                          uint32_t version, uint32_t id) {
-  VT_PROFILE_SCOPE();
   struct vt_compositor_t *comp = (struct vt_compositor_t *)data;
   struct wl_resource     *res = wl_resource_create(
       client, &zwp_linux_explicit_synchronization_v1_interface, version, id);
@@ -243,7 +240,6 @@ static void _linux_explicit_sync_v1_bind(struct wl_client *client, void *data,
 
 void _linux_surface_sync_v1_destroy(struct wl_client   *client,
                                     struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
@@ -384,7 +380,6 @@ void _linux_surface_sync_v1_get_release(struct wl_client   *client,
 }
 
 void _linux_surface_sync_handle_destroy(struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   struct vt_linux_explicit_sync_v1_surface_state_t *state =
       resource ? wl_resource_get_user_data(resource) : NULL;
 
@@ -414,7 +409,6 @@ static void _handle_explict_release_destroy(struct wl_resource *resource) {
  * =================================================== */
 bool vt_proto_linux_explicit_sync_v1_init(struct vt_compositor_t *comp,
                                           uint32_t                version) {
-  VT_PROFILE_SCOPE();
   /* 1. Register global for linux-explicit-synchronization interface */
   if (!wl_global_create(comp->wl.dsp,
                         &zwp_linux_explicit_synchronization_v1_interface,
@@ -457,7 +451,6 @@ void vt_proto_linux_explicit_sync_v1_err(struct wl_resource *resource,
 
 static void
 _linux_explicit_sync_destroy_addon(struct vt_surface_addon_t *addon) {
-  VT_PROFILE_SCOPE();
   struct vt_linux_explicit_sync_v1_surface_state_t *state =
       wl_container_of(addon, state, addon);
 

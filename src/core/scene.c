@@ -412,7 +412,6 @@ struct vt_scene_node_t *
 _scene_node_create_rect(struct vt_compositor_t *c, float x, float y, float w,
                         float h, uint32_t color,
                         enum vt_scene_node_type_t type) {
-  VT_PROFILE_SCOPE();
   struct vt_scene_node_t *n = VT_ALLOC(c, sizeof(*n));
   if (!n) {
     VT_ERROR(c->log, "Failed to allocate scene node.");
@@ -435,7 +434,6 @@ _scene_node_create_rect(struct vt_compositor_t *c, float x, float y, float w,
 
 struct vt_scene_node_t *vt_scene_node_create(struct vt_compositor_t *c,
                                              struct vt_surface_t    *surf) {
-  VT_PROFILE_SCOPE();
   struct vt_scene_node_t *n = VT_ALLOC(c, sizeof(*n));
   if (!n) {
     VT_ERROR(c->log, "Failed to allocate scene node.");
@@ -463,7 +461,6 @@ struct vt_scene_node_t *vt_scene_node_create(struct vt_compositor_t *c,
 struct vt_scene_node_t *
 vt_scene_node_create_buffer(struct vt_compositor_t *c,
                             struct vt_buffer_use_t *use) {
-  VT_PROFILE_SCOPE();
   struct vt_scene_node_t *n = VT_ALLOC(c, sizeof(*n));
   if (!n) {
     VT_ERROR(c->log, "Failed to allocate scene node.");
@@ -487,7 +484,6 @@ vt_scene_node_create_buffer(struct vt_compositor_t *c,
 
 bool vt_scene_node_destroy(struct vt_compositor_t *c,
                            struct vt_scene_node_t *node) {
-  VT_PROFILE_SCOPE();
   (void)c;
   if (node->type == VT_SCENE_NODE_BUFFER && node->use) {
     vt_buffer_use_unref(&node->use);
@@ -589,21 +585,18 @@ bool vt_scene_node_damage_whole(struct vt_compositor_t *comp,
 struct vt_scene_node_t *vt_scene_node_create_rect(struct vt_compositor_t *c,
                                                   float x, float y, float w,
                                                   float h, uint32_t color) {
-  VT_PROFILE_SCOPE();
   return _scene_node_create_rect(c, x, y, w, h, color, VT_SCENE_NODE_RECT);
 }
 
 struct vt_scene_node_t *
 vt_scene_node_create_rect_invisible(struct vt_compositor_t *c, float x, float y,
                                     float w, float h) {
-  VT_PROFILE_SCOPE();
   return _scene_node_create_rect(c, x, y, w, h, 0x0,
                                  VT_SCENE_NODE_INVISIBLE_GEOMETRY);
 }
 
 struct vt_scene_node_t *
 vt_scene_node_create_container(struct vt_compositor_t *c) {
-  VT_PROFILE_SCOPE();
   return vt_scene_node_create_rect_invisible(c, 0, 0, 0, 0);
 }
 
@@ -691,7 +684,6 @@ bool vt_scene_node_remove_child(struct vt_scene_node_t *parent,
 
 struct vt_scene_t *vt_scene_create(struct vt_renderer_t   *renderer,
                                    struct vt_scene_node_t *root) {
-  VT_PROFILE_SCOPE();
   assert(renderer && renderer->comp && root);
 
   struct vt_scene_t *scene = VT_ALLOC(renderer->comp, sizeof(*scene));

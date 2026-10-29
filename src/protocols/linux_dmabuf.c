@@ -239,7 +239,6 @@ static const struct wl_buffer_interface _dmabuf_wl_buffer_impl = {
 
 static void
 _linux_dmabuf_surface_destroy_addon(struct vt_surface_addon_t *addon) {
-  VT_PROFILE_SCOPE();
   struct vt_linux_dmabuf_v1_surface_state_t *state =
       wl_container_of(addon, state, addon);
 
@@ -280,7 +279,6 @@ struct vt_buffer_attachment_implementation_t dmabuf_buffer_attachment_impl = {
 
 void _proto_linux_dmabuf_v1_bind(struct wl_client *client, void *data,
                                  uint32_t version, uint32_t id) {
-  VT_PROFILE_SCOPE();
   /* 1. Validate protocol data pointer */
   if (!data) {
     VT_PARAM_CHECK_FAIL(_proto->comp);
@@ -317,7 +315,6 @@ void _proto_linux_dmabuf_v1_bind(struct wl_client *client, void *data,
 }
 
 void _proto_linux_dmabuf_v1_destroy(struct vt_proto_linux_dmabuf_v1_t *dmabuf) {
-  VT_PROFILE_SCOPE();
   /* 1. Validate protocol handle */
   if (!dmabuf) {
     VT_PARAM_CHECK_FAIL(_proto->comp);
@@ -357,7 +354,6 @@ void _proto_linux_dmabuf_v1_destroy(struct vt_proto_linux_dmabuf_v1_t *dmabuf) {
 
 void _proto_linux_dmabuf_v1_handle_dsp_destroy(struct wl_listener *listener,
                                                void               *data) {
-  VT_PROFILE_SCOPE();
   (void)data;
   /* 1. Retrieve protocol handle from listener */
   struct vt_proto_linux_dmabuf_v1_t *dmabuf =
@@ -376,7 +372,6 @@ void _proto_linux_dmabuf_v1_handle_dsp_destroy(struct wl_listener *listener,
 
 void _linux_dmabuf_v1_destroy(struct wl_client   *client,
                               struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   (void)client;
   /* Destroy the linux-dmabuf global resource */
   wl_resource_destroy(resource);
@@ -389,7 +384,6 @@ void _linux_dmabuf_v1_destroy(struct wl_client   *client,
 void _linux_dmabuf_v1_create_params(struct wl_client   *client,
                                     struct wl_resource *resource,
                                     uint32_t            params_id) {
-  VT_PROFILE_SCOPE();
   VT_TRACE(_proto->comp->log, "linux_dmabuf.create_params: request received.");
 
   /* 1. Allocate internal params handle */
@@ -425,7 +419,6 @@ void _linux_dmabuf_v1_create_params(struct wl_client   *client,
 void _linux_dmabuf_v1_get_default_feedback(struct wl_client   *client,
                                            struct wl_resource *resource,
                                            uint32_t            id) {
-  VT_PROFILE_SCOPE();
   VT_TRACE(_proto->comp->log,
            "linux_dmabuf.get_default_feedback: request received.");
 
@@ -456,7 +449,6 @@ void _linux_dmabuf_v1_get_surface_feedback(struct wl_client   *client,
                                            struct wl_resource *resource,
                                            uint32_t            id,
                                            struct wl_resource *surface) {
-  VT_PROFILE_SCOPE();
   VT_TRACE(_proto->comp->log,
            "linux_dmabuf.get_surface_feedback: request received.");
 
@@ -517,7 +509,6 @@ void _linux_dmabuf_v1_get_surface_feedback(struct wl_client   *client,
 
 void _linux_dmabuf_v1_params_destroy(struct wl_client   *client,
                                      struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   (void)client;
   /* Destroy the linux_dmabuf buffer params resource */
   wl_resource_destroy(resource);
@@ -826,7 +817,6 @@ void _linux_dmabuf_v1_params_create_immed(struct wl_client   *client,
 
 static void
 _linux_dmabuf_v1_params_handle_res_destroy(struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   struct vt_linux_dmabuf_v1_params_t *params =
       wl_resource_get_user_data(resource);
 
@@ -862,13 +852,11 @@ void _linux_dmabuf_v1_buffer_handle_res_destroy(struct wl_resource *resource) {
 
 void _linux_dmabuf_v1_surf_feedback_handle_res_destroy(
     struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   wl_list_remove(wl_resource_get_link(resource));
 }
 
 void _linux_dmabuf_v1_feedback_destroy(struct wl_client   *client,
                                        struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
@@ -946,7 +934,6 @@ static bool _accumulate_tranche_formats(struct vt_compositor_t *comp,
 bool _linux_dmabuf_set_default_feedback(
     struct vt_proto_linux_dmabuf_v1_t *proto,
     struct vt_dmabuf_feedback_t       *feedback) {
-  VT_PROFILE_SCOPE();
   /* 1. Validate input parameters */
   if (!proto || !feedback || !feedback->comp || !feedback->comp->session) {
     VT_PARAM_CHECK_FAIL(proto ? proto->comp : _proto->comp);
@@ -1319,7 +1306,6 @@ _linux_dmabuf_output_feedback_get_or_create(struct vt_output_t *output,
 
 static void _linux_dmabuf_output_feedback_destroy(
     struct vt_linux_dmabuf_v1_output_feedback_t *cache) {
-  VT_PROFILE_SCOPE();
   if (!cache)
     return;
 
@@ -1517,7 +1503,6 @@ void _linux_dmabuf_send_feedback(
 
 static void _send_mods(struct wl_resource     *resource,
                        struct vt_drm_format_t *fmt) {
-  VT_PROFILE_SCOPE();
   if (wl_resource_get_version(resource) <
       ZWP_LINUX_DMABUF_V1_MODIFIER_SINCE_VERSION) {
     /* when the format has the INVALID modifier, it means it's modifier list is
@@ -1552,7 +1537,6 @@ static void _send_mods(struct wl_resource     *resource,
 }
 
 void _linux_dmabuf_legacy_send_default_formats(struct wl_resource *res) {
-  VT_PROFILE_SCOPE();
   struct vt_drm_format_t *fmt;
   wl_array_for_each(fmt, &_proto->default_formats) {
     _send_mods(res, fmt);
@@ -1617,7 +1601,6 @@ static void _dmabuf_buffer_attachment_destroy(struct vt_buffer_t *buf,
 bool vt_proto_linux_dmabuf_v1_init(
     struct vt_compositor_t *comp, struct vt_dmabuf_feedback_t *default_feedback,
     uint32_t version) {
-  VT_PROFILE_SCOPE();
   /* 1. Allocate protocol context */
   if (!(_proto = VT_ALLOC(comp, sizeof(*_proto)))) {
     VT_WL_OUT_OF_MEMORY(comp, NULL);

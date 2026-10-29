@@ -179,7 +179,6 @@ static bool _format_is_advertised(uint32_t format) {
 }
 
 static bool _append_format_unique(uint32_t format) {
-  VT_PROFILE_SCOPE();
   if (_format_is_advertised(format))
     return true;
 
@@ -283,7 +282,6 @@ static bool _validate_buffer_layout(struct shm_pool_t *pool, int32_t offset,
 
 static void _wl_shm_bind(struct wl_client *client, void *data, uint32_t version,
                          uint32_t id) {
-  VT_PROFILE_SCOPE();
   struct proto_wl_shm_t *proto = data;
   if (!proto || !proto->comp)
     return;
@@ -309,7 +307,6 @@ static void _wl_shm_bind(struct wl_client *client, void *data, uint32_t version,
 static void _wl_shm_create_pool(struct wl_client   *client,
                                 struct wl_resource *resource, uint32_t id,
                                 int32_t fd, int32_t size) {
-  VT_PROFILE_SCOPE();
   if (fd < 0 || size <= 0) {
     if (fd >= 0)
       close(fd);
@@ -365,7 +362,6 @@ static void _wl_shm_create_pool(struct wl_client   *client,
 
 static void _wl_shm_release(struct wl_client   *client,
                             struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
@@ -425,14 +421,12 @@ static void _wl_shm_pool_create_buffer(struct wl_client   *client,
 
 static void _wl_shm_pool_destroy(struct wl_client   *client,
                                  struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
 
 static void _wl_shm_pool_resize(struct wl_client   *client,
                                 struct wl_resource *resource, int32_t size) {
-  VT_PROFILE_SCOPE();
   (void)client;
 
   struct shm_pool_t *pool = wl_resource_get_user_data(resource);
@@ -467,7 +461,6 @@ static void _wl_shm_pool_resize(struct wl_client   *client,
 }
 
 static void _wl_shm_pool_handle_res_destroy(struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   struct shm_pool_t *pool = wl_resource_get_user_data(resource);
   if (!pool)
     return;
@@ -576,7 +569,6 @@ bool _wl_shm_buffer_get_attr(struct vt_buffer_t   *buf,
 
 static void _wl_shm_handle_display_destroy(struct wl_listener *listener,
                                            void               *data) {
-  VT_PROFILE_SCOPE();
   (void)data;
 
   struct proto_wl_shm_t *proto = wl_container_of(listener, proto, dsp_destroy);
@@ -588,7 +580,6 @@ static void _wl_shm_handle_display_destroy(struct wl_listener *listener,
 
 bool vt_proto_wl_shm_init(struct vt_compositor_t *comp,
                           const uint32_t *drm_formats, uint32_t n_formats) {
-  VT_PROFILE_SCOPE();
   if (!comp || !comp->wl.dsp || !drm_formats || n_formats == 0)
     return false;
 

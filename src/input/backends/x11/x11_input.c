@@ -35,7 +35,6 @@ struct x11_input {
 };
 
 bool input_backend_terminate_x11(struct vt_input_backend_t *backend) {
-  VT_PROFILE_SCOPE();
   assert(backend);
 
   xkb_state_unref(backend->kb_state);
@@ -51,7 +50,6 @@ bool input_backend_terminate_x11(struct vt_input_backend_t *backend) {
 
 bool input_backend_init_x11(struct vt_input_backend_t *backend,
                             void                      *native_handle) {
-  VT_PROFILE_SCOPE();
   if (!native_handle)
     return false;
 

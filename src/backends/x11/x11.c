@@ -218,7 +218,6 @@ static int _x11_parent_frame_done(void *data) {
 
 static void _x11_release_keys(struct vt_compositor_t *c,
                               struct x11_output      *xo) {
-  VT_PROFILE_SCOPE();
   for (unsigned i = 8; i < sizeof(xo->pressed_keys); ++i) {
     if (xo->pressed_keys[i]) {
       vt_seat_handle_key(c->seat, i, VT_KEY_STATE_RELEASED,
@@ -394,7 +393,6 @@ static int _x11_parent_dispatch(int fd, uint32_t mask, void *data) {
 
 static void _x11_backend_destroy_output(struct vt_backend_t *backend,
                                         struct vt_output_t  *output) {
-  VT_PROFILE_SCOPE();
   struct x11_backend *x = backend->user_data;
   struct x11_output  *xo = output->user_data;
   if (output->commit_source) {
@@ -424,7 +422,6 @@ static void _x11_backend_destroy_output(struct vt_backend_t *backend,
 
 static bool _x11_backend_create_output(struct vt_backend_t *backend,
                                        XVisualInfo *visual, unsigned id) {
-  VT_PROFILE_SCOPE();
 
   assert(backend && visual);
 
@@ -546,7 +543,6 @@ fail:
 }
 
 static bool _x11_init_dmabuf_feedback(struct vt_compositor_t *c) {
-  VT_PROFILE_SCOPE();
   struct vt_dmabuf_feedback_t *fb = vt_dmabuf_feedback_create(c, NULL);
   if (!fb)
     return false;
@@ -736,7 +732,6 @@ static bool backend_handle_frame_x11(struct vt_backend_t *backend,
 }
 
 static bool backend_terminate_x11(struct vt_backend_t *backend) {
-  VT_PROFILE_SCOPE();
   struct x11_backend *x = backend->user_data;
   if (!x)
     return true;
@@ -758,7 +753,6 @@ static bool backend_terminate_x11(struct vt_backend_t *backend) {
 }
 
 static bool backend_init_x11(struct vt_backend_t *backend) {
-  VT_PROFILE_SCOPE();
   struct vt_compositor_t *c = backend->comp;
   struct x11_backend     *x = VT_ALLOC(c, sizeof(*x));
   if (!x)
@@ -876,7 +870,6 @@ static bool backend_is_dmabuf_importable_x11(struct vt_backend_t     *backend,
 }
 
 bool backend_implement_x11(struct vt_compositor_t *comp) {
-  VT_PROFILE_SCOPE();
   if (!comp || !comp->backend)
     return false;
   comp->backend->platform = VT_BACKEND_X11;

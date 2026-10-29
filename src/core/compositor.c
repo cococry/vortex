@@ -199,13 +199,11 @@ bool _vt_comp_render_output(struct vt_compositor_t *c,
 }
 
 static bool _flag_cmp(const char *flag, const char *lng, const char *shrt) {
-  VT_PROFILE_SCOPE();
   return strcmp(flag, lng) == 0 || strcmp(flag, shrt) == 0;
 }
 
 static enum vt_rendering_backend_t
 _get_render_backend_from_str(const char *str) {
-  VT_PROFILE_SCOPE();
   if (!str)
     return VT_RENDERING_BACKEND_INVALID;
 #if VT_HAS_OPENGL
@@ -220,7 +218,6 @@ _get_render_backend_from_str(const char *str) {
 }
 
 static char **_get_valid_renderers(size_t *count_out) {
-  VT_PROFILE_SCOPE();
   if(!count_out) return NULL;
   *count_out = 0;
 
@@ -240,7 +237,6 @@ static char **_get_valid_renderers(size_t *count_out) {
 }
 
 static char **_scan_valid_backends(size_t *count_out) {
-  VT_PROFILE_SCOPE();
   if (count_out)
     *count_out = 0;
 
@@ -304,7 +300,6 @@ static char **_scan_valid_backends(size_t *count_out) {
 
 bool _vt_comp_handle_cmd_flags(struct vt_compositor_t *c, int argc,
                                       char **argv, struct vt_cli_flag_vals_t* o_vals) {
-  VT_PROFILE_SCOPE();
   if (!c || argc < 0 || (argc > 0 && !argv) || !o_vals)
     return false;
 
@@ -485,7 +480,6 @@ bool _vt_comp_handle_cmd_flags(struct vt_compositor_t *c, int argc,
 }
 
 void _vt_comp_log_help(void) {
-  VT_PROFILE_SCOPE();
   printf("Usage: vortex [option:s] (value:s)\n");
   printf("Options: \n");
   printf("%-35s %s\n", "-h, --help", "Show this help message and exit");
@@ -536,7 +530,6 @@ void _vt_comp_log_help(void) {
 
 void _vt_comp_wl_bind(struct wl_client *client, void *data, uint32_t version,
                       uint32_t id) {
-  VT_PROFILE_SCOPE();
   if (!client || !data)
     return;
 
@@ -551,7 +544,6 @@ void _vt_comp_wl_bind(struct wl_client *client, void *data, uint32_t version,
 
 void _vt_comp_load_backend(struct vt_compositor_t *c, const char *backend_name,
                            const char *backend_path) {
-  VT_PROFILE_SCOPE();
   if (!c || !c->backend || !backend_name || !backend_name[0])
     return;
 
@@ -617,7 +609,6 @@ void _vt_comp_load_backend(struct vt_compositor_t *c, const char *backend_name,
 
 void _vt_comp_wl_surface_create(struct wl_client   *client,
                                 struct wl_resource *resource, uint32_t id) {
-  VT_PROFILE_SCOPE();
   struct vt_compositor_t *c =
       resource ? wl_resource_get_user_data(resource) : NULL;
   assert(c && c->scene);
@@ -655,7 +646,6 @@ void _vt_comp_wl_surface_create(struct wl_client   *client,
 }
 
 void _vt_comp_wl_region_handle_resource_destroy(struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   struct vt_region_t *r = resource ? wl_resource_get_user_data(resource) : NULL;
   if (!r)
     return;
@@ -669,7 +659,6 @@ void _vt_comp_wl_region_handle_resource_destroy(struct wl_resource *resource) {
 void _vt_comp_wl_surface_create_region(struct wl_client   *client,
                                        struct wl_resource *resource,
                                        uint32_t            id) {
-  VT_PROFILE_SCOPE();
   struct vt_compositor_t *comp =
       resource ? wl_resource_get_user_data(resource) : NULL;
   if (!comp) {
@@ -709,7 +698,6 @@ void _vt_comp_wl_surface_create_region(struct wl_client   *client,
 
 void _vt_comp_wl_region_destroy(struct wl_client   *client,
                                 struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
@@ -717,7 +705,6 @@ void _vt_comp_wl_region_destroy(struct wl_client   *client,
 void _vt_comp_wl_region_add(struct wl_client   *client,
                             struct wl_resource *resource, int32_t x, int32_t y,
                             int32_t width, int32_t height) {
-  VT_PROFILE_SCOPE();
   (void)client;
   struct vt_region_t *r = resource ? wl_resource_get_user_data(resource) : NULL;
   if (!r)
@@ -730,7 +717,6 @@ void _vt_comp_wl_region_add(struct wl_client   *client,
 void _vt_comp_wl_region_subtract(struct wl_client   *client,
                                  struct wl_resource *resource, int32_t x,
                                  int32_t y, int32_t width, int32_t height) {
-  VT_PROFILE_SCOPE();
   (void)client;
   struct vt_region_t *r = resource ? wl_resource_get_user_data(resource) : NULL;
   if (!r)
@@ -756,7 +742,6 @@ static void _vt_comp_schedule_output_commit(struct vt_compositor_t *comp,
 }
 
 bool _vt_comp_wl_init(struct vt_compositor_t *c) {
-  VT_PROFILE_SCOPE();
   if (!c)
     return false;
 
@@ -823,7 +808,6 @@ error:
 static struct vt_compositor_t *vt_global_compositor;
 
 static void _sig_handler(int sig) {
-  VT_PROFILE_SCOPE();
   void  *trace[32];
   size_t n = backtrace(trace, 32);
   fprintf(stderr, "\n[vortex] Caught signal %d (%s)\n", sig, strsignal(sig));
@@ -842,7 +826,6 @@ static void _sig_handler(int sig) {
 
 static void _handle_output_changed_backend(struct vt_backend_t *backend,
                                            struct vt_output_t  *output) {
-  VT_PROFILE_SCOPE();
   if (!backend || !backend->comp || !backend->comp->scene)
     return;
 
@@ -871,7 +854,6 @@ static void _handle_output_changed_backend(struct vt_backend_t *backend,
 }
 
 bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
-  VT_PROFILE_SCOPE();
   if (!c)
     return false;
 
@@ -1044,7 +1026,6 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
 }
 
 static int _vt_comp_handle_quit_signal(int sig, void *data) {
-  VT_PROFILE_SCOPE();
   struct vt_compositor_t *c = data;
   VT_TRACE(c->log, "Caught signal %d (%s), shutting down.", sig,
            strsignal(sig));
@@ -1053,7 +1034,6 @@ static int _vt_comp_handle_quit_signal(int sig, void *data) {
 }
 
 void vt_comp_run(struct vt_compositor_t *c) {
-  VT_PROFILE_SCOPE();
   if (!c || !c->wl.evloop || !c->wl.dsp)
     return;
 
@@ -1082,7 +1062,6 @@ void vt_comp_run(struct vt_compositor_t *c) {
 }
 
 bool vt_comp_terminate(struct vt_compositor_t *c) {
-  VT_PROFILE_SCOPE();
   if (!c)
     return false;
 

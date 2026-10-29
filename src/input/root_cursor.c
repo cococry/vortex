@@ -36,7 +36,6 @@
 
 static void _root_cursor_pixels_destroy(struct vt_buffer_t *buf,
                                         const void *owner, void *data) {
-  VT_PROFILE_SCOPE();
   (void)buf;
   (void)owner;
   XcursorImageDestroy(data);
@@ -69,7 +68,6 @@ static const struct vt_buffer_implementation_t root_buffer_impl = {
     .get_shm = _root_cursor_get_shm};
 
 bool vt_seat_root_cursor_init(struct vt_seat_t *seat) {
-  VT_PROFILE_SCOPE();
   if (!seat || !seat->comp)
     return false;
 
@@ -138,7 +136,6 @@ fail:
 }
 
 void vt_seat_root_cursor_finish(struct vt_seat_t *seat) {
-  VT_PROFILE_SCOPE();
   if (!seat || !seat->comp || !seat->comp->root_cursor)
     return;
 

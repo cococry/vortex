@@ -282,7 +282,6 @@ static bool _popup_resolve_pos(struct vt_xdg_popup_t       *popup,
 
 void _xdg_wm_base_bind(struct wl_client *client, void *data, uint32_t version,
                        uint32_t id) {
-  VT_PROFILE_SCOPE();
   /* 1. Allocate resource for the XDG WM-base interface */
   struct wl_resource *res =
       wl_resource_create(client, &xdg_wm_base_interface, version, id);
@@ -297,7 +296,6 @@ void _xdg_wm_base_bind(struct wl_client *client, void *data, uint32_t version,
 
 void _xdg_wm_base_destroy(struct wl_client   *client,
                           struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   (void)client;
   /* Destroy the XDG WM-base interface resource */
   wl_resource_destroy(resource);
@@ -305,7 +303,6 @@ void _xdg_wm_base_destroy(struct wl_client   *client,
 
 void _xdg_wm_base_create_positioner(struct wl_client   *client,
                                     struct wl_resource *resource, uint32_t id) {
-  VT_PROFILE_SCOPE();
   /* 1. Allocate resource for the positioner interface */
   struct wl_resource *res = wl_resource_create(
       client, &xdg_positioner_interface, wl_resource_get_version(resource), id);
@@ -344,7 +341,6 @@ void _xdg_wm_base_create_positioner(struct wl_client   *client,
 
 void _xdg_wm_base_positioner_handle_resource_destroy(
     struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   struct vt_xdg_positioner_t *pos =
       resource ? wl_resource_get_user_data(resource) : NULL;
   if (!pos) {
@@ -366,7 +362,6 @@ void _xdg_wm_base_positioner_handle_resource_destroy(
 }
 
 void _xdg_toplevel_handle_resource_destroy(struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   struct vt_xdg_toplevel_t *top =
       resource ? wl_resource_get_user_data(resource) : NULL;
 
@@ -397,7 +392,6 @@ void _xdg_toplevel_handle_resource_destroy(struct wl_resource *resource) {
 }
 
 void _xdg_surface_handle_resource_destroy(struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   struct vt_xdg_surface_t *xdg =
       resource ? wl_resource_get_user_data(resource) : NULL;
 
@@ -433,7 +427,6 @@ void _xdg_surface_handle_resource_destroy(struct wl_resource *resource) {
 }
 
 void _xdg_popup_handle_resource_destroy(struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   struct vt_xdg_popup_t *popup =
       resource ? wl_resource_get_user_data(resource) : NULL;
 
@@ -569,7 +562,6 @@ fail:
 void _xdg_wm_base_get_xdg_surface(struct wl_client   *client,
                                   struct wl_resource *resource, uint32_t id,
                                   struct wl_resource *surface_res) {
-  VT_PROFILE_SCOPE();
   struct vt_surface_t *surf =
       surface_res ? wl_resource_get_user_data(surface_res) : NULL;
   if (!surf) {
@@ -620,7 +612,6 @@ void _xdg_wm_base_get_xdg_surface(struct wl_client   *client,
 
 void _xdg_wm_base_pong(struct wl_client *client, struct wl_resource *resource,
                        uint32_t serial) {
-  VT_PROFILE_SCOPE();
   (void)client;
   (void)resource;
   (void)serial;
@@ -628,7 +619,6 @@ void _xdg_wm_base_pong(struct wl_client *client, struct wl_resource *resource,
 
 void _xdg_positioner_destroy(struct wl_client   *client,
                              struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
@@ -839,13 +829,11 @@ void _xdg_positioner_set_offset(struct wl_client   *client,
 
 void _xdg_surface_destroy(struct wl_client   *client,
                           struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
 
 void send_initial_configure(struct vt_xdg_surface_t *surf) {
-  VT_PROFILE_SCOPE();
   if (!surf || !surf->toplevel) {
     VT_PARAM_CHECK_FAIL(_proto.comp);
     return;
@@ -856,7 +844,6 @@ void send_initial_configure(struct vt_xdg_surface_t *surf) {
 
 void _xdg_surface_get_toplevel(struct wl_client   *client,
                                struct wl_resource *resource, uint32_t id) {
-  VT_PROFILE_SCOPE();
 
   /* 1. Retrieve internal XDG-Surface handle from the resource
    * the request came from. */
@@ -930,7 +917,6 @@ void _xdg_surface_get_popup(struct wl_client   *client,
                             struct wl_resource *resource, uint32_t id,
                             struct wl_resource *parent_surface,
                             struct wl_resource *positioner) {
-  VT_PROFILE_SCOPE();
 
   /* 1. Retrieve internal XDG-Surface handle for both parent toplevel and popup
    * from the resources the request came from. */
@@ -1128,14 +1114,12 @@ void _xdg_surface_set_window_geometry(struct wl_client   *client,
 
 void _xdg_toplevel_destroy(struct wl_client   *client,
                            struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
 void _xdg_toplevel_set_parent(struct wl_client   *client,
                               struct wl_resource *resource,
                               struct wl_resource *parent_resource) {
-  VT_PROFILE_SCOPE();
   (void)client;
   /* 1. Retrieve internal XDG-Toplevel handle */
   struct vt_xdg_toplevel_t *xdg_toplevel =
@@ -1174,7 +1158,6 @@ void _xdg_toplevel_set_parent(struct wl_client   *client,
 
 void _xdg_toplevel_set_title(struct wl_client   *client,
                              struct wl_resource *resource, const char *title) {
-  VT_PROFILE_SCOPE();
   (void)client;
   /* Deallocate the old App Title and strdup() the requested ID */
   struct vt_xdg_toplevel_t *top = wl_resource_get_user_data(resource);
@@ -1186,7 +1169,6 @@ void _xdg_toplevel_set_title(struct wl_client   *client,
 void _xdg_toplevel_set_app_id(struct wl_client   *client,
                               struct wl_resource *resource,
                               const char         *app_id) {
-  VT_PROFILE_SCOPE();
   (void)client;
   struct vt_xdg_toplevel_t *top = wl_resource_get_user_data(resource);
   /* Deallocate the old App ID and strdup() the requested ID */
@@ -1199,7 +1181,6 @@ void _xdg_toplevel_show_window_menu(struct wl_client   *client,
                                     struct wl_resource *resource,
                                     struct wl_resource *seat, uint32_t serial,
                                     int32_t x, int32_t y) {
-  VT_PROFILE_SCOPE();
   (void)client;
   (void)resource;
   (void)seat;
@@ -1232,7 +1213,6 @@ void _xdg_toplevel_resize(struct wl_client   *client,
 void _xdg_toplevel_set_max_size(struct wl_client   *client,
                                 struct wl_resource *resource, int32_t width,
                                 int32_t height) {
-  VT_PROFILE_SCOPE();
   (void)client;
   (void)resource;
   (void)width;
@@ -1242,7 +1222,6 @@ void _xdg_toplevel_set_max_size(struct wl_client   *client,
 void _xdg_toplevel_set_min_size(struct wl_client   *client,
                                 struct wl_resource *resource, int32_t width,
                                 int32_t height) {
-  VT_PROFILE_SCOPE();
   (void)client;
   (void)resource;
   (void)width;
@@ -1330,7 +1309,6 @@ void _xdg_toplevel_set_minimized(struct wl_client   *client,
 
 void _xdg_popup_destroy(struct wl_client   *client,
                         struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
@@ -1712,7 +1690,6 @@ void _xdg_popup_reposition(struct wl_client   *client,
 // =================== PUBLIC API ====================
 // ===================================================
 bool vt_proto_xdg_shell_init(struct vt_compositor_t *c, uint32_t version) {
-  VT_PROFILE_SCOPE();
   if (!(_proto.xdg_wm_base = wl_global_create(c->wl.dsp, &xdg_wm_base_interface,
                                               version, c, _xdg_wm_base_bind))) {
     VT_ERROR(c->log, "Cannot implement XDG base interface.");

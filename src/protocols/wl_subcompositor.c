@@ -79,7 +79,6 @@ static const struct vt_surface_role_impl_t subsurface_role_impl = {
 
 static void _subcompositor_bind(struct wl_client *client, void *data,
                                 uint32_t version, uint32_t id) {
-  VT_PROFILE_SCOPE();
   (void)version;
 
   struct vt_compositor_t *comp = data;
@@ -96,7 +95,6 @@ static void _subcompositor_bind(struct wl_client *client, void *data,
 
 static void _subcompositor_destroy(struct wl_client   *client,
                                    struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
@@ -118,7 +116,6 @@ static bool _surface_has_ancestor(struct vt_surface_t *surf,
 }
 
 static void _destroy_subsurface(struct vt_subsurface_t *sub) {
-  VT_PROFILE_SCOPE();
   if (!sub)
     return;
 
@@ -131,7 +128,6 @@ static void _destroy_subsurface(struct vt_subsurface_t *sub) {
 }
 
 static void _subsurface_resource_destroy(struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   struct vt_subsurface_t *sub = wl_resource_get_user_data(resource);
 
   if (sub)
@@ -143,7 +139,6 @@ static void _subcompositor_get_subsurface(struct wl_client   *client,
                                           uint32_t            id,
                                           struct wl_resource *surface_resource,
                                           struct wl_resource *parent_resource) {
-  VT_PROFILE_SCOPE();
   struct vt_surface_t *surf = wl_resource_get_user_data(surface_resource);
 
   struct vt_surface_t *parent = wl_resource_get_user_data(parent_resource);
@@ -230,7 +225,6 @@ static void _subcompositor_get_subsurface(struct wl_client   *client,
 
 static void _subsurface_destroy(struct wl_client   *client,
                                 struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
@@ -347,7 +341,6 @@ void vt_subsurface_apply_stacking(struct vt_content_update_t *cu) {
 }
 
 void vt_subsurface_surface_destroy(struct vt_surface_t *surf) {
-  VT_PROFILE_SCOPE();
   struct vt_subsurface_t *sub, *tmp;
   wl_list_for_each_safe(sub, tmp, &surf->subsurface.childs, link) {
     wl_resource_set_user_data(sub->resource, NULL);
@@ -384,7 +377,6 @@ static void _subsurface_set_desync(struct wl_client   *client,
 }
 
 bool vt_proto_wl_subcompositor_init(struct vt_compositor_t *comp) {
-  VT_PROFILE_SCOPE();
 
   if (!wl_global_create(comp->wl.dsp, &wl_subcompositor_interface, 1, comp,
                         _subcompositor_bind)) {

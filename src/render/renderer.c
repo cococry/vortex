@@ -20,7 +20,6 @@
  * SOFTWARE.
  */
 
-#include "src/core/profiling.h"
 #include "renderer.h"
 #include "config.h"
 #include "core/util.h"
@@ -37,7 +36,6 @@
 
 void vt_renderer_implement(struct vt_renderer_t       *renderer,
                            enum vt_rendering_backend_t backend) {
-  VT_PROFILE_SCOPE();
 #if VT_HAS_OPENGL
   if (backend == VT_RENDERING_BACKEND_EGL_OPENGL) {
     renderer->impl = (struct vt_renderer_interface_t){

@@ -267,7 +267,6 @@ static bool _vk_import_shm(struct vt_renderer_t *r, struct vk_texture *texture,
 }
 
 static bool _vk_query_formats(struct vt_renderer_t *r) {
-  VT_PROFILE_SCOPE();
   struct vt_vk_backend_state_t       *vk = r->user_data;
   const struct rn_vk_dmabuf_format_t *formats;
   size_t                              count;
@@ -430,7 +429,6 @@ static bool _vk_prepare_use(struct vt_renderer_t   *r,
 }
 
 static const char *const *_vk_instance_extensions(void *user, uint32_t *count) {
-  VT_PROFILE_SCOPE();
   struct vt_renderer_t    *r = user;
   static const char *const x11[] = {VK_KHR_SURFACE_EXTENSION_NAME,
                                     "VK_KHR_xlib_surface"};
@@ -442,7 +440,6 @@ static const char *const *_vk_instance_extensions(void *user, uint32_t *count) {
 
 static VkResult _vk_create_surface(void *user, VkInstance instance,
                                    VkSurfaceKHR *surface) {
-  VT_PROFILE_SCOPE();
   struct vt_output_t   *output = user;
   struct vt_renderer_t *r = output->backend->comp->renderer;
 
@@ -480,7 +477,6 @@ static VkResult _vk_create_surface(void *user, VkInstance instance,
 
 static void _vk_framebuffer_size(void *user, uint32_t *width,
                                  uint32_t *height) {
-  VT_PROFILE_SCOPE();
   struct vt_output_t *output = user;
   *width = output->width;
   *height = output->height;
@@ -489,7 +485,6 @@ static void _vk_framebuffer_size(void *user, uint32_t *width,
 static bool _vk_create_renderer(struct vt_renderer_t      *r,
                                 enum vt_backend_platform_t platform,
                                 void                      *native_handle) {
-  VT_PROFILE_SCOPE();
   if (platform != VT_BACKEND_X11 && platform != VT_BACKEND_WAYLAND) {
     VT_ERROR(r->comp->log,
              "Vulkan presentation currently requires X11 or Wayland.");
@@ -542,7 +537,6 @@ fail:
 
 bool renderer_init_vk(struct vt_backend_t *backend, struct vt_renderer_t *r,
                       void *native_handle) {
-  VT_PROFILE_SCOPE();
   if (!backend || !r || !native_handle)
     return false;
 
@@ -567,14 +561,12 @@ bool renderer_init_vk(struct vt_backend_t *backend, struct vt_renderer_t *r,
 
 bool renderer_is_handle_renderable_vk(struct vt_renderer_t *r,
                                       void                 *native_handle) {
-  VT_PROFILE_SCOPE();
   return r && r->user_data && native_handle;
 }
 
 bool renderer_query_dmabuf_formats_vk(struct vt_compositor_t *comp,
                                       void                   *native_handle,
                                       struct wl_array        *formats) {
-  VT_PROFILE_SCOPE();
   return comp && native_handle &&
          renderer_query_dmabuf_formats_with_renderer_vk(comp->renderer,
                                                         formats);
@@ -582,7 +574,6 @@ bool renderer_query_dmabuf_formats_vk(struct vt_compositor_t *comp,
 
 bool renderer_query_dmabuf_formats_with_renderer_vk(struct vt_renderer_t *r,
                                                     struct wl_array *formats) {
-  VT_PROFILE_SCOPE();
   if (!r || !r->user_data || !formats)
     return false;
 
@@ -592,7 +583,6 @@ bool renderer_query_dmabuf_formats_with_renderer_vk(struct vt_renderer_t *r,
 
 bool renderer_setup_renderable_output_vk(struct vt_renderer_t *r,
                                          struct vt_output_t   *output) {
-  VT_PROFILE_SCOPE();
   if (!r || !r->user_data || !output || output->backend != r->backend ||
       !output->native_window)
     return false;
@@ -638,7 +628,6 @@ bool renderer_setup_renderable_output_vk(struct vt_renderer_t *r,
 bool renderer_resize_renderable_output_vk(struct vt_renderer_t *r,
                                           struct vt_output_t *output, int32_t w,
                                           int32_t h) {
-  VT_PROFILE_SCOPE();
   if (!r || !r->user_data || !output || !output->render_surface || w <= 0 ||
       h <= 0)
     return false;
@@ -653,7 +642,6 @@ bool renderer_resize_renderable_output_vk(struct vt_renderer_t *r,
 
 bool renderer_destroy_renderable_output_vk(struct vt_renderer_t *r,
                                            struct vt_output_t   *output) {
-  VT_PROFILE_SCOPE();
   if (!r || !r->user_data || !output)
     return false;
 
@@ -725,7 +713,6 @@ bool renderer_is_dmabuf_importable_vk(struct vt_renderer_t          *r,
 }
 
 bool renderer_drop_context_vk(struct vt_renderer_t *r) {
-  VT_PROFILE_SCOPE();
   if (!r || !r->user_data)
     return false;
 
@@ -746,7 +733,6 @@ bool renderer_supports_explicit_sync_vk(struct vt_renderer_t *r) {
 }
 
 void renderer_set_vsync_vk(struct vt_renderer_t *r, bool vsync) {
-  VT_PROFILE_SCOPE();
   if (!r || !r->user_data)
     return;
 
@@ -1013,7 +999,6 @@ void renderer_end_frame_vk(struct vt_renderer_t *r, struct vt_output_t *output,
 }
 
 bool renderer_destroy_vk(struct vt_renderer_t *r) {
-  VT_PROFILE_SCOPE();
   if (!r)
     return false;
 

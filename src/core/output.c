@@ -33,7 +33,6 @@ static int32_t output_x_ptr = 0;
 
 struct vt_output_t *vt_output_init(struct vt_backend_t               *backend,
                                    struct vt_output_implementation_t *impl) {
-  VT_PROFILE_SCOPE();
   assert(backend && backend->comp && impl);
 
   struct vt_output_t *output = VT_ALLOC(backend->comp, sizeof(*output));
@@ -50,7 +49,6 @@ struct vt_output_t *vt_output_init(struct vt_backend_t               *backend,
 }
 
 void vt_output_fini(struct vt_output_t *output) {
-  VT_PROFILE_SCOPE();
   assert(output && output->backend && output->backend->comp);
 
   if (output->background.owner) {
@@ -84,7 +82,6 @@ void vt_output_fini(struct vt_output_t *output) {
 }
 
 bool _init_output_bg(struct vt_output_t *output) {
-  VT_PROFILE_SCOPE();
   assert(output && output->backend && output->backend->comp &&
          output->backend->impl.allocate_buffer &&
          output->backend->impl.clear_buffer);
@@ -131,7 +128,6 @@ fail:
 
 bool vt_output_init_geom(struct vt_output_t *output, uint32_t width,
                          uint32_t height) {
-  VT_PROFILE_SCOPE();
   assert(output && output->backend && output->backend->comp);
 
   output->width = width;
@@ -178,7 +174,6 @@ void vt_output_set_background(struct vt_output_t     *output,
 }
 
 bool vt_output_resize_background(struct vt_output_t *output) {
-  VT_PROFILE_SCOPE();
   struct vt_buffer_use_t *old = output->background.use_fallback;
   if (!old ||
       (old->buf->width == output->width && old->buf->height == output->height))

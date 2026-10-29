@@ -21,7 +21,6 @@
  */
 
 #define _POSIX_C_SOURCE 200809L
-#include "src/core/profiling.h"
 #include "wl_data_device.h"
 #include <string.h>
 #include <unistd.h>
@@ -64,7 +63,6 @@ static const struct wl_data_source_interface data_source_interface = {
     _data_source_offer, _data_source_destroy, _data_source_set_actions};
 
 static void _destroy_data_source(struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   struct vt_data_source_t *source = wl_resource_get_user_data(resource);
   char                   **p;
 
@@ -79,7 +77,6 @@ static void _destroy_data_source(struct wl_resource *resource) {
 
 static void _create_data_source(struct wl_client   *client,
                                 struct wl_resource *resource, uint32_t id) {
-  VT_PROFILE_SCOPE();
   struct vt_data_source_t *source;
 
   source = malloc(sizeof(*source));
@@ -116,7 +113,6 @@ static void _create_data_source(struct wl_client   *client,
 }
 
 static void _unbind_data_device(struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   wl_list_remove(wl_resource_get_link(resource));
 }
 
@@ -125,7 +121,6 @@ static void data_device_start_drag(struct wl_client   *client,
                                    struct wl_resource *source,
                                    struct wl_resource *origin,
                                    struct wl_resource *icon, uint32_t serial) {
-  VT_PROFILE_SCOPE();
   (void)client;
   (void)resource;
   (void)source;
@@ -138,7 +133,6 @@ static void data_device_set_selection(struct wl_client   *client,
                                       struct wl_resource *resource,
                                       struct wl_resource *source_resource,
                                       uint32_t            serial) {
-  VT_PROFILE_SCOPE();
   (void)client;
   (void)resource;
   (void)source_resource;
@@ -147,7 +141,6 @@ static void data_device_set_selection(struct wl_client   *client,
 
 static void data_device_release(struct wl_client   *client,
                                 struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
@@ -161,7 +154,6 @@ static const struct wl_data_device_interface data_device_interface = {
 static void _get_data_device(struct wl_client   *client,
                              struct wl_resource *manager_resource, uint32_t id,
                              struct wl_resource *seat_resource) {
-  VT_PROFILE_SCOPE();
   struct vt_seat_t   *seat = wl_resource_get_user_data(seat_resource);
   struct wl_resource *resource;
 
@@ -184,26 +176,22 @@ static void _get_data_device(struct wl_client   *client,
 
 static void _client_source_accept(struct vt_data_source_t *source,
                                   uint32_t serial, const char *mime_type) {
-  VT_PROFILE_SCOPE();
   (void)serial;
   wl_data_source_send_target(source->resource, mime_type);
 }
 
 static void _client_source_send(struct vt_data_source_t *source,
                                 const char *mime_type, int32_t fd) {
-  VT_PROFILE_SCOPE();
   wl_data_source_send_send(source->resource, mime_type, fd);
   close(fd);
 }
 
 static void _client_source_cancel(struct vt_data_source_t *source) {
-  VT_PROFILE_SCOPE();
   wl_data_source_send_cancelled(source->resource);
 }
 
 static void _data_source_offer(struct wl_client   *client,
                                struct wl_resource *resource, const char *type) {
-  VT_PROFILE_SCOPE();
   (void)client;
   struct vt_data_source_t *source = wl_resource_get_user_data(resource);
   char                   **p;
@@ -217,7 +205,6 @@ static void _data_source_offer(struct wl_client   *client,
 
 static void _data_source_destroy(struct wl_client   *client,
                                  struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
@@ -225,7 +212,6 @@ static void _data_source_destroy(struct wl_client   *client,
 static void _data_source_set_actions(struct wl_client   *client,
                                      struct wl_resource *resource,
                                      uint32_t            dnd_actions) {
-  VT_PROFILE_SCOPE();
   (void)client;
   struct vt_data_source_t *source = wl_resource_get_user_data(resource);
 
@@ -257,7 +243,6 @@ static void _data_source_set_actions(struct wl_client   *client,
 
 static void _manager_bind(struct wl_client *client, void *data,
                           uint32_t version, uint32_t id) {
-  VT_PROFILE_SCOPE();
   (void)data;
   struct wl_resource *resource;
 
@@ -271,7 +256,6 @@ static void _manager_bind(struct wl_client *client, void *data,
   wl_resource_set_implementation(resource, &manager_interface, NULL, NULL);
 }
 bool vt_proto_wl_data_device_init(struct vt_compositor_t *comp) {
-  VT_PROFILE_SCOPE();
   if (!wl_global_create(comp->wl.dsp, &wl_data_device_manager_interface, 3,
                         NULL, _manager_bind)) {
     return false;

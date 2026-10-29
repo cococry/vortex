@@ -447,7 +447,6 @@ static bool _addon_commit(struct vt_surface_t        *surf,
 }
 
 static void _addon_destroy(struct vt_surface_addon_t *addon) {
-  VT_PROFILE_SCOPE();
   struct vt_linux_drm_syncobj_v1_surface_state_t *s =
       wl_container_of(addon, s, addon);
 
@@ -475,7 +474,6 @@ static const struct vt_surface_addon_impl_t _addon_impl = {
 
 static void _surface_destroy(struct wl_client   *client,
                              struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
@@ -533,7 +531,6 @@ static const struct wp_linux_drm_syncobj_surface_v1_interface _surface_impl = {
 };
 
 static void _surface_handle_resource_destroy(struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   struct vt_linux_drm_syncobj_v1_surface_state_t *s =
       wl_resource_get_user_data(resource);
   if (!s)
@@ -546,7 +543,6 @@ static void _surface_handle_resource_destroy(struct wl_resource *resource) {
 
 static void _timeline_destroy(struct wl_client   *client,
                               struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
@@ -558,14 +554,12 @@ static const struct wp_linux_drm_syncobj_timeline_v1_interface _timeline_impl =
 
 // points already set keep their own reference
 static void _timeline_handle_resource_destroy(struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   struct vt_drm_syncobj_timeline_t *tl = wl_resource_get_user_data(resource);
   _timeline_unref(&tl);
 }
 
 static void _manager_destroy(struct wl_client   *client,
                              struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
@@ -573,7 +567,6 @@ static void _manager_destroy(struct wl_client   *client,
 static void _manager_get_surface(struct wl_client   *client,
                                  struct wl_resource *resource, uint32_t id,
                                  struct wl_resource *surface_res) {
-  VT_PROFILE_SCOPE();
   struct vt_surface_t *surf = wl_resource_get_user_data(surface_res);
 
   if (surf->proto_state.linux_drm_syncobj_v1) {
@@ -609,7 +602,6 @@ static void _manager_get_surface(struct wl_client   *client,
 static void _manager_import_timeline(struct wl_client   *client,
                                      struct wl_resource *resource, uint32_t id,
                                      int32_t fd) {
-  VT_PROFILE_SCOPE();
   struct vt_drm_syncobj_timeline_t *tl = calloc(1, sizeof(*tl));
   if (!tl) {
     close(fd);
@@ -653,7 +645,6 @@ static const struct wp_linux_drm_syncobj_manager_v1_interface _manager_impl = {
 
 static void _manager_bind(struct wl_client *client, void *data,
                           uint32_t version, uint32_t id) {
-  VT_PROFILE_SCOPE();
   (void)data;
   struct wl_resource *res = wl_resource_create(
       client, &wp_linux_drm_syncobj_manager_v1_interface, version, id);
@@ -673,7 +664,6 @@ static void _manager_bind(struct wl_client *client, void *data,
 
 bool vt_proto_linux_drm_syncobj_v1_init(struct vt_compositor_t *comp,
                                         int                     drm_fd) {
-  VT_PROFILE_SCOPE();
   uint64_t cap = 0;
   if (drmGetCap(drm_fd, DRM_CAP_SYNCOBJ_TIMELINE, &cap) != 0 || !cap) {
     VT_TRACE(comp->log, "DRM device lacks timeline syncobjs, not advertising "
@@ -696,7 +686,6 @@ bool vt_proto_linux_drm_syncobj_v1_init(struct vt_compositor_t *comp,
 }
 
 void vt_proto_linux_drm_syncobj_v1_log_stats(void) {
-  VT_PROFILE_SCOPE();
   if (!_proto.comp)
     return;
 

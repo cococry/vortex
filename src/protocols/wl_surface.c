@@ -461,7 +461,6 @@ void _wl_surface_offset(struct wl_client *client, struct wl_resource *resource,
 
 void _wl_surface_destroy(struct wl_client   *client,
                          struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   (void)client;
   struct vt_surface_t *surf =
       ((struct vt_surface_t *)wl_resource_get_user_data(resource));
@@ -478,7 +477,6 @@ void _wl_surface_destroy(struct wl_client   *client,
 }
 
 void _wl_surface_handle_resource_destroy(struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   struct vt_surface_t *surf = wl_resource_get_user_data(resource);
 
   if (!surf || !surf->comp) {
@@ -622,7 +620,6 @@ static void _wayland_buffer_handle_res_destroy(struct wl_listener *listener,
 bool vt_proto_wl_surface_init(struct vt_surface_t *surf,
                               struct wl_client *client, uint32_t id,
                               uint32_t version) {
-  VT_PROFILE_SCOPE();
   if (!surf) {
     return false;
   }

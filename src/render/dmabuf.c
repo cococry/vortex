@@ -50,7 +50,6 @@ vt_dmabuf_feedback_create(struct vt_compositor_t *comp,
 }
 
 void vt_dmabuf_feedback_fini(struct vt_dmabuf_feedback_t *feedback) {
-  VT_PROFILE_SCOPE();
   assert(feedback);
 
   if (feedback->tranches.size > 0) {

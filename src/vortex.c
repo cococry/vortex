@@ -20,11 +20,9 @@
  * SOFTWARE.
  */
 
-#include "src/core/profiling.h"
 #include "src/core/compositor.h"
 
 int main(int argc, char **argv) {
-  VT_PROFILE_SCOPE();
   struct vt_compositor_t *c = calloc(1, sizeof(*c));
   if (!vt_comp_init(c, argc, argv))
     return 1;

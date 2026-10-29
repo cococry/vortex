@@ -38,7 +38,6 @@
 #define _SUBSYS_NAME "SURFACE"
 
 bool vt_surface_init(struct vt_surface_t *surf) {
-  VT_PROFILE_SCOPE();
   if (!surf)
     return false;
 
@@ -185,7 +184,6 @@ void vt_surface_applied_state_init(struct vt_surface_state_applied_t *state) {
 
 void vt_surface_applied_state_defaults(
     struct vt_surface_state_applied_t *state) {
-  VT_PROFILE_SCOPE();
   if (!state)
     return;
 
@@ -282,7 +280,6 @@ void vt_surface_pending_state_fini(struct vt_surface_state_pending_t *state) {
 }
 
 void vt_surface_applied_state_fini(struct vt_surface_state_applied_t *state) {
-  VT_PROFILE_SCOPE();
   if (!state)
     return;
 
@@ -552,7 +549,6 @@ bool vt_surface_compute_final_size(const struct vt_surface_t *surf,
 bool vt_surface_set_role(struct vt_surface_t                 *surf,
                          const struct vt_surface_role_impl_t *impl,
                          void                                *data) {
-  VT_PROFILE_SCOPE();
   if (!surf || !impl)
     return false;
 
@@ -574,7 +570,6 @@ bool vt_surface_set_role(struct vt_surface_t                 *surf,
 
 bool vt_surface_has_role(struct vt_surface_t        *surf,
                          enum vt_surface_role_type_t type) {
-  VT_PROFILE_SCOPE();
   if (!surf)
     return false;
   return surf->role.impl && surf->role.impl->type == type;

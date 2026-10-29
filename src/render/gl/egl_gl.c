@@ -571,7 +571,6 @@ bool _egl_gl_import_buffer_dmabuf(struct vt_renderer_t    *r,
 bool _egl_pick_config_from_format(struct vt_compositor_t     *c,
                                   struct egl_backend_state_t *egl,
                                   uint32_t                    format) {
-  VT_PROFILE_SCOPE();
   EGLint num = 0;
   if (!eglGetConfigs(egl->egl_dsp, NULL, 0, &num) || num <= 0) {
     VT_ERROR(c->log, "eglGetConfigs() failed or returned no configs");
@@ -612,7 +611,6 @@ bool _egl_pick_config_from_format(struct vt_compositor_t     *c,
 bool _egl_pick_config(struct vt_compositor_t     *comp,
                       struct egl_backend_state_t *egl,
                       struct vt_backend_t        *backend) {
-  VT_PROFILE_SCOPE();
   switch (backend->platform) {
   case VT_BACKEND_DRM_GBM: {
     // DRM/GBM backend: use DRM fourcc to pick config
@@ -805,7 +803,6 @@ bool _egl_record_surface_release_fences(struct vt_renderer_t *renderer,
 
 bool _egl_gl_create_output_fbo(struct vt_output_t *output, uint32_t w,
                                uint32_t h) {
-  VT_PROFILE_SCOPE();
   if (!output || !output->user_data_render)
     return false;
 
@@ -858,7 +855,6 @@ bool _egl_gl_create_output_fbo(struct vt_output_t *output, uint32_t w,
 EGLDisplay _egl_create_display(struct vt_compositor_t    *comp,
                                enum vt_backend_platform_t platform,
                                void *native_handle, bool log_error) {
-  VT_PROFILE_SCOPE();
   PFNEGLGETPLATFORMDISPLAYEXTPROC eglGetPlatformDisplayEXT =
       (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress(
           "eglGetPlatformDisplayEXT");
@@ -911,7 +907,6 @@ EGLDisplay _egl_create_display(struct vt_compositor_t    *comp,
 bool _egl_create_renderer(struct vt_renderer_t      *renderer,
                           enum vt_backend_platform_t platform,
                           void *native_handle, bool log_error) {
-  VT_PROFILE_SCOPE();
   if (!native_handle)
     return false;
 
@@ -1034,7 +1029,6 @@ static bool _egl_track_rendered_buffer_use(struct vt_output_t     *output,
 }
 
 static bool _egl_gl_has_extension(const char *name) {
-  VT_PROFILE_SCOPE();
   GLint count = 0;
   glGetIntegerv(GL_NUM_EXTENSIONS, &count);
   for (GLint i = 0; i < count; ++i) {
@@ -1046,7 +1040,6 @@ static bool _egl_gl_has_extension(const char *name) {
 }
 
 static bool _egl_has_extension(const char *exts, const char *name) {
-  VT_PROFILE_SCOPE();
   if (!exts || !name || !*name)
     return false;
   size_t len = strlen(name);
@@ -1073,7 +1066,6 @@ static inline rn_color_t _hex_to_rn_color(uint32_t col) {
 
 bool renderer_init_egl(struct vt_backend_t *backend, struct vt_renderer_t *r,
                        void *native_handle) {
-  VT_PROFILE_SCOPE();
   if (!r || !native_handle)
     return false;
 
@@ -1203,7 +1195,6 @@ bool renderer_init_egl(struct vt_backend_t *backend, struct vt_renderer_t *r,
 
 bool renderer_is_handle_renderable_egl(struct vt_renderer_t *renderer,
                                        void                 *native_handle) {
-  VT_PROFILE_SCOPE();
   if (!renderer || !renderer->comp || !renderer->comp->backend ||
       !native_handle)
     return false;
@@ -1212,7 +1203,6 @@ bool renderer_is_handle_renderable_egl(struct vt_renderer_t *renderer,
 }
 
 static bool _egl_load_dmabuf_query_procs(void) {
-  VT_PROFILE_SCOPE();
   if (!eglQueryDmaBufFormatsEXT_ptr)
     eglQueryDmaBufFormatsEXT_ptr =
         (PFNEGLQUERYDMABUFFORMATSEXTPROC)eglGetProcAddress(
@@ -1228,7 +1218,6 @@ static bool _egl_load_dmabuf_query_procs(void) {
 static bool _egl_query_dmabuf_formats(struct vt_compositor_t *comp,
                                       EGLDisplay              egl_dsp,
                                       struct wl_array        *formats) {
-  VT_PROFILE_SCOPE();
   assert(comp && formats);
 
   wl_array_init(formats);
@@ -1351,7 +1340,6 @@ static bool _egl_query_dmabuf_formats(struct vt_compositor_t *comp,
 bool renderer_query_dmabuf_formats_egl(struct vt_compositor_t *comp,
                                        void                   *native_handle,
                                        struct wl_array        *formats) {
-  VT_PROFILE_SCOPE();
   if (!comp || !native_handle || !formats)
     return false;
 
@@ -1381,7 +1369,6 @@ bool renderer_query_dmabuf_formats_egl(struct vt_compositor_t *comp,
 
 bool renderer_query_dmabuf_formats_with_renderer_egl(
     struct vt_renderer_t *renderer, struct wl_array *formats) {
-  VT_PROFILE_SCOPE();
   if (!renderer || !renderer->user_data || !formats)
     return false;
 
@@ -1420,7 +1407,6 @@ bool renderer_query_dmabuf_formats_with_renderer_egl(
 
 bool renderer_setup_renderable_output_egl(struct vt_renderer_t *r,
                                           struct vt_output_t   *output) {
-  VT_PROFILE_SCOPE();
   if (!r || !output || !r->user_data || !output->native_window)
     return false;
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
@@ -1524,7 +1510,6 @@ bool renderer_setup_renderable_output_egl(struct vt_renderer_t *r,
 bool renderer_resize_renderable_output_egl(struct vt_renderer_t *r,
                                            struct vt_output_t   *output,
                                            int32_t w, int32_t h) {
-  VT_PROFILE_SCOPE();
   if (!r || !output || !output->native_window || w == 0 || h == 0)
     return false;
 
@@ -1547,7 +1532,6 @@ bool renderer_resize_renderable_output_egl(struct vt_renderer_t *r,
 
 bool renderer_destroy_renderable_output_egl(struct vt_renderer_t *r,
                                             struct vt_output_t   *output) {
-  VT_PROFILE_SCOPE();
   if (!r || !r->user_data || !output->render_surface ||
       r->backend->platform == VT_BACKEND_SURFACELESS)
     return false;
@@ -1691,7 +1675,6 @@ bool renderer_supports_explicit_sync_egl(struct vt_renderer_t *r) {
 }
 
 bool renderer_drop_context_egl(struct vt_renderer_t *r) {
-  VT_PROFILE_SCOPE();
   if (!r || !r->impl.drop_context || !r->user_data) {
     VT_ERROR(r->comp->log,
              "Renderer backend not initialized before dropping context.");
@@ -1708,7 +1691,6 @@ bool renderer_drop_context_egl(struct vt_renderer_t *r) {
 }
 
 void renderer_set_vsync_egl(struct vt_renderer_t *r, bool vsync) {
-  VT_PROFILE_SCOPE();
   if (!r || !r->impl.set_vsync || !r->user_data) {
     VT_ERROR(r->comp->log,
              "Renderer backend not initialized before setting vsync.");
@@ -2113,7 +2095,6 @@ void renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,
 }
 
 bool renderer_destroy_egl(struct vt_renderer_t *r) {
-  VT_PROFILE_SCOPE();
   if (!r || !r->impl.destroy || !r->user_data) {
     VT_ERROR(r->comp->log,
              "Renderer backend not initialized before destroying backend.");

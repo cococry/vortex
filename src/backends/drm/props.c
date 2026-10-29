@@ -20,7 +20,6 @@
  * SOFTWARE.
  */
 
-#include "src/core/profiling.h"
 #include "props.h"
 #include <stdlib.h>
 #include <string.h>
@@ -66,7 +65,6 @@ static const char *plane_infos[VT_DRM_PLANE__COUNT] = {
 };
 
 static int compare_prop_name(const void *key, const void *elem) {
-  VT_PROFILE_SCOPE();
   const char        *name = key;
   const char *const *entry = elem;
 
@@ -76,7 +74,6 @@ static int compare_prop_name(const void *key, const void *elem) {
 static bool _drm_get_props(int drm_fd, uint32_t id, uint32_t type,
                            const char *names[], size_t names_len,
                            uint32_t *out) {
-  VT_PROFILE_SCOPE();
   memset(out, 0, names_len * sizeof(*out));
 
   drmModeObjectProperties *props = drmModeObjectGetProperties(drm_fd, id, type);
@@ -106,26 +103,22 @@ static bool _drm_get_props(int drm_fd, uint32_t id, uint32_t type,
 }
 
 bool drm_kms_props_get_connector(int drm_fd, uint32_t id, uint32_t *o_props) {
-  VT_PROFILE_SCOPE();
   return _drm_get_props(drm_fd, id, DRM_MODE_OBJECT_CONNECTOR, connector_infos,
                         VT_DRM_CONNECTOR__COUNT, o_props);
 }
 
 bool drm_kms_props_get_crtc(int drm_fd, uint32_t id, uint32_t *o_props) {
-  VT_PROFILE_SCOPE();
   return _drm_get_props(drm_fd, id, DRM_MODE_OBJECT_CRTC, crtc_infos,
                         VT_DRM_CRTC__COUNT, o_props);
 }
 
 bool drm_kms_props_get_plane(int drm_fd, uint32_t id, uint32_t *o_props) {
-  VT_PROFILE_SCOPE();
   return _drm_get_props(drm_fd, id, DRM_MODE_OBJECT_PLANE, plane_infos,
                         VT_DRM_PLANE__COUNT, o_props);
 }
 
 bool drm_kms_props_get_prop(int drm_fd, uint32_t id, uint32_t prop,
                             uint64_t *o_prop) {
-  VT_PROFILE_SCOPE();
   if (prop == 0 || o_prop == NULL) {
     return false;
   }

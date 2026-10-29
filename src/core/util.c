@@ -50,7 +50,6 @@ uint64_t vt_util_get_time_msec(void) {
 }
 
 void vt_util_arena_init(struct vt_arena_t *a, size_t capacity) {
-  VT_PROFILE_SCOPE();
   a->base = (uint8_t *)malloc(capacity);
   a->offset = 0;
   a->capacity = capacity;
@@ -76,14 +75,12 @@ void vt_util_arena_reset(struct vt_arena_t *a) {
 }
 
 void vt_util_arena_destroy(struct vt_arena_t *a) {
-  VT_PROFILE_SCOPE();
   free(a->base);
   a->base = NULL;
   a->capacity = a->offset = 0;
 }
 
 char *vt_util_log_get_filepath() {
-  VT_PROFILE_SCOPE();
   static char path[PATH_MAX];
   char       *state_home = getenv("XDG_STATE_HOME");
   const char *home = getenv("HOME");
@@ -130,7 +127,6 @@ char *vt_util_log_get_filepath() {
 }
 
 void vt_util_log_header(FILE *stream, log_level_t lvl) {
-  VT_PROFILE_SCOPE();
   static const char *lvl_str[VT_LL_COUNT] = {"TRACE", "INFO", "WARNING",
                                              "ERROR", "FATAL"};
   static const char *lvl_clr[VT_LL_COUNT] = {
@@ -168,7 +164,6 @@ void vt_util_log_header(FILE *stream, log_level_t lvl) {
 // handle_noop + vt_util_emit_signal =>
 // https://github.com/swaywm/wlroots/blob/master/util/signal.c#L7
 static void handle_noop(struct wl_listener *listener, void *data) {
-  VT_PROFILE_SCOPE();
   (void)listener;
   (void)data;
 }

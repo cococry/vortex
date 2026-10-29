@@ -318,7 +318,6 @@ static void _drm_frame_stats_record(struct vt_drm_output_state_t *drm_output,
 }
 
 static void _drm_frame_stats_log(struct vt_drm_output_state_t *drm_output) {
-  VT_PROFILE_SCOPE();
   struct vt_compositor_t *comp = drm_output->base->backend->comp;
 
   VT_INFO(comp->log,
@@ -380,7 +379,6 @@ static void _drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec,
 }
 
 static void _drm_release_all_layers(struct vt_output_t *output) {
-  VT_PROFILE_SCOPE();
   if (!output || !output->user_data)
     return;
 
@@ -415,7 +413,6 @@ static void _drm_release_all_layers(struct vt_output_t *output) {
 }
 
 static bool _drm_devices_equal(drmDevicePtr a, drmDevicePtr b) {
-  VT_PROFILE_SCOPE();
   if (!a || !b)
     return false;
   return drmDevicesEqual(a, b) != 0;
@@ -423,7 +420,6 @@ static bool _drm_devices_equal(drmDevicePtr a, drmDevicePtr b) {
 
 static bool _drm_can_share_dmabuf(struct vt_device_t *main_dev,
                                   struct vt_device_t *dev) {
-  VT_PROFILE_SCOPE();
   if (!main_dev || !dev || !main_dev)
     return false;
 
@@ -499,7 +495,6 @@ static bool _drm_can_share_dmabuf(struct vt_device_t *main_dev,
 }
 
 static const char *_fourcc_to_str(uint32_t fmt) {
-  VT_PROFILE_SCOPE();
   static char str[5];
   str[0] = fmt & 0xFF;
   str[1] = (fmt >> 8) & 0xFF;
@@ -510,7 +505,6 @@ static const char *_fourcc_to_str(uint32_t fmt) {
 }
 
 static const char *_modifier_to_str(uint64_t mod, char *buf, size_t len) {
-  VT_PROFILE_SCOPE();
   if (!buf || len == 0)
     return NULL;
 
@@ -536,7 +530,6 @@ static const char *_modifier_to_str(uint64_t mod, char *buf, size_t len) {
 static void _log_dmabuf_tranche(struct vt_compositor_t           *comp,
                                 const struct vt_dmabuf_tranche_t *tranche,
                                 const char                       *device_path) {
-  VT_PROFILE_SCOPE();
   if (!comp || !tranche || !tranche->target_device || !device_path)
     return;
 
@@ -585,7 +578,6 @@ static void _log_dmabuf_tranche(struct vt_compositor_t           *comp,
 static bool
 _drm_build_dmabuf_feedback(struct vt_drm_backend_master_state_t *master,
                            struct vt_dmabuf_feedback_t          *feedback) {
-  VT_PROFILE_SCOPE();
   if (!feedback || !master || !master->comp || !master->comp->renderer ||
       !master->main_drm || !master->main_drm->dev)
     return false;
@@ -774,7 +766,6 @@ static bool _drm_any_flip_inflight(struct vt_drm_backend_state_t *drm) {
 /* libseat hands out a non-blocking fd: reading before the flip event
  * arrives fails with EAGAIN, so wait for it instead */
 static bool _drm_drain_flips(struct vt_drm_backend_state_t *drm) {
-  VT_PROFILE_SCOPE();
   while (_drm_any_flip_inflight(drm)) {
     struct pollfd pfd = {.fd = drm->drm_fd, .events = POLLIN};
     int           ret = poll(&pfd, 1, 1000);
@@ -795,7 +786,6 @@ static bool _drm_drain_flips(struct vt_drm_backend_state_t *drm) {
 }
 
 static bool _drm_suspend(struct vt_drm_backend_state_t *backend) {
-  VT_PROFILE_SCOPE();
   if (!backend || !backend->comp || backend->drm_fd < 0 || !backend->impl)
     return false;
 
@@ -838,7 +828,6 @@ static bool _drm_suspend(struct vt_drm_backend_state_t *backend) {
 }
 
 static bool _drm_resume(struct vt_drm_backend_state_t *backend) {
-  VT_PROFILE_SCOPE();
   if (!backend || !backend->comp || backend->drm_fd < 0)
     return false;
 
@@ -900,7 +889,6 @@ static int _drm_dispatch(int fd, uint32_t mask, void *data) {
 static bool _drm_init_for_device(struct vt_compositor_t        *comp,
                                  struct vt_drm_backend_state_t *drm,
                                  struct vt_device_t            *dev) {
-  VT_PROFILE_SCOPE();
   if (!comp || !drm || !dev || dev->fd < 0 || !drm->backend)
     return false;
 
@@ -990,7 +978,6 @@ static bool
 _drm_plane_init_cursor_sizes(struct vt_drm_plane_t            *plane,
                              const struct drm_plane_size_hint *hints,
                              size_t                            hints_len) {
-  VT_PROFILE_SCOPE();
   assert(plane && hints && hints_len > 0);
 
   plane->cursor_sizes = calloc(hints_len, sizeof(plane->cursor_sizes[0]));
@@ -1011,7 +998,6 @@ _drm_plane_init_cursor_sizes(struct vt_drm_plane_t            *plane,
 }
 
 static const char *_drm_plane_type_name(uint64_t type) {
-  VT_PROFILE_SCOPE();
   switch (type) {
   case DRM_PLANE_TYPE_PRIMARY:
     return "primary";
@@ -1028,7 +1014,6 @@ static bool _drm_plane_init(struct vt_drm_backend_state_t *drm,
                             struct vt_drm_plane_t         *plane,
                             drmModePlane *drm_plane, struct wl_array *crtcs,
                             uint32_t plane_id) {
-  VT_PROFILE_SCOPE();
   assert(drm && drm->comp && drm->drm_fd >= 0);
   (void)crtcs;
 
@@ -1199,7 +1184,6 @@ static bool _drm_plane_init(struct vt_drm_backend_state_t *drm,
 }
 
 static void _drm_liftoff_finish(struct vt_drm_backend_state_t *drm) {
-  VT_PROFILE_SCOPE();
   struct vt_drm_crtc_t *crtc;
   wl_array_for_each(crtc, &drm->crtcs) {
     // also destroys the device's planes
@@ -1212,7 +1196,6 @@ static void _drm_liftoff_finish(struct vt_drm_backend_state_t *drm) {
 }
 
 static bool _drm_liftoff_init(struct vt_drm_backend_state_t *drm) {
-  VT_PROFILE_SCOPE();
   struct vt_drm_crtc_t *crtc;
   wl_array_for_each(crtc, &drm->crtcs) {
     // liftoff dups the fd itself
@@ -1249,7 +1232,6 @@ fail:
 }
 
 static bool _drm_planes_init(struct vt_drm_backend_state_t *drm) {
-  VT_PROFILE_SCOPE();
   assert(drm && drm->comp && drm->drm_fd >= 0);
 
   drmModePlaneRes *plane_res = drmModeGetPlaneResources(drm->drm_fd);
@@ -1310,7 +1292,6 @@ fail_planes:
 static bool _drm_init_crtc(struct vt_compositor_t *comp,
                            struct vt_drm_crtc_t *crtc, int drm_fd, uint32_t id,
                            uint32_t index) {
-  VT_PROFILE_SCOPE();
   assert(comp);
 
   if (!crtc)
@@ -1329,7 +1310,6 @@ static bool _drm_init_crtc(struct vt_compositor_t *comp,
 }
 
 static bool _drm_init_crtcs_and_planes(struct vt_drm_backend_state_t *drm) {
-  VT_PROFILE_SCOPE();
   if (!drm || !drm->comp)
     return false;
 
@@ -1414,7 +1394,6 @@ fail_resources:
 
 static struct vt_output_mode_t *
 _drm_create_output_mode(struct wl_list *list, drmModeModeInfo *mode_info) {
-  VT_PROFILE_SCOPE();
   if (!list || !mode_info)
     return NULL;
 
@@ -1461,7 +1440,6 @@ _drm_create_output_mode(struct wl_list *list, drmModeModeInfo *mode_info) {
 }
 
 static uint32_t _drm_subpixel_to_wl(drmModeSubPixel subpixel) {
-  VT_PROFILE_SCOPE();
   switch (subpixel) {
   case DRM_MODE_SUBPIXEL_HORIZONTAL_RGB:
     return WL_OUTPUT_SUBPIXEL_HORIZONTAL_RGB;
@@ -1480,7 +1458,6 @@ static uint32_t _drm_subpixel_to_wl(drmModeSubPixel subpixel) {
 }
 
 static const char *_drm_connector_type_name(uint32_t type) {
-  VT_PROFILE_SCOPE();
   switch (type) {
   case DRM_MODE_CONNECTOR_VGA:
     return "VGA";
@@ -1525,7 +1502,6 @@ static const char *_drm_connector_type_name(uint32_t type) {
 
 static bool _drm_plane_is_assigned(struct vt_drm_backend_state_t *drm,
                                    struct vt_drm_plane_t         *plane) {
-  VT_PROFILE_SCOPE();
   struct vt_drm_crtc_t *crtc;
   wl_array_for_each(crtc, &drm->crtcs) {
     if (crtc->plane_primary == plane || crtc->plane_cursor == plane)
@@ -1538,7 +1514,6 @@ static bool _drm_plane_is_assigned(struct vt_drm_backend_state_t *drm,
 static struct vt_drm_plane_t *
 _drm_pick_plane(struct vt_drm_backend_state_t *drm, struct vt_drm_crtc_t *crtc,
                 uint32_t type) {
-  VT_PROFILE_SCOPE();
   struct vt_drm_plane_t *fallback = NULL;
   struct vt_drm_plane_t *plane;
   wl_array_for_each(plane, &drm->planes) {
@@ -1558,7 +1533,6 @@ _drm_pick_plane(struct vt_drm_backend_state_t *drm, struct vt_drm_crtc_t *crtc,
 }
 
 static void _drm_assign_crtc_planes(struct vt_drm_backend_state_t *drm) {
-  VT_PROFILE_SCOPE();
   struct vt_drm_crtc_t *crtc;
   wl_array_for_each(crtc, &drm->crtcs) {
     crtc->plane_primary = _drm_pick_plane(drm, crtc, DRM_PLANE_TYPE_PRIMARY);
@@ -1568,7 +1542,6 @@ static void _drm_assign_crtc_planes(struct vt_drm_backend_state_t *drm) {
 
 static struct vt_drm_crtc_t *_drm_find_crtc(struct vt_drm_backend_state_t *drm,
                                             uint32_t                       id) {
-  VT_PROFILE_SCOPE();
   struct vt_drm_crtc_t *crtc;
   wl_array_for_each(crtc, &drm->crtcs) {
     if (crtc->id == id)
@@ -1580,7 +1553,6 @@ static struct vt_drm_crtc_t *_drm_find_crtc(struct vt_drm_backend_state_t *drm,
 
 static struct vt_drm_crtc_t *_drm_pick_crtc(struct vt_drm_backend_state_t *drm,
                                             drmModeConnector *conn) {
-  VT_PROFILE_SCOPE();
   if (!drm || !conn)
     return NULL;
 
@@ -1631,7 +1603,6 @@ static struct vt_drm_crtc_t *_drm_pick_crtc(struct vt_drm_backend_state_t *drm,
 }
 
 static bool _drm_atomic_output_supported(struct vt_drm_output_state_t *output) {
-  VT_PROFILE_SCOPE();
   if (!output || !output->crtc || !output->crtc->plane_primary)
     return false;
 
@@ -1656,7 +1627,6 @@ static bool _drm_atomic_output_supported(struct vt_drm_output_state_t *output) {
 static bool _drm_create_output_for_device(struct vt_drm_backend_state_t *drm,
                                           struct vt_output_t            *output,
                                           void                          *data) {
-  VT_PROFILE_SCOPE();
   if (!drm || !drm->comp || !drm->res || !output || !data)
     return false;
 
@@ -1857,7 +1827,6 @@ static bool _drm_create_output_for_device(struct vt_drm_backend_state_t *drm,
 }
 
 static bool _drm_resources_init(struct vt_drm_backend_state_t *drm) {
-  VT_PROFILE_SCOPE();
   if (!drm || !drm->comp || drm->drm_fd < 0)
     return false;
 
@@ -1894,7 +1863,6 @@ static bool _drm_resources_init(struct vt_drm_backend_state_t *drm) {
 
 static struct vt_output_t *_drm_find_output(struct vt_drm_backend_state_t *drm,
                                             uint32_t conn_id) {
-  VT_PROFILE_SCOPE();
   struct vt_output_t *output;
   wl_list_for_each(output, &drm->outputs, link_local) {
     if (!output->user_data)
@@ -1910,7 +1878,6 @@ static struct vt_output_t *_drm_find_output(struct vt_drm_backend_state_t *drm,
 }
 
 static bool _drm_scan_connectors(struct vt_drm_backend_state_t *drm) {
-  VT_PROFILE_SCOPE();
   if (!drm || !drm->comp)
     return false;
 
@@ -2007,7 +1974,6 @@ static bool _drm_scan_connectors(struct vt_drm_backend_state_t *drm) {
 }
 
 static void _drm_on_drm_change(struct wl_listener *listener, void *data) {
-  VT_PROFILE_SCOPE();
   if (!listener || !data)
     return;
 
@@ -2377,7 +2343,6 @@ _drm_output_cursor_update_visibility(struct vt_output_t           *output,
 
 static bool _drm_destroy_output_for_device(struct vt_drm_backend_state_t *drm,
                                            struct vt_output_t *output) {
-  VT_PROFILE_SCOPE();
   if (!drm || !drm->comp)
     return false;
   if (!output || !output->user_data)
@@ -2441,7 +2406,6 @@ static bool _drm_destroy_output_for_device(struct vt_drm_backend_state_t *drm,
 }
 
 static bool _drm_terminate_for_device(struct vt_drm_backend_state_t *drm) {
-  VT_PROFILE_SCOPE();
   if (!drm || !drm->comp)
     return false;
   struct vt_compositor_t *comp = drm->comp;
@@ -2513,7 +2477,6 @@ static bool _drm_terminate_for_device(struct vt_drm_backend_state_t *drm) {
 
 static void _drm_on_session_terminate(struct wl_listener *listener,
                                       void               *data) {
-  VT_PROFILE_SCOPE();
   if (!listener || !data)
     return;
   struct vt_session_t     *session = (struct vt_session_t *)data;
@@ -2533,7 +2496,6 @@ static void _drm_on_session_terminate(struct wl_listener *listener,
 }
 
 static void _drm_on_seat_disable(struct wl_listener *listener, void *data) {
-  VT_PROFILE_SCOPE();
   (void)listener;
 
   if (!data)
@@ -2565,7 +2527,6 @@ static void _drm_on_seat_disable(struct wl_listener *listener, void *data) {
 
 static void _drm_keybind_switch_vt(struct vt_compositor_t *comp,
                                    void                   *user_data) {
-  VT_PROFILE_SCOPE();
   if (!comp || !comp->session || !user_data)
     return;
   uint32_t vt = *(uint32_t *)user_data;
@@ -2573,7 +2534,6 @@ static void _drm_keybind_switch_vt(struct vt_compositor_t *comp,
 }
 
 static void _drm_on_seat_enable(struct wl_listener *listener, void *data) {
-  VT_PROFILE_SCOPE();
   (void)listener;
 
   if (!data)
@@ -2941,7 +2901,6 @@ static void _drm_update_tearing_cap(struct vt_drm_backend_state_t *drm) {
 }
 
 static bool _drm_verify_caps(struct vt_drm_backend_state_t *drm) {
-  VT_PROFILE_SCOPE();
   if (!drm || !drm->comp)
     return false;
 
@@ -2986,7 +2945,6 @@ static bool _drm_verify_caps(struct vt_drm_backend_state_t *drm) {
 // =================== PUBLIC API ====================
 // ===================================================
 bool backend_init_drm(struct vt_backend_t *backend) {
-  VT_PROFILE_SCOPE();
   if (!backend || !backend->comp || !backend->comp->session)
     return false;
 
@@ -3198,7 +3156,6 @@ bool backend_commit_cursor_only_drm(struct vt_backend_t *backend,
 }
 
 bool backend_terminate_drm(struct vt_backend_t *backend) {
-  VT_PROFILE_SCOPE();
   if (!backend || !backend->comp || !backend->user_data)
     return false;
 
@@ -4010,7 +3967,6 @@ bool backend_prepare_output_frame_drm(struct vt_backend_t *backend,
 }
 
 bool backend_implement_drm(struct vt_compositor_t *comp) {
-  VT_PROFILE_SCOPE();
   if (!comp || !comp->backend || !comp->session)
     return false;
 

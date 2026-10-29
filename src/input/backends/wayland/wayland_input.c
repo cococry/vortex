@@ -105,7 +105,6 @@ static void _wl_pointer_axis_relative_direction(void              *data,
 
 void _wl_keyboard_keymap(void *data, struct wl_keyboard *wl_keyboard,
                          uint32_t format, int fd, uint32_t size) {
-  VT_PROFILE_SCOPE();
   (void)wl_keyboard;
   struct vt_input_backend_wl_t *wl = data;
   if (format != WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1) {
@@ -208,7 +207,6 @@ void _wl_keyboard_modifiers(void *data, struct wl_keyboard *wl_keyboard,
 
 void _wl_keyboard_repeat_info(void *data, struct wl_keyboard *wl_keyboard,
                               int32_t rate, int32_t delay) {
-  VT_PROFILE_SCOPE();
   (void)data;
   (void)wl_keyboard;
   (void)rate;
@@ -392,7 +390,6 @@ static const struct wl_pointer_listener pointer_listener = {
 
 bool input_backend_init_wl(struct vt_input_backend_t *backend,
                            void                      *native_handle) {
-  VT_PROFILE_SCOPE();
   if (!backend || !native_handle)
     return false;
 
@@ -428,7 +425,6 @@ bool input_backend_init_wl(struct vt_input_backend_t *backend,
 }
 
 bool input_backend_terminate_wl(struct vt_input_backend_t *backend) {
-  VT_PROFILE_SCOPE();
   if (!backend || !backend->user_data)
     return false;
   struct vt_input_backend_wl_t *wl = backend->user_data;
@@ -445,13 +441,11 @@ bool input_backend_terminate_wl(struct vt_input_backend_t *backend) {
 }
 
 bool input_backend_suspend_wl(struct vt_input_backend_t *backend) {
-  VT_PROFILE_SCOPE();
   (void)backend;
   return true;
 }
 
 bool input_backend_resume_wl(struct vt_input_backend_t *backend) {
-  VT_PROFILE_SCOPE();
   (void)backend;
   return true;
 }

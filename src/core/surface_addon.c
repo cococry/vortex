@@ -20,11 +20,9 @@
  * SOFTWARE.
  */
 
-#include "src/core/profiling.h"
 #include "surface_addon.h"
 
 void vt_surface_addon_destroy(struct vt_surface_addon_t *addon) {
-  VT_PROFILE_SCOPE();
   if (!addon || !addon->impl.destroy)
     return;
 

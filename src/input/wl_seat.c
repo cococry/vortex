@@ -106,7 +106,6 @@ _wl_kb_get_mod_states(struct xkb_state *state);
 
 static void _wl_seat_release(struct wl_client   *client,
                              struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
@@ -135,7 +134,6 @@ static const struct vt_surface_role_impl_t surface_role_cursor_impl = {
 
 void _wl_seat_bind(struct wl_client *client, void *data, uint32_t version,
                    uint32_t id) {
-  VT_PROFILE_SCOPE();
   struct vt_seat_t *seat = data;
 
   struct wl_resource *resource =
@@ -151,7 +149,6 @@ void _wl_seat_bind(struct wl_client *client, void *data, uint32_t version,
 }
 
 int _wl_create_keymap_fd(struct vt_keyboard_t *kbd) {
-  VT_PROFILE_SCOPE();
   struct xkb_keymap *keymap = kbd->seat->comp->input_backend->keymap;
 
   char *keymap_str =
@@ -171,7 +168,6 @@ int _wl_create_keymap_fd(struct vt_keyboard_t *kbd) {
 }
 
 void _wl_keyboard_send_initial_state(struct vt_keyboard_t *kbd) {
-  VT_PROFILE_SCOPE();
   struct xkb_state *state = kbd->seat->comp->input_backend->kb_state;
 
   uint32_t depressed =
@@ -207,12 +203,10 @@ bool _wl_handle_global_keybind(struct vt_seat_t *seat, uint32_t keycode,
 }
 
 void _wl_handle_keybind_exit(struct vt_compositor_t *comp, void *user_data) {
-  VT_PROFILE_SCOPE();
   (void)user_data;
   comp->running = false;
 }
 void _wl_handle_keybind_term(struct vt_compositor_t *comp, void *user_data) {
-  VT_PROFILE_SCOPE();
   (void)user_data;
   char buf[128];
   // env scoped to the child: our own WAYLAND_DISPLAY may point at a parent
@@ -225,7 +219,6 @@ void _wl_handle_keybind_term(struct vt_compositor_t *comp, void *user_data) {
 
 void _wl_seat_get_pointer(struct wl_client   *client,
                           struct wl_resource *seat_res, uint32_t id) {
-  VT_PROFILE_SCOPE();
   struct vt_seat_t *seat = wl_resource_get_user_data(seat_res);
   if (!seat)
     return;
@@ -265,7 +258,6 @@ void _wl_seat_get_pointer(struct wl_client   *client,
 
 void _wl_seat_get_touch(struct wl_client *client, struct wl_resource *seat_res,
                         uint32_t id) {
-  VT_PROFILE_SCOPE();
   struct vt_seat_t *seat = wl_resource_get_user_data(seat_res);
   if (!seat)
     return;
@@ -324,7 +316,6 @@ static void _wl_seat_pointer_set_cursor(struct wl_client   *client,
 
 void _wl_seat_get_keyboard(struct wl_client   *client,
                            struct wl_resource *seat_res, uint32_t id) {
-  VT_PROFILE_SCOPE();
   struct vt_seat_t *seat = wl_resource_get_user_data(seat_res);
   if (!seat)
     return;
@@ -371,20 +362,17 @@ void _wl_seat_get_keyboard(struct wl_client   *client,
 
 void _wl_seat_release_kb(struct wl_client   *client,
                          struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
 
 void _wl_seat_release_pointer(struct wl_client   *client,
                               struct wl_resource *resource) {
-  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
 
 void _wl_keyboard_handle_resource_destroy(struct wl_resource *res) {
-  VT_PROFILE_SCOPE();
   struct vt_keyboard_t *kbd = wl_resource_get_user_data(res);
   if (!kbd || !kbd->seat)
     return;
@@ -398,7 +386,6 @@ void _wl_keyboard_handle_resource_destroy(struct wl_resource *res) {
 }
 
 void _wl_pointer_handle_resource_destroy(struct wl_resource *res) {
-  VT_PROFILE_SCOPE();
   struct vt_pointer_t *ptr = wl_resource_get_user_data(res);
   if (!ptr || !ptr->seat)
     return;
@@ -417,7 +404,6 @@ void _wl_pointer_handle_resource_destroy(struct wl_resource *res) {
 
 static void _surface_role_cursor_mapping_changed(struct vt_surface_t *surf,
                                                  bool                 mapped) {
-  VT_PROFILE_SCOPE();
   if (!surf || !surf->comp || !surf->comp->seat)
     return;
 
@@ -476,7 +462,6 @@ struct vt_kb_modifier_states_t _wl_kb_get_mod_states(struct xkb_state *state) {
 }
 
 bool vt_seat_init(struct vt_seat_t *seat) {
-  VT_PROFILE_SCOPE();
   if (!seat || !seat->comp)
     return false;
 
@@ -1047,7 +1032,6 @@ struct vt_keybind_t *vt_seat_add_global_keybind(
     struct vt_seat_t *seat, xkb_keysym_t sym, uint32_t mods,
     void (*callback)(struct vt_compositor_t *comp, void *user_data),
     void *user_data) {
-  VT_PROFILE_SCOPE();
   if (!seat || !seat->comp)
     return NULL;
   struct vt_keybind_t *keybind = VT_ALLOC(seat->comp, sizeof(*keybind));
@@ -1234,7 +1218,6 @@ void vt_seat_set_pointer_focus(struct vt_seat_t    *seat,
 }
 
 void vt_seat_bind_global_keybinds(struct vt_seat_t *seat) {
-  VT_PROFILE_SCOPE();
   if (!seat)
     return;
   struct vt_kb_modifiers_t mods = seat->comp->input_backend->mods;
@@ -1275,7 +1258,6 @@ void vt_seat_repick_pointer_focus(struct vt_seat_t *seat) {
 }
 
 bool vt_seat_terminate(struct vt_seat_t *seat) {
-  VT_PROFILE_SCOPE();
   if (!seat)
     return false;
   if (seat->global)
@@ -1287,7 +1269,6 @@ bool vt_seat_terminate(struct vt_seat_t *seat) {
 
 /* Notify existing keyboards when a nested host changes its keymap. */
 void vt_seat_refresh_keymap(struct vt_seat_t *seat) {
-  VT_PROFILE_SCOPE();
   struct vt_keyboard_t *kbd;
   wl_list_for_each(kbd, &seat->keyboards, link) {
     int fd = _wl_create_keymap_fd(kbd);
