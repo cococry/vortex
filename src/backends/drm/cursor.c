@@ -1,8 +1,10 @@
+#include "src/core/profiling.h"
 #include "cursor.h"
 #include "fb.h"
 
 static void _drm_cursor_image_finish(struct vt_drm_backend_state_t *drm,
                                      struct vt_drm_cursor_image_t  *image) {
+  VT_PROFILE_SCOPE();
   if (!drm || !image)
     return;
 
@@ -27,6 +29,7 @@ static void _drm_cursor_image_finish(struct vt_drm_backend_state_t *drm,
 
 struct vt_drm_cursor_image_t *
 drm_cursor_image_ref(struct vt_drm_cursor_image_t *img) {
+  VT_PROFILE_SCOPE();
   assert(img);
 
   img->refcount++;
@@ -35,6 +38,7 @@ drm_cursor_image_ref(struct vt_drm_cursor_image_t *img) {
 }
 
 void drm_cursor_image_unref(struct vt_drm_cursor_image_t **img_ptr) {
+  VT_PROFILE_SCOPE();
 
   assert(img_ptr && *img_ptr);
 

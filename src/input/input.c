@@ -20,6 +20,7 @@
  * SOFTWARE.
  */
 
+#include "src/core/profiling.h"
 #include "input.h"
 #include "config.h"
 #if VT_HAS_LIBINPUT
@@ -37,6 +38,7 @@
 
 void vt_input_implement(struct vt_input_backend_t       *backend,
                         enum vt_input_backend_platform_t platform) {
+  VT_PROFILE_SCOPE();
   if (!backend)
     return;
   backend->platform = platform;

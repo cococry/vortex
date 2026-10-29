@@ -21,6 +21,7 @@
  */
 
 #include "content_update.h"
+#include "profiling.h"
 #include "src/core/compositor.h"
 #include "src/core/core_types.h"
 #include "src/core/surface.h"
@@ -62,6 +63,7 @@ _content_update_retire_applied_dag(struct vt_content_update_t *root);
 
 static void _content_update_dependency_destroy(
     struct vt_content_update_dependency_t *edge) {
+  VT_PROFILE_SCOPE();
   if (!edge)
     return;
 
@@ -72,6 +74,7 @@ static void _content_update_dependency_destroy(
 }
 
 static bool _content_update_prepare_buffer(struct vt_content_update_t *cu) {
+  VT_PROFILE_SCOPE();
   assert(cu && cu->surf && cu->surf->comp && cu->surf->comp->renderer);
 
   if (!cu->state.buffer_attached)
@@ -96,6 +99,7 @@ static bool _content_update_prepare_buffer(struct vt_content_update_t *cu) {
 }
 
 static bool _content_update_is_ready(const struct vt_content_update_t *cu) {
+  VT_PROFILE_SCOPE();
   if (!cu)
     return false;
 
@@ -113,6 +117,7 @@ static bool _content_update_is_ready(const struct vt_content_update_t *cu) {
 }
 
 static bool _content_update_is_candidate(const struct vt_content_update_t *cu) {
+  VT_PROFILE_SCOPE();
   if (!cu)
     return false;
 
@@ -128,6 +133,7 @@ static bool _content_update_is_candidate(const struct vt_content_update_t *cu) {
 
 static bool
 _content_update_prepare_dag_recursive(struct vt_content_update_t *cu) {
+  VT_PROFILE_SCOPE();
   if (!cu || !cu->surf)
     return false;
 
@@ -160,6 +166,7 @@ _content_update_prepare_dag_recursive(struct vt_content_update_t *cu) {
 
 static bool
 _content_update_apply_surface_state(struct vt_content_update_t *cu) {
+  VT_PROFILE_SCOPE();
   /* Content update application must assert a valid prepared content update. All
    * failures here must not be permitted. */
   assert(cu && cu->surf);
@@ -249,6 +256,7 @@ _content_update_apply_surface_state(struct vt_content_update_t *cu) {
 }
 
 static bool _content_update_apply_one(struct vt_content_update_t *cu) {
+  VT_PROFILE_SCOPE();
   bool valid_params = cu && cu->surf;
   assert(valid_params);
 
@@ -315,6 +323,7 @@ static bool _content_update_apply_one(struct vt_content_update_t *cu) {
 
 static bool
 _content_update_apply_dag_recursive(struct vt_content_update_t *cu) {
+  VT_PROFILE_SCOPE();
   bool valid_params = cu != NULL;
   assert(valid_params);
 
@@ -343,6 +352,7 @@ _content_update_apply_dag_recursive(struct vt_content_update_t *cu) {
 
 static void _content_update_collect_applied_dag(struct vt_content_update_t *cu,
                                                 struct wl_list *list) {
+  VT_PROFILE_SCOPE();
   if (!cu || !cu->applied)
     return;
 
@@ -359,6 +369,7 @@ static void _content_update_collect_applied_dag(struct vt_content_update_t *cu,
 
 static void
 _content_update_retire_applied_dag(struct vt_content_update_t *root) {
+  VT_PROFILE_SCOPE();
   struct wl_list applied;
   wl_list_init(&applied);
   _content_update_collect_applied_dag(root, &applied);
@@ -376,6 +387,7 @@ struct vt_content_update_t *
 vt_content_update_create(struct vt_surface_t               *surf,
                          struct vt_surface_state_pending_t *state,
                          enum vt_content_update_type_t      type) {
+  VT_PROFILE_SCOPE();
   if (!surf || !state || !surf->comp)
     return NULL;
 
@@ -407,6 +419,7 @@ vt_content_update_create(struct vt_surface_t               *surf,
 }
 
 bool vt_content_update_finish_create(struct vt_content_update_t *cu) {
+  VT_PROFILE_SCOPE();
   assert(cu && cu->surf && cu->surf->comp && cu->surf->comp->renderer);
 
   struct vt_renderer_t *r = cu->surf->comp->renderer;
@@ -435,6 +448,7 @@ bool vt_content_update_finish_create(struct vt_content_update_t *cu) {
 }
 
 void vt_content_update_destroy(struct vt_content_update_t *cu) {
+  VT_PROFILE_SCOPE();
   if (!cu)
     return;
 
@@ -477,6 +491,7 @@ void vt_content_update_destroy(struct vt_content_update_t *cu) {
 
 bool vt_content_update_add_dependency(struct vt_content_update_t *cu,
                                       struct vt_content_update_t *dependency) {
+  VT_PROFILE_SCOPE();
   if (!cu || !dependency || cu == dependency ||
       vt_content_update_reaches(dependency, cu))
     return false;
@@ -497,6 +512,7 @@ bool vt_content_update_add_dependency(struct vt_content_update_t *cu,
 }
 
 bool vt_content_update_apply_dag(struct vt_content_update_t *root) {
+  VT_PROFILE_SCOPE();
   if (!root || !root->surf || !root->surf->comp)
     return false;
 
@@ -549,6 +565,7 @@ bool vt_content_update_apply_dag(struct vt_content_update_t *root) {
 }
 
 bool vt_content_update_waits(const struct vt_content_update_t *cu) {
+  VT_PROFILE_SCOPE();
   assert(cu && cu->surf);
 
   const struct vt_content_update_t *it;
@@ -563,6 +580,7 @@ bool vt_content_update_waits(const struct vt_content_update_t *cu) {
 
 void vt_content_update_add_constraint(
     struct vt_content_update_t *cu, struct vt_content_update_constraint_t *c) {
+  VT_PROFILE_SCOPE();
   assert(cu && c && c->destroy);
   wl_list_insert(&cu->constraints, &c->link);
 }
@@ -570,6 +588,7 @@ void vt_content_update_add_constraint(
 static void
 _content_update_collect_dependant_surfaces(struct vt_content_update_t *cu,
                                            struct wl_array            *surfs) {
+  VT_PROFILE_SCOPE();
   struct vt_content_update_dependency_t *edge;
   wl_list_for_each(edge, &cu->dependants, dependant_link) {
     struct vt_surface_t **slot = wl_array_add(surfs, sizeof(*slot));
@@ -581,6 +600,7 @@ _content_update_collect_dependant_surfaces(struct vt_content_update_t *cu,
 
 // applies queue heads in order until one is not ready yet
 static void _content_update_flush_surface(struct vt_surface_t *surf) {
+  VT_PROFILE_SCOPE();
   while (!wl_list_empty(&surf->content_updates)) {
     struct vt_content_update_t *head =
         wl_container_of(surf->content_updates.next, head, queue_link);
@@ -591,6 +611,7 @@ static void _content_update_flush_surface(struct vt_surface_t *surf) {
 
 void vt_content_update_resolve_constraint(
     struct vt_content_update_t *cu, struct vt_content_update_constraint_t *c) {
+  VT_PROFILE_SCOPE();
   assert(cu && c);
 
   wl_list_remove(&c->link);
@@ -611,6 +632,7 @@ void vt_content_update_resolve_constraint(
 
 bool vt_content_update_reaches(struct vt_content_update_t *from,
                                struct vt_content_update_t *target) {
+  VT_PROFILE_SCOPE();
   if (!from || !target)
     return false;
 

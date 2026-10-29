@@ -20,6 +20,7 @@
  * SOFTWARE.
  */
 
+#include "src/core/profiling.h"
 #include "buffer_orchestrator.h"
 #include "src/protocols/linux_dmabuf.h"
 #include "src/protocols/wl_shm.h"
@@ -28,6 +29,7 @@
 
 struct vt_buffer_t *
 vt_buffer_get_or_create_from_wayland_resource(struct wl_resource *res) {
+  VT_PROFILE_SCOPE();
   if (!res)
     return NULL;
 

@@ -22,6 +22,7 @@
 
 #define _GNU_SOURCE
 
+#include "src/core/profiling.h"
 #include <fcntl.h>
 #include <pthread.h>
 #include <sys/mman.h>
@@ -257,6 +258,7 @@ static const struct wl_callback_listener output_sync_listener = {
 
 static bool _wl_set_fake_output_mode(struct vt_output_t *output, int32_t width,
                                      int32_t height, int32_t refresh) {
+  VT_PROFILE_SCOPE();
   struct vt_output_mode_t *mode =
       _wl_find_output_mode(&output->physical.modes, width, height, refresh);
 
@@ -275,6 +277,7 @@ static bool _wl_set_fake_output_mode(struct vt_output_t *output, int32_t width,
 
 static void output_sync_callback(void *data, struct wl_callback *callback,
                                  uint32_t unused) {
+  VT_PROFILE_SCOPE();
   (void)unused;
   parent_physical_output_t *output = data;
 
@@ -285,6 +288,7 @@ static void output_sync_callback(void *data, struct wl_callback *callback,
 
 static void _wl_register_output(struct wl_registry      *reg,
                                 wayland_backend_state_t *backend, uint32_t id) {
+  VT_PROFILE_SCOPE();
   parent_physical_output_t *output =
       VT_ALLOC(backend->comp, sizeof(parent_physical_output_t));
 
@@ -311,6 +315,7 @@ static void _wl_register_output(struct wl_registry      *reg,
 static void _wl_parent_registry_add(void *data, struct wl_registry *reg,
                                     uint32_t id, const char *iface,
                                     uint32_t ver) {
+  VT_PROFILE_SCOPE();
   wayland_backend_state_t *wl = data;
   if (strcmp(iface, wl_compositor_interface.name) == 0) {
     wl->parent_compositor =
@@ -329,6 +334,7 @@ static void _wl_parent_registry_add(void *data, struct wl_registry *reg,
 
 static void _wl_parent_registry_remove(void *data, struct wl_registry *reg,
                                        uint32_t id) {
+  VT_PROFILE_SCOPE();
   // who cares xd
   (void)data;
   (void)reg;
@@ -337,6 +343,7 @@ static void _wl_parent_registry_remove(void *data, struct wl_registry *reg,
 
 static void _wl_parent_xdg_wm_base_ping(void *data, struct xdg_wm_base *wm,
                                         uint32_t serial) {
+  VT_PROFILE_SCOPE();
   (void)data;
   // Pong that scheiße
   xdg_wm_base_pong(wm, serial);
@@ -344,6 +351,7 @@ static void _wl_parent_xdg_wm_base_ping(void *data, struct xdg_wm_base *wm,
 
 static void _output_handle_render_resize(struct vt_output_t *output, int32_t w,
                                          int32_t h) {
+  VT_PROFILE_SCOPE();
   struct vt_renderer_t *r = output->backend->comp->renderer;
   if (r && r->impl.resize_renderable_output && output->native_window) {
 
@@ -366,6 +374,7 @@ static void _wl_parent_xdg_toplevel_configure(void                *data,
                                               struct xdg_toplevel *toplevel,
                                               int32_t w, int32_t h,
                                               struct wl_array *states) {
+  VT_PROFILE_SCOPE();
   (void)toplevel;
   (void)states;
   struct vt_output_t *output = data;
@@ -384,6 +393,7 @@ static void _wl_parent_xdg_toplevel_configure(void                *data,
 }
 
 static bool _wl_parent_flush(wayland_backend_state_t *wl) {
+  VT_PROFILE_SCOPE();
   if (!wl || !wl->parent_display || !wl->parent_event_source)
     return false;
 
@@ -407,6 +417,7 @@ static bool _wl_parent_flush(wayland_backend_state_t *wl) {
 static void _wl_parent_xdg_surface_configure(void               *data,
                                              struct xdg_surface *surf,
                                              uint32_t            serial) {
+  VT_PROFILE_SCOPE();
   struct vt_output_t *output = data;
   // We must acknowledge the size from the request
   xdg_surface_ack_configure(surf, serial);
@@ -423,6 +434,7 @@ static void _wl_parent_xdg_surface_configure(void               *data,
 
 static void _wl_parent_xdg_toplevel_close(void                *data,
                                           struct xdg_toplevel *toplevel) {
+  VT_PROFILE_SCOPE();
   (void)toplevel;
   struct vt_output_t *output = data;
   // destroying the output here leaves its pending frame callbacks dangling,
@@ -431,6 +443,7 @@ static void _wl_parent_xdg_toplevel_close(void                *data,
 }
 
 static int _wl_parent_dispatch(int fd, uint32_t mask, void *data) {
+  VT_PROFILE_SCOPE();
   (void)fd;
 
   wayland_backend_state_t *wl = data;
@@ -459,6 +472,7 @@ static int _wl_parent_dispatch(int fd, uint32_t mask, void *data) {
 
 static void _wl_parent_frame_done(void *data, struct wl_callback *wl_callback,
                                   uint32_t time) {
+  VT_PROFILE_SCOPE();
   if (!wl_callback || !data)
     return;
   struct vt_output_t *output = (struct vt_output_t *)data;
@@ -484,6 +498,7 @@ static void _wl_parent_frame_done(void *data, struct wl_callback *wl_callback,
 }
 
 static bool _wl_backend_init_active_outputs(struct vt_backend_t *backend) {
+  VT_PROFILE_SCOPE();
   if (!backend)
     return false;
 
@@ -543,6 +558,7 @@ static bool _wl_backend_init_active_outputs(struct vt_backend_t *backend) {
 }
 
 static const char *wl_output_transform_name(int32_t transform) {
+  VT_PROFILE_SCOPE();
   switch (transform) {
   case WL_OUTPUT_TRANSFORM_NORMAL:
     return "normal";
@@ -569,6 +585,7 @@ static void _wl_parent_output_geometry(
     void *data, struct wl_output *output_proxy, int32_t x, int32_t y,
     int32_t physical_width, int32_t physical_height, int32_t subpixel,
     const char *make, const char *model, int32_t transform) {
+  VT_PROFILE_SCOPE();
   parent_physical_output_t *output = data;
 
   output->x = x;
@@ -601,6 +618,7 @@ static struct vt_output_mode_t *_wl_find_output_mode(struct wl_list *list,
                                                      int32_t         width,
                                                      int32_t         height,
                                                      uint32_t        refresh) {
+  VT_PROFILE_SCOPE();
   struct vt_output_mode_t *mode;
 
   wl_list_for_each(mode, list, link) {
@@ -626,6 +644,7 @@ static void _wl_parent_output_mode(void             *data,
                                    struct wl_output *wl_output_proxy,
                                    uint32_t flags, int32_t width,
                                    int32_t height, int32_t refresh) {
+  VT_PROFILE_SCOPE();
   (void)wl_output_proxy;
   parent_physical_output_t *output = data;
 
@@ -639,6 +658,7 @@ static void _wl_parent_output_mode(void             *data,
 
 static bool _wl_backend_create_output(struct vt_backend_t *backend,
                                       struct vt_output_t *output, void *data) {
+  VT_PROFILE_SCOPE();
   (void)data;
   if (!backend || !output)
     return false;
@@ -722,6 +742,7 @@ static bool _wl_backend_create_output(struct vt_backend_t *backend,
 
 static bool _wl_backend_destroy_output(struct vt_backend_t *backend,
                                        struct vt_output_t  *output) {
+  VT_PROFILE_SCOPE();
   if (!output || !output->user_data)
     return false;
 
@@ -766,6 +787,7 @@ static bool _wl_backend_destroy_output(struct vt_backend_t *backend,
 
 static bool _wl_init_dmabuf_feedback(struct vt_compositor_t      *comp,
                                      struct vt_dmabuf_feedback_t *fb) {
+  VT_PROFILE_SCOPE();
   fb->dev_main = calloc(1, sizeof(*fb->dev_main));
   dev_t       main_dev;
   struct stat st;
@@ -819,6 +841,7 @@ static bool _wl_init_dmabuf_feedback(struct vt_compositor_t      *comp,
 
 static void _wl_buffer_attachment_destroy(struct vt_buffer_t *buf,
                                           const void *owner, void *ptr) {
+  VT_PROFILE_SCOPE();
   (void)buf;
   (void)owner;
   struct vt_wl_buffer_attachment_t *data = ptr;
@@ -828,6 +851,7 @@ static void _wl_buffer_attachment_destroy(struct vt_buffer_t *buf,
 
 static struct vt_wl_buffer_attachment_t *
 _wl_buffer_attachment_data(struct vt_buffer_t *buf) {
+  VT_PROFILE_SCOPE();
   struct vt_buffer_attachment_t *a =
       vt_buffer_find_attachment(buf, &wl_allocator_owner, &wl_allocator_impl);
   return a ? a->data : NULL;
@@ -835,6 +859,7 @@ _wl_buffer_attachment_data(struct vt_buffer_t *buf) {
 
 static bool _wl_buffer_attachment_get_shm(struct vt_buffer_t   *buf,
                                           struct vt_shm_attr_t *attr) {
+  VT_PROFILE_SCOPE();
   struct vt_wl_buffer_attachment_t *data = _wl_buffer_attachment_data(buf);
   if (!data || !attr)
     return false;
@@ -858,6 +883,7 @@ static bool _wl_buffer_attachment_get_shm(struct vt_buffer_t   *buf,
 
 static bool _wl_buffer_check_size(uint32_t width, uint32_t height,
                                   size_t *size) {
+  VT_PROFILE_SCOPE();
   if (!width || !height || width > INT32_MAX / 4 || height > INT32_MAX ||
       height > SIZE_MAX / ((size_t)width * 4))
     return false;
@@ -869,6 +895,7 @@ static bool _wl_buffer_check_size(uint32_t width, uint32_t height,
 // =================== PUBLIC API ====================
 // ===================================================
 bool backend_init_wl(struct vt_backend_t *backend) {
+  VT_PROFILE_SCOPE();
   if (!backend)
     return false;
   if (!(backend->user_data =
@@ -985,6 +1012,7 @@ bool backend_init_wl(struct vt_backend_t *backend) {
 static struct vt_buffer_t *
 backend_allocate_buffer_wl(struct vt_backend_t *backend, uint32_t width,
                            uint32_t height, uint32_t format) {
+  VT_PROFILE_SCOPE();
   size_t size;
   if (!_wl_buffer_check_size(width, height, &size) ||
       (format != DRM_FORMAT_XRGB8888 && format != DRM_FORMAT_ARGB8888))
@@ -1016,6 +1044,7 @@ backend_allocate_buffer_wl(struct vt_backend_t *backend, uint32_t width,
 
 static bool backend_clear_buffer_wl(struct vt_backend_t *backend,
                                     struct vt_buffer_t *buf, uint32_t color) {
+  VT_PROFILE_SCOPE();
   (void)backend;
   struct vt_wl_buffer_attachment_t *data =
       buf ? _wl_buffer_attachment_data(buf) : NULL;
@@ -1041,12 +1070,14 @@ static bool backend_clear_buffer_wl(struct vt_backend_t *backend,
 static bool backend_is_dmabuf_importable_wl(struct vt_backend_t     *backend,
                                             struct vt_dmabuf_attr_t *attr,
                                             int32_t device_fd) {
+  VT_PROFILE_SCOPE();
   (void)device_fd;
   struct vt_renderer_t *r = backend->comp->renderer;
   return !r->impl.is_dmabuf_importable || r->impl.is_dmabuf_importable(r, attr);
 }
 
 bool backend_implement_wl(struct vt_compositor_t *comp) {
+  VT_PROFILE_SCOPE();
   if (!comp || !comp->backend)
     return false;
 
@@ -1070,6 +1101,7 @@ bool backend_implement_wl(struct vt_compositor_t *comp) {
 
 static bool backend_handle_frame_wl(struct vt_backend_t *backend,
                                     struct vt_output_t  *output) {
+  VT_PROFILE_SCOPE();
   if (!backend || !output)
     return false;
 
@@ -1082,6 +1114,7 @@ static bool backend_handle_frame_wl(struct vt_backend_t *backend,
 }
 
 static bool backend_terminate_wl(struct vt_backend_t *backend) {
+  VT_PROFILE_SCOPE();
   if (!backend || !backend->user_data)
     return false;
 
@@ -1124,6 +1157,7 @@ static bool backend_terminate_wl(struct vt_backend_t *backend) {
 
 static bool backend_prepare_output_frame_wl(struct vt_backend_t *backend,
                                             struct vt_output_t  *output) {
+  VT_PROFILE_SCOPE();
   (void)backend;
   wayland_output_state_t *wl_output =
       BACKEND_DATA(output, wayland_output_state_t);

@@ -1,3 +1,8 @@
+option('profiling',
+  type: 'boolean',
+  value: false,
+  description: 'Build with Tracy CPU profiling support')
+
 option('backends',
   type: 'combo',
   value: 'all',

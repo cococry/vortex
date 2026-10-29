@@ -90,6 +90,27 @@ deps = [
   runara_dep,
 ]
 
+dep_profiling_headers = declare_dependency()
+if get_option('profiling')
+  # We build tracy only if profiling is specifically enabled  
+  tracy_sp = subproject(
+    'tracy',
+    default_options: [
+      'tracy_enable=true',
+      'default_library=static',
+      'cpp_std=c++17',
+    ],
+  )
+  tracy_dep = tracy_sp.get_variable('tracy_dep')
+  deps += tracy_dep
+  # Backend modules use the client exported by Vortex, rather than embedding
+  # separate Tracy clients in each module.
+  dep_profiling_headers = tracy_dep.partial_dependency(
+    compile_args: true,
+    includes: true,
+  )
+endif
+
 if dep_xkbcommon.found()
   deps += dep_xkbcommon
 endif
@@ -378,6 +399,7 @@ summary(
     'GPU renderers': renderers,
     'OpenGL': build_opengl,
     'Vulkan': build_vulkan,
+    'CPU profiling (Tracy)': get_option('profiling'),
   },
   section: 'Vortex',
   bool_yn: true,

@@ -20,6 +20,7 @@
  * SOFTWARE.
  */
 
+#include "src/core/profiling.h"
 #include "buffer.h"
 #include "src/core/core_types.h"
 #include "src/core/util.h"
@@ -42,6 +43,7 @@ _buffer_remove_attachment(struct vt_buffer_attachment_t *attachment);
 
 static void
 _buffer_remove_attachment(struct vt_buffer_attachment_t *attachment) {
+  VT_PROFILE_SCOPE();
   if (!attachment || !attachment->buf) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return;
@@ -60,6 +62,7 @@ _buffer_remove_attachment(struct vt_buffer_attachment_t *attachment) {
 }
 
 static void _buffer_destroy(struct vt_buffer_t *buf) {
+  VT_PROFILE_SCOPE();
   if (!buf || !buf->impl || !buf->comp) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return;
@@ -81,6 +84,7 @@ static void _buffer_destroy(struct vt_buffer_t *buf) {
 struct vt_buffer_t *
 vt_buffer_create(struct vt_compositor_t *comp, uint32_t width, uint32_t height,
                  const struct vt_buffer_implementation_t *impl) {
+  VT_PROFILE_SCOPE();
   if (!comp || !impl) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return NULL;
@@ -106,6 +110,7 @@ vt_buffer_create(struct vt_compositor_t *comp, uint32_t width, uint32_t height,
 }
 
 struct vt_buffer_t *vt_buffer_ref(struct vt_buffer_t *buf) {
+  VT_PROFILE_SCOPE();
   if (!buf || !buf->comp) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return NULL;
@@ -120,6 +125,7 @@ struct vt_buffer_t *vt_buffer_ref(struct vt_buffer_t *buf) {
 }
 
 void vt_buffer_unref(struct vt_buffer_t **buf_ptr) {
+  VT_PROFILE_SCOPE();
   if (!buf_ptr || !*buf_ptr || !(*buf_ptr)->comp) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return;
@@ -141,6 +147,7 @@ void vt_buffer_unref(struct vt_buffer_t **buf_ptr) {
 
 bool vt_buffer_get_dmabuf(struct vt_buffer_t      *buf,
                           struct vt_dmabuf_attr_t *o_attr) {
+  VT_PROFILE_SCOPE();
   if (!buf || !buf->impl || !buf->impl->get_dmabuf)
     return NULL;
 
@@ -148,6 +155,7 @@ bool vt_buffer_get_dmabuf(struct vt_buffer_t      *buf,
 }
 
 bool vt_buffer_get_shm(struct vt_buffer_t *buf, struct vt_shm_attr_t *o_attr) {
+  VT_PROFILE_SCOPE();
   if (!buf || !buf->impl || !buf->impl->get_shm)
     return NULL;
 
@@ -155,6 +163,7 @@ bool vt_buffer_get_shm(struct vt_buffer_t *buf, struct vt_shm_attr_t *o_attr) {
 }
 
 void vt_buffer_begin_use(struct vt_buffer_t *buf) {
+  VT_PROFILE_SCOPE();
   if (!buf || !buf->comp) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return;
@@ -167,6 +176,7 @@ void vt_buffer_begin_use(struct vt_buffer_t *buf) {
 }
 
 void vt_buffer_end_use(struct vt_buffer_t *buf) {
+  VT_PROFILE_SCOPE();
   if (!buf || !buf->comp) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return;
@@ -190,6 +200,7 @@ void vt_buffer_end_use(struct vt_buffer_t *buf) {
 struct vt_buffer_attachment_t *vt_buffer_add_attachment(
     struct vt_buffer_t *buf, const void *owner, void *data,
     const struct vt_buffer_attachment_implementation_t *impl) {
+  VT_PROFILE_SCOPE();
 
   if (!buf || !buf->comp) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
@@ -219,6 +230,7 @@ struct vt_buffer_attachment_t *vt_buffer_add_attachment(
 struct vt_buffer_attachment_t *vt_buffer_find_attachment(
     struct vt_buffer_t *buf, const void *owner,
     const struct vt_buffer_attachment_implementation_t *impl) {
+  VT_PROFILE_SCOPE();
   if (!buf || !buf->comp || !impl) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return NULL;
@@ -241,6 +253,7 @@ struct vt_buffer_attachment_t *vt_buffer_find_attachment(
 void vt_buffer_release_init_and_ref(
     struct vt_buffer_release_t *release, struct vt_compositor_t *comp,
     const struct vt_buffer_release_implementation_t *impl) {
+  VT_PROFILE_SCOPE();
   if (!release)
     return;
 
@@ -252,6 +265,7 @@ void vt_buffer_release_init_and_ref(
 
 struct vt_buffer_release_t *
 vt_buffer_release_ref(struct vt_buffer_release_t *release) {
+  VT_PROFILE_SCOPE();
   if (!release || !release->comp) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return NULL;
@@ -266,6 +280,7 @@ vt_buffer_release_ref(struct vt_buffer_release_t *release) {
 }
 
 void vt_buffer_release_unref(struct vt_buffer_release_t **release_ptr) {
+  VT_PROFILE_SCOPE();
   if (!release_ptr || !*release_ptr || !(*release_ptr)->comp) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return;
@@ -291,6 +306,7 @@ void vt_buffer_release_unref(struct vt_buffer_release_t **release_ptr) {
 
 void vt_buffer_release_finish(struct vt_buffer_release_t *release,
                               int                         release_fence_fd) {
+  VT_PROFILE_SCOPE();
   if (!release) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return;
@@ -305,6 +321,7 @@ void vt_buffer_release_finish(struct vt_buffer_release_t *release,
 }
 
 bool vt_buffer_release_needs_fence(struct vt_buffer_release_t *release) {
+  VT_PROFILE_SCOPE();
   if (!release || !release->impl)
     return false;
 
@@ -315,6 +332,7 @@ bool vt_buffer_release_needs_fence(struct vt_buffer_release_t *release) {
 }
 
 struct vt_buffer_use_t *vt_buffer_use_ref(struct vt_buffer_use_t *use) {
+  VT_PROFILE_SCOPE();
   if (!use || !use->comp) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return NULL;
@@ -329,6 +347,7 @@ struct vt_buffer_use_t *vt_buffer_use_ref(struct vt_buffer_use_t *use) {
 }
 
 static void _buffer_use_destroy(struct vt_buffer_use_t *use) {
+  VT_PROFILE_SCOPE();
   if (!use || !use->comp || !use->buf) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return;
@@ -365,6 +384,7 @@ static void _buffer_use_destroy(struct vt_buffer_use_t *use) {
 }
 
 void vt_buffer_use_unref(struct vt_buffer_use_t **use) {
+  VT_PROFILE_SCOPE();
   if (!use || !*use) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return;
@@ -386,6 +406,7 @@ void vt_buffer_use_unref(struct vt_buffer_use_t **use) {
 struct vt_buffer_use_t *vt_buffer_use_create_take(
     struct vt_compositor_t *comp, const void *owner, struct vt_buffer_t **buf,
     struct vt_buffer_release_t **release, int *acquire_fence_fd) {
+  VT_PROFILE_SCOPE();
   if (!buf || !*buf || !comp) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return NULL;
@@ -424,6 +445,7 @@ struct vt_buffer_use_t *vt_buffer_use_create_take(
 }
 
 int vt_buffer_use_acquire_fence(struct vt_buffer_use_t *use) {
+  VT_PROFILE_SCOPE();
   if (!use)
     return -1;
 
@@ -438,6 +460,7 @@ int vt_buffer_use_acquire_fence(struct vt_buffer_use_t *use) {
 }
 
 bool vt_buffer_use_set_release_fence_fd(struct vt_buffer_use_t *use, int fd) {
+  VT_PROFILE_SCOPE();
   if (!use || !use->comp || fd < 0) {
     VT_PARAM_CHECK_FAIL_HEADLESS();
     return false;

@@ -20,6 +20,7 @@
  * SOFTWARE.
  */
 
+#include "src/core/profiling.h"
 #include "fb.h"
 #include "gbm_allocator.h"
 #include "prime.h"
@@ -36,6 +37,7 @@ static bool _drm_fb_add(struct vt_drm_backend_state_t *drm,
                         uint32_t height, uint32_t format, uint32_t handles[4],
                         uint32_t strides[4], uint32_t offsets[4],
                         uint64_t modifier, uint32_t num_planes) {
+  VT_PROFILE_SCOPE();
   assert(drm && fb);
   assert(num_planes > 0 && num_planes <= 4);
 
@@ -78,6 +80,7 @@ static bool _drm_fb_add(struct vt_drm_backend_state_t *drm,
 bool drm_fb_init_from_buffer(struct vt_drm_backend_state_t *drm,
                              struct vt_drm_framebuffer_t   *fb,
                              struct vt_buffer_t            *buf) {
+  VT_PROFILE_SCOPE();
   if (!drm || !fb || !buf)
     return false;
 
@@ -127,6 +130,7 @@ bool drm_fb_init_from_buffer(struct vt_drm_backend_state_t *drm,
 bool drm_fb_init_from_gbm(struct vt_drm_backend_state_t *drm,
                           struct vt_drm_framebuffer_t *fb, struct gbm_bo *bo,
                           struct gbm_surface *surf) {
+  VT_PROFILE_SCOPE();
   if (!drm || !fb || !bo)
     return false;
 
@@ -183,6 +187,7 @@ bool drm_fb_init_from_gbm(struct vt_drm_backend_state_t *drm,
 
 void drm_fb_finish(struct vt_drm_backend_state_t *drm,
                    struct vt_drm_framebuffer_t   *fb) {
+  VT_PROFILE_SCOPE();
   if (!drm || !fb)
     return;
 

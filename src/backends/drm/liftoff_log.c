@@ -1,9 +1,11 @@
+#include "src/core/profiling.h"
 #include "liftoff_log.h"
 #include "core/core_types.h"
 
 static struct log_state_t *_liftoff_log_state = NULL;
 
 void drm_liftoff_log_init(struct vt_backend_t *backend) {
+  VT_PROFILE_SCOPE();
   _liftoff_log_state = &backend->comp->log;
 
   liftoff_log_set_handler(drm_liftoff_log_handler);
@@ -18,6 +20,7 @@ void drm_liftoff_log_init(struct vt_backend_t *backend) {
 
 void drm_liftoff_log_write(FILE *stream, log_level_t level, const char *fmt,
                            va_list args) {
+  VT_PROFILE_SCOPE();
   va_list copy;
   va_copy(copy, args);
 
@@ -30,6 +33,7 @@ void drm_liftoff_log_write(FILE *stream, log_level_t level, const char *fmt,
 }
 void drm_liftoff_log_handler(enum liftoff_log_priority priority,
                              const char *fmt, va_list args) {
+  VT_PROFILE_SCOPE();
   struct log_state_t *log = _liftoff_log_state;
 
   if (!log || log->quiet)

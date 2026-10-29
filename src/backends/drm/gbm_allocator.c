@@ -1,3 +1,4 @@
+#include "src/core/profiling.h"
 #include "gbm_allocator.h"
 
 #include <drm/drm_fourcc.h>
@@ -30,6 +31,7 @@ static const struct vt_buffer_attachment_implementation_t gbm_attachment_impl =
 
 static void _gbm_attachment_destroy(struct vt_buffer_t *buffer,
                                     const void *owner, void *ptr) {
+  VT_PROFILE_SCOPE();
   (void)buffer;
   (void)owner;
 
@@ -48,6 +50,7 @@ static void _gbm_attachment_destroy(struct vt_buffer_t *buffer,
 
 static struct gbm_attachment_data *
 _find_gbm_attachment(struct vt_buffer_t *buffer) {
+  VT_PROFILE_SCOPE();
   if (!buffer)
     return NULL;
 
@@ -57,12 +60,14 @@ _find_gbm_attachment(struct vt_buffer_t *buffer) {
 }
 
 struct gbm_bo *drm_gbm_buffer_allocator_get_bo(struct vt_buffer_t *buffer) {
+  VT_PROFILE_SCOPE();
   struct gbm_attachment_data *data = _find_gbm_attachment(buffer);
   return data ? data->bo : NULL;
 }
 
 static bool _allocated_gbm_get_dmabuf(struct vt_buffer_t      *buffer,
                                       struct vt_dmabuf_attr_t *out) {
+  VT_PROFILE_SCOPE();
   struct gbm_attachment_data *data = _find_gbm_attachment(buffer);
   if (!data || !out)
     return false;
@@ -93,6 +98,7 @@ static const struct vt_buffer_implementation_t allocated_gbm_buffer_impl = {
 
 bool drm_gbm_buffer_allocator_clear(struct vt_buffer_t *buffer,
                                     uint32_t            color) {
+  VT_PROFILE_SCOPE();
   struct gbm_attachment_data *data = _find_gbm_attachment(buffer);
   if (!data || !data->bo || buffer->uses != 0)
     return false;
@@ -130,6 +136,7 @@ struct vt_buffer_t *drm_gbm_buffer_allocator_alloc(struct vt_compositor_t *comp,
                                                    uint32_t width,
                                                    uint32_t height,
                                                    uint32_t format) {
+  VT_PROFILE_SCOPE();
   if (!comp || !gbm || width == 0 || height == 0 || width > UINT32_MAX / 4u)
     return NULL;
 

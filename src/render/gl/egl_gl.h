@@ -40,6 +40,7 @@ struct vt_egl_buffer_t {
   struct vt_egl_texture_t tex;
   struct rn_image_t       rn_img;
   bool                    rn_img_registered;
+  uint32_t                shm_format;
   EGLImageKHR             egl_img;
   struct vt_renderer_t   *renderer;
 };

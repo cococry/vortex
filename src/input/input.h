@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "src/core/profiling.h"
 #include <stdbool.h>
 #include <xkbcommon/xkbcommon.h>
 
@@ -29,6 +30,7 @@
 
 static inline uint32_t vt_input_xkb_mod_mask(struct xkb_keymap *keymap,
                                              const char        *name) {
+  VT_PROFILE_SCOPE();
   xkb_mod_index_t idx = xkb_keymap_mod_get_index(keymap, name);
   return idx == XKB_MOD_INVALID ? 0 : (1u << idx);
 }

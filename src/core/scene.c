@@ -20,6 +20,7 @@
  * SOFTWARE.
  */
 
+#include "src/core/profiling.h"
 #include "scene.h"
 #include "core/buffer.h"
 #include "pixman.h"
@@ -58,6 +59,7 @@ static void _scene_node_update_surface_feedback(struct vt_scene_node_t *node);
 
 static struct vt_output_layer_state_t *
 _scene_push_layer(struct vt_scene_t *scene) {
+  VT_PROFILE_SCOPE();
   assert(scene);
 
   if (scene->n_layers == scene->layers_cap) {
@@ -79,6 +81,7 @@ _scene_push_layer(struct vt_scene_t *scene) {
 }
 
 static bool _scene_node_is_layer_candidate(struct vt_scene_node_t *node) {
+  VT_PROFILE_SCOPE();
   if (node->type == VT_SCENE_NODE_INVISIBLE_GEOMETRY)
     return false;
 
@@ -97,6 +100,7 @@ static bool _scene_node_is_layer_candidate(struct vt_scene_node_t *node) {
 
 static bool _scene_node_on_output(struct vt_scene_node_t *node,
                                   struct vt_output_t     *output) {
+  VT_PROFILE_SCOPE();
   assert(node && output);
 
   struct vt_box_t *box = vt_scene_node_get_global_bounds(node);
@@ -135,6 +139,7 @@ static bool _scene_node_on_output(struct vt_scene_node_t *node,
 bool _scene_node_push_surface_layer(struct vt_scene_t      *scene,
                                     struct vt_output_t     *output,
                                     struct vt_scene_node_t *node) {
+  VT_PROFILE_SCOPE();
   assert(scene && output && node && node->type == VT_SCENE_NODE_SURFACE);
 
   struct vt_box_t *rect = vt_scene_node_get_global_bounds(node);
@@ -185,6 +190,7 @@ bool _scene_node_push_surface_layer(struct vt_scene_t      *scene,
 
 bool _scene_node_push_buffer_layer(struct vt_scene_t      *scene,
                                    struct vt_scene_node_t *node) {
+  VT_PROFILE_SCOPE();
   assert(scene && node && node->type == VT_SCENE_NODE_BUFFER);
 
   struct vt_box_t *rect = vt_scene_node_get_global_bounds(node);
@@ -211,6 +217,7 @@ static void _scene_node_accumulate_layers(struct vt_scene_t      *scene,
                                           struct vt_output_t     *output,
                                           struct vt_scene_node_t *node,
                                           int32_t parent_x, int32_t parent_y) {
+  VT_PROFILE_SCOPE();
   if (!scene || !output || !node)
     return;
 
@@ -256,6 +263,7 @@ children:
 
 static void _scene_accumulate_layers(struct vt_scene_t  *scene,
                                      struct vt_output_t *output) {
+  VT_PROFILE_SCOPE();
   assert(scene && scene->root);
 
   scene->n_layers = 0;
@@ -265,8 +273,11 @@ static void _scene_accumulate_layers(struct vt_scene_t  *scene,
     struct vt_output_layer_state_t *bg = &scene->layers[scene->n_layers - 1];
     bg->dst =
         (struct vt_box_t){.width = output->width, .height = output->height};
-    if (output->background.owner)
+    if (output->background.owner) {
+      /* route client backgrounds through surface rendering */
+      bg->type = VT_OUTPUT_LAYER_SURFACE;
       bg->surface = output->background.owner->surface;
+    }
   }
 
   _scene_node_accumulate_layers(scene, output, scene->root, 0, 0);
@@ -274,6 +285,7 @@ static void _scene_accumulate_layers(struct vt_scene_t  *scene,
 
 static void _scene_render_layers(struct vt_scene_t  *scene,
                                  struct vt_output_t *output) {
+  VT_PROFILE_SCOPE();
   assert(scene);
   assert(scene->renderer);
 
@@ -304,6 +316,7 @@ static void _scene_render_layers(struct vt_scene_t  *scene,
 
 static void _scene_render_cursor(struct vt_scene_t  *scene,
                                  struct vt_output_t *output) {
+  VT_PROFILE_SCOPE();
   assert(scene && scene->renderer && output);
 
   struct vt_renderer_t *r = scene->renderer;
@@ -334,6 +347,7 @@ static void _scene_render_cursor(struct vt_scene_t  *scene,
 
 static void _composite_pass(struct vt_scene_t  *scene,
                             struct vt_output_t *output) {
+  VT_PROFILE_SCOPE();
   assert(scene && scene->renderer && output);
 
   struct vt_renderer_t *r = scene->renderer;
@@ -355,6 +369,7 @@ static void _composite_pass(struct vt_scene_t  *scene,
 
 static void _scene_node_get_size(struct vt_scene_node_t *node, int32_t *o_w,
                                  int32_t *o_h) {
+  VT_PROFILE_SCOPE();
   if (!node || !o_w || !o_h)
     return;
 
@@ -381,6 +396,7 @@ static void _scene_node_get_size(struct vt_scene_node_t *node, int32_t *o_w,
 }
 
 static void _scene_node_update_surface_feedback(struct vt_scene_node_t *node) {
+  VT_PROFILE_SCOPE();
   if (!node)
     return;
 
@@ -396,6 +412,7 @@ struct vt_scene_node_t *
 _scene_node_create_rect(struct vt_compositor_t *c, float x, float y, float w,
                         float h, uint32_t color,
                         enum vt_scene_node_type_t type) {
+  VT_PROFILE_SCOPE();
   struct vt_scene_node_t *n = VT_ALLOC(c, sizeof(*n));
   if (!n) {
     VT_ERROR(c->log, "Failed to allocate scene node.");
@@ -418,6 +435,7 @@ _scene_node_create_rect(struct vt_compositor_t *c, float x, float y, float w,
 
 struct vt_scene_node_t *vt_scene_node_create(struct vt_compositor_t *c,
                                              struct vt_surface_t    *surf) {
+  VT_PROFILE_SCOPE();
   struct vt_scene_node_t *n = VT_ALLOC(c, sizeof(*n));
   if (!n) {
     VT_ERROR(c->log, "Failed to allocate scene node.");
@@ -445,6 +463,7 @@ struct vt_scene_node_t *vt_scene_node_create(struct vt_compositor_t *c,
 struct vt_scene_node_t *
 vt_scene_node_create_buffer(struct vt_compositor_t *c,
                             struct vt_buffer_use_t *use) {
+  VT_PROFILE_SCOPE();
   struct vt_scene_node_t *n = VT_ALLOC(c, sizeof(*n));
   if (!n) {
     VT_ERROR(c->log, "Failed to allocate scene node.");
@@ -468,6 +487,7 @@ vt_scene_node_create_buffer(struct vt_compositor_t *c,
 
 bool vt_scene_node_destroy(struct vt_compositor_t *c,
                            struct vt_scene_node_t *node) {
+  VT_PROFILE_SCOPE();
   (void)c;
   if (node->type == VT_SCENE_NODE_BUFFER && node->use) {
     vt_buffer_use_unref(&node->use);
@@ -480,6 +500,7 @@ bool vt_scene_node_destroy(struct vt_compositor_t *c,
 
 void vt_scene_damage_box(struct vt_compositor_t *comp,
                          const struct vt_box_t  *box) {
+  VT_PROFILE_SCOPE();
   if (!comp || !box || box->width <= 0 || box->height <= 0)
     return;
   struct vt_output_t *output;
@@ -502,6 +523,7 @@ void vt_scene_damage_box(struct vt_compositor_t *comp,
 void vt_scene_node_damage_region(struct vt_compositor_t  *comp,
                                  struct vt_scene_node_t  *node,
                                  const pixman_region32_t *damage) {
+  VT_PROFILE_SCOPE();
   if (!node || !damage)
     return;
   const struct vt_box_t *bounds = vt_scene_node_get_global_bounds(node);
@@ -523,6 +545,7 @@ void vt_scene_node_damage_region(struct vt_compositor_t  *comp,
 void vt_scene_node_damage_buffer(struct vt_compositor_t  *comp,
                                  struct vt_scene_node_t  *node,
                                  const pixman_region32_t *damage) {
+  VT_PROFILE_SCOPE();
   if (!node || node->type != VT_SCENE_NODE_SURFACE || !node->surf)
     return;
   struct vt_surface_t *surf = node->surf;
@@ -552,6 +575,7 @@ void vt_scene_node_damage_buffer(struct vt_compositor_t  *comp,
 
 bool vt_scene_node_damage_whole(struct vt_compositor_t *comp,
                                 struct vt_scene_node_t *node) {
+  VT_PROFILE_SCOPE();
   if (!node || !comp)
     return false;
   if (node->type != VT_SCENE_NODE_INVISIBLE_GEOMETRY &&
@@ -565,24 +589,28 @@ bool vt_scene_node_damage_whole(struct vt_compositor_t *comp,
 struct vt_scene_node_t *vt_scene_node_create_rect(struct vt_compositor_t *c,
                                                   float x, float y, float w,
                                                   float h, uint32_t color) {
+  VT_PROFILE_SCOPE();
   return _scene_node_create_rect(c, x, y, w, h, color, VT_SCENE_NODE_RECT);
 }
 
 struct vt_scene_node_t *
 vt_scene_node_create_rect_invisible(struct vt_compositor_t *c, float x, float y,
                                     float w, float h) {
+  VT_PROFILE_SCOPE();
   return _scene_node_create_rect(c, x, y, w, h, 0x0,
                                  VT_SCENE_NODE_INVISIBLE_GEOMETRY);
 }
 
 struct vt_scene_node_t *
 vt_scene_node_create_container(struct vt_compositor_t *c) {
+  VT_PROFILE_SCOPE();
   return vt_scene_node_create_rect_invisible(c, 0, 0, 0, 0);
 }
 
 bool vt_scene_node_reparent(struct vt_compositor_t *c,
                             struct vt_scene_node_t *node,
                             struct vt_scene_node_t *new_parent) {
+  VT_PROFILE_SCOPE();
   if (!c || !node) {
     VT_ERROR(c->log, "One or more parameters of vt_scene_node_reparent() are "
                      "invalid, cannot add child.");
@@ -610,6 +638,7 @@ bool vt_scene_node_reparent(struct vt_compositor_t *c,
 bool vt_scene_node_add_child(struct vt_compositor_t *c,
                              struct vt_scene_node_t *node,
                              struct vt_scene_node_t *child) {
+  VT_PROFILE_SCOPE();
   if (!c || !node || !child) {
     VT_ERROR(c->log, "One or more parameters of vt_scene_node_add_child() are "
                      "invalid, cannot add child.");
@@ -632,6 +661,7 @@ bool vt_scene_node_remove_child(struct vt_scene_node_t *parent,
                                 struct vt_scene_node_t *child)
 
 {
+  VT_PROFILE_SCOPE();
   if (!parent || !child)
     return false;
 
@@ -661,6 +691,7 @@ bool vt_scene_node_remove_child(struct vt_scene_node_t *parent,
 
 struct vt_scene_t *vt_scene_create(struct vt_renderer_t   *renderer,
                                    struct vt_scene_node_t *root) {
+  VT_PROFILE_SCOPE();
   assert(renderer && renderer->comp && root);
 
   struct vt_scene_t *scene = VT_ALLOC(renderer->comp, sizeof(*scene));
@@ -674,6 +705,7 @@ struct vt_scene_t *vt_scene_create(struct vt_renderer_t   *renderer,
 }
 
 void vt_scene_render(struct vt_scene_t *scene, struct vt_output_t *output) {
+  VT_PROFILE_SCOPE();
   assert(scene && scene->renderer && output);
   scene->n_layers = 0;
 
@@ -740,6 +772,7 @@ void vt_scene_render(struct vt_scene_t *scene, struct vt_output_t *output) {
 
 void vt_scene_node_set_position(struct vt_scene_node_t *node, int32_t x,
                                 int32_t y) {
+  VT_PROFILE_SCOPE();
   if (!node)
     return;
 
@@ -756,6 +789,7 @@ void vt_scene_node_set_position(struct vt_scene_node_t *node, int32_t x,
 }
 
 void vt_scene_node_mark_geometry_dirty(struct vt_scene_node_t *node) {
+  VT_PROFILE_SCOPE();
   if (!node)
     return;
 
@@ -767,6 +801,7 @@ void vt_scene_node_mark_geometry_dirty(struct vt_scene_node_t *node) {
 }
 
 void vt_scene_node_update_global_bounds(struct vt_scene_node_t *node) {
+  VT_PROFILE_SCOPE();
   if (!node || !node->geom_dirty)
     return;
 
@@ -789,6 +824,7 @@ void vt_scene_node_update_global_bounds(struct vt_scene_node_t *node) {
 }
 
 struct vt_box_t *vt_scene_node_get_global_bounds(struct vt_scene_node_t *node) {
+  VT_PROFILE_SCOPE();
   if (!node)
     return NULL;
 
@@ -799,6 +835,7 @@ struct vt_box_t *vt_scene_node_get_global_bounds(struct vt_scene_node_t *node) {
 
 struct vt_output_t *vt_scene_node_primary_output(struct vt_compositor_t *comp,
                                                  struct vt_scene_node_t *node) {
+  VT_PROFILE_SCOPE();
   if (!node) {
     VT_PARAM_CHECK_FAIL(comp);
     VT_ERROR(comp->log, "Cannot pick primary output for NULL node");

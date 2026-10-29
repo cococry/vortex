@@ -22,6 +22,7 @@
 
 #define _POSIX_C_SOURCE 200809L
 
+#include "src/core/profiling.h"
 #include "src/core/buffer.h"
 #include "src/core/compositor.h"
 #include "src/core/output.h"
@@ -153,6 +154,7 @@ static struct vt_output_implementation_t output_impl = {0};
 
 static void _x11_buffer_attachment_destroy(struct vt_buffer_t *buf,
                                            const void *owner, void *ptr) {
+  VT_PROFILE_SCOPE();
   (void)buf;
   (void)owner;
   struct vt_x11_buffer_attachment_t *data = ptr;
@@ -162,6 +164,7 @@ static void _x11_buffer_attachment_destroy(struct vt_buffer_t *buf,
 
 static struct vt_x11_buffer_attachment_t *
 _x11_buffer_attachment_data(struct vt_buffer_t *buf) {
+  VT_PROFILE_SCOPE();
   struct vt_buffer_attachment_t *a =
       vt_buffer_find_attachment(buf, &x11_allocator_owner, &x11_allocator_impl);
   return a ? a->data : NULL;
@@ -169,6 +172,7 @@ _x11_buffer_attachment_data(struct vt_buffer_t *buf) {
 
 static bool _x11_buffer_attachment_get_shm(struct vt_buffer_t   *buf,
                                            struct vt_shm_attr_t *attr) {
+  VT_PROFILE_SCOPE();
   struct vt_x11_buffer_attachment_t *data = _x11_buffer_attachment_data(buf);
   if (!data || !attr)
     return false;
@@ -191,6 +195,7 @@ static bool _x11_buffer_attachment_get_shm(struct vt_buffer_t   *buf,
 
 static bool _x11_buffer_check_size(uint32_t width, uint32_t height,
                                    size_t *size) {
+  VT_PROFILE_SCOPE();
   if (!width || !height || width > INT32_MAX / 4 || height > INT32_MAX ||
       height > SIZE_MAX / ((size_t)width * 4))
     return false;
@@ -199,6 +204,7 @@ static bool _x11_buffer_check_size(uint32_t width, uint32_t height,
 }
 
 static int _x11_parent_frame_done(void *data) {
+  VT_PROFILE_SCOPE();
   struct vt_output_t *output = data;
   struct x11_output  *xo = output->user_data;
 
@@ -212,6 +218,7 @@ static int _x11_parent_frame_done(void *data) {
 
 static void _x11_release_keys(struct vt_compositor_t *c,
                               struct x11_output      *xo) {
+  VT_PROFILE_SCOPE();
   for (unsigned i = 8; i < sizeof(xo->pressed_keys); ++i) {
     if (xo->pressed_keys[i]) {
       vt_seat_handle_key(c->seat, i, VT_KEY_STATE_RELEASED,
@@ -222,6 +229,7 @@ static void _x11_release_keys(struct vt_compositor_t *c,
 }
 
 static void _x11_parent_dispatch_event(struct x11_backend *x, XEvent *event) {
+  VT_PROFILE_SCOPE();
   struct vt_compositor_t *c = x->backend->comp;
   if (input_backend_handle_event_x11(c->input_backend, event))
     return;
@@ -339,6 +347,7 @@ static void _x11_parent_dispatch_event(struct x11_backend *x, XEvent *event) {
 }
 
 static int _x11_parent_dispatch(int fd, uint32_t mask, void *data) {
+  VT_PROFILE_SCOPE();
   (void)fd;
   struct x11_backend *x = data;
   if (mask & (WL_EVENT_HANGUP | WL_EVENT_ERROR)) {
@@ -385,6 +394,7 @@ static int _x11_parent_dispatch(int fd, uint32_t mask, void *data) {
 
 static void _x11_backend_destroy_output(struct vt_backend_t *backend,
                                         struct vt_output_t  *output) {
+  VT_PROFILE_SCOPE();
   struct x11_backend *x = backend->user_data;
   struct x11_output  *xo = output->user_data;
   if (output->commit_source) {
@@ -414,6 +424,7 @@ static void _x11_backend_destroy_output(struct vt_backend_t *backend,
 
 static bool _x11_backend_create_output(struct vt_backend_t *backend,
                                        XVisualInfo *visual, unsigned id) {
+  VT_PROFILE_SCOPE();
 
   assert(backend && visual);
 
@@ -535,6 +546,7 @@ fail:
 }
 
 static bool _x11_init_dmabuf_feedback(struct vt_compositor_t *c) {
+  VT_PROFILE_SCOPE();
   struct vt_dmabuf_feedback_t *fb = vt_dmabuf_feedback_create(c, NULL);
   if (!fb)
     return false;
@@ -586,6 +598,7 @@ done:
 static struct vt_buffer_t *
 backend_allocate_buffer_x11(struct vt_backend_t *backend, uint32_t width,
                             uint32_t height, uint32_t format) {
+  VT_PROFILE_SCOPE();
   size_t size;
   if (!_x11_buffer_check_size(width, height, &size) ||
       (format != DRM_FORMAT_XRGB8888 && format != DRM_FORMAT_ARGB8888))
@@ -617,6 +630,7 @@ backend_allocate_buffer_x11(struct vt_backend_t *backend, uint32_t width,
 
 static bool backend_clear_buffer_x11(struct vt_backend_t *backend,
                                      struct vt_buffer_t *buf, uint32_t color) {
+  VT_PROFILE_SCOPE();
   (void)backend;
   struct vt_x11_buffer_attachment_t *data =
       buf ? _x11_buffer_attachment_data(buf) : NULL;
@@ -637,6 +651,7 @@ static bool backend_clear_buffer_x11(struct vt_backend_t *backend,
 
 static bool backend_prepare_output_frame_x11(struct vt_backend_t *backend,
                                              struct vt_output_t  *output) {
+  VT_PROFILE_SCOPE();
   struct x11_output *xo = output->user_data;
   if (xo->frame_pending || !xo->mapped)
     return false;
@@ -703,6 +718,7 @@ static bool backend_prepare_output_frame_x11(struct vt_backend_t *backend,
 
 static bool backend_handle_frame_x11(struct vt_backend_t *backend,
                                      struct vt_output_t  *output) {
+  VT_PROFILE_SCOPE();
   struct x11_backend *x = backend->user_data;
   struct x11_output  *xo = output->user_data;
   XFlush(x->display);
@@ -720,6 +736,7 @@ static bool backend_handle_frame_x11(struct vt_backend_t *backend,
 }
 
 static bool backend_terminate_x11(struct vt_backend_t *backend) {
+  VT_PROFILE_SCOPE();
   struct x11_backend *x = backend->user_data;
   if (!x)
     return true;
@@ -741,6 +758,7 @@ static bool backend_terminate_x11(struct vt_backend_t *backend) {
 }
 
 static bool backend_init_x11(struct vt_backend_t *backend) {
+  VT_PROFILE_SCOPE();
   struct vt_compositor_t *c = backend->comp;
   struct x11_backend     *x = VT_ALLOC(c, sizeof(*x));
   if (!x)
@@ -771,8 +789,8 @@ static bool backend_init_x11(struct vt_backend_t *backend) {
     free(version);
   }
 
-  VT_INFO(c->log, "X11 frame pacing: %s",
-          x->has_present ? "Present MSC" : "60 Hz timer");
+  VT_INFO(c->log, "Method for frame pacing: %s",
+          x->has_present ? "Present MSC" : "Fallback 60 Hz timer");
 
   x->wm_protocols = XInternAtom(x->display, "WM_PROTOCOLS", False);
   x->wm_delete = XInternAtom(x->display, "WM_DELETE_WINDOW", False);
@@ -851,12 +869,14 @@ fail:
 static bool backend_is_dmabuf_importable_x11(struct vt_backend_t     *backend,
                                              struct vt_dmabuf_attr_t *attr,
                                              int32_t device_fd) {
+  VT_PROFILE_SCOPE();
   (void)device_fd;
   struct vt_renderer_t *r = backend->comp->renderer;
   return !r->impl.is_dmabuf_importable || r->impl.is_dmabuf_importable(r, attr);
 }
 
 bool backend_implement_x11(struct vt_compositor_t *comp) {
+  VT_PROFILE_SCOPE();
   if (!comp || !comp->backend)
     return false;
   comp->backend->platform = VT_BACKEND_X11;

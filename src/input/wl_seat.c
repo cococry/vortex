@@ -21,6 +21,7 @@
  */
 
 #define _GNU_SOURCE
+#include "src/core/profiling.h"
 #include <sys/mman.h>
 
 #include "input.h"
@@ -105,6 +106,7 @@ _wl_kb_get_mod_states(struct xkb_state *state);
 
 static void _wl_seat_release(struct wl_client   *client,
                              struct wl_resource *resource) {
+  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
@@ -133,6 +135,7 @@ static const struct vt_surface_role_impl_t surface_role_cursor_impl = {
 
 void _wl_seat_bind(struct wl_client *client, void *data, uint32_t version,
                    uint32_t id) {
+  VT_PROFILE_SCOPE();
   struct vt_seat_t *seat = data;
 
   struct wl_resource *resource =
@@ -148,6 +151,7 @@ void _wl_seat_bind(struct wl_client *client, void *data, uint32_t version,
 }
 
 int _wl_create_keymap_fd(struct vt_keyboard_t *kbd) {
+  VT_PROFILE_SCOPE();
   struct xkb_keymap *keymap = kbd->seat->comp->input_backend->keymap;
 
   char *keymap_str =
@@ -167,6 +171,7 @@ int _wl_create_keymap_fd(struct vt_keyboard_t *kbd) {
 }
 
 void _wl_keyboard_send_initial_state(struct vt_keyboard_t *kbd) {
+  VT_PROFILE_SCOPE();
   struct xkb_state *state = kbd->seat->comp->input_backend->kb_state;
 
   uint32_t depressed =
@@ -183,6 +188,7 @@ void _wl_keyboard_send_initial_state(struct vt_keyboard_t *kbd) {
 
 bool _wl_handle_global_keybind(struct vt_seat_t *seat, uint32_t keycode,
                                uint32_t state, uint32_t mods_mask) {
+  VT_PROFILE_SCOPE();
   if (state != VT_KEY_STATE_PRESSED)
     return false;
   xkb_keysym_t sym =
@@ -201,10 +207,12 @@ bool _wl_handle_global_keybind(struct vt_seat_t *seat, uint32_t keycode,
 }
 
 void _wl_handle_keybind_exit(struct vt_compositor_t *comp, void *user_data) {
+  VT_PROFILE_SCOPE();
   (void)user_data;
   comp->running = false;
 }
 void _wl_handle_keybind_term(struct vt_compositor_t *comp, void *user_data) {
+  VT_PROFILE_SCOPE();
   (void)user_data;
   char buf[128];
   // env scoped to the child: our own WAYLAND_DISPLAY may point at a parent
@@ -217,6 +225,7 @@ void _wl_handle_keybind_term(struct vt_compositor_t *comp, void *user_data) {
 
 void _wl_seat_get_pointer(struct wl_client   *client,
                           struct wl_resource *seat_res, uint32_t id) {
+  VT_PROFILE_SCOPE();
   struct vt_seat_t *seat = wl_resource_get_user_data(seat_res);
   if (!seat)
     return;
@@ -256,6 +265,7 @@ void _wl_seat_get_pointer(struct wl_client   *client,
 
 void _wl_seat_get_touch(struct wl_client *client, struct wl_resource *seat_res,
                         uint32_t id) {
+  VT_PROFILE_SCOPE();
   struct vt_seat_t *seat = wl_resource_get_user_data(seat_res);
   if (!seat)
     return;
@@ -275,6 +285,7 @@ static void _wl_seat_pointer_set_cursor(struct wl_client   *client,
                                         uint32_t            serial,
                                         struct wl_resource *surface,
                                         int32_t hotspot_x, int32_t hotspot_y) {
+  VT_PROFILE_SCOPE();
   (void)serial;
   struct vt_pointer_t *ptr = wl_resource_get_user_data(resource);
 
@@ -313,6 +324,7 @@ static void _wl_seat_pointer_set_cursor(struct wl_client   *client,
 
 void _wl_seat_get_keyboard(struct wl_client   *client,
                            struct wl_resource *seat_res, uint32_t id) {
+  VT_PROFILE_SCOPE();
   struct vt_seat_t *seat = wl_resource_get_user_data(seat_res);
   if (!seat)
     return;
@@ -359,17 +371,20 @@ void _wl_seat_get_keyboard(struct wl_client   *client,
 
 void _wl_seat_release_kb(struct wl_client   *client,
                          struct wl_resource *resource) {
+  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
 
 void _wl_seat_release_pointer(struct wl_client   *client,
                               struct wl_resource *resource) {
+  VT_PROFILE_SCOPE();
   (void)client;
   wl_resource_destroy(resource);
 }
 
 void _wl_keyboard_handle_resource_destroy(struct wl_resource *res) {
+  VT_PROFILE_SCOPE();
   struct vt_keyboard_t *kbd = wl_resource_get_user_data(res);
   if (!kbd || !kbd->seat)
     return;
@@ -383,6 +398,7 @@ void _wl_keyboard_handle_resource_destroy(struct wl_resource *res) {
 }
 
 void _wl_pointer_handle_resource_destroy(struct wl_resource *res) {
+  VT_PROFILE_SCOPE();
   struct vt_pointer_t *ptr = wl_resource_get_user_data(res);
   if (!ptr || !ptr->seat)
     return;
@@ -401,6 +417,7 @@ void _wl_pointer_handle_resource_destroy(struct wl_resource *res) {
 
 static void _surface_role_cursor_mapping_changed(struct vt_surface_t *surf,
                                                  bool                 mapped) {
+  VT_PROFILE_SCOPE();
   if (!surf || !surf->comp || !surf->comp->seat)
     return;
 
@@ -416,6 +433,7 @@ static void _surface_role_cursor_mapping_changed(struct vt_surface_t *surf,
 
 static bool _surface_role_cursor_apply(struct vt_surface_t        *surf,
                                        struct vt_content_update_t *cu) {
+  VT_PROFILE_SCOPE();
   if (!surf || !cu || !surf->comp || !surf->comp->seat)
     return false;
 
@@ -441,6 +459,7 @@ static bool _surface_role_cursor_apply(struct vt_surface_t        *surf,
 }
 
 struct vt_kb_modifier_states_t _wl_kb_get_mod_states(struct xkb_state *state) {
+  VT_PROFILE_SCOPE();
   uint32_t depressed =
       xkb_state_serialize_mods(state, XKB_STATE_MODS_DEPRESSED);
   uint32_t latched = xkb_state_serialize_mods(state, XKB_STATE_MODS_LATCHED);
@@ -457,6 +476,7 @@ struct vt_kb_modifier_states_t _wl_kb_get_mod_states(struct xkb_state *state) {
 }
 
 bool vt_seat_init(struct vt_seat_t *seat) {
+  VT_PROFILE_SCOPE();
   if (!seat || !seat->comp)
     return false;
 
@@ -516,6 +536,7 @@ bool vt_seat_init(struct vt_seat_t *seat) {
 
 void vt_seat_handle_key(struct vt_seat_t *seat, uint32_t keycode,
                         uint32_t state, uint32_t time) {
+  VT_PROFILE_SCOPE();
   if (!seat)
     return;
 
@@ -577,6 +598,7 @@ void vt_seat_handle_key(struct vt_seat_t *seat, uint32_t keycode,
 static void _send_pointer_enter(struct vt_pointer_t *ptr,
                                 struct vt_surface_t *surf, double sx,
                                 double sy) {
+  VT_PROFILE_SCOPE();
   if (!ptr || !ptr->res || !surf || !surf->res)
     return;
 
@@ -593,6 +615,7 @@ static void _send_pointer_enter(struct vt_pointer_t *ptr,
 
 static void _send_pointer_motion(struct vt_seat_t *seat, uint32_t time,
                                  double sx, double sy) {
+  VT_PROFILE_SCOPE();
   struct wl_client    *client = seat->ptr_focus.client;
   struct vt_surface_t *surf = seat->ptr_focus.surf;
 
@@ -617,6 +640,7 @@ static void _send_pointer_motion(struct vt_seat_t *seat, uint32_t time,
 }
 
 struct vt_seat_cursor_image_t vt_seat_get_cursor_image(struct vt_seat_t *seat) {
+  VT_PROFILE_SCOPE();
   struct vt_seat_cursor_image_t result = {0};
   if (!seat)
     return result;
@@ -637,6 +661,7 @@ struct vt_seat_cursor_image_t vt_seat_get_cursor_image(struct vt_seat_t *seat) {
 }
 
 static void _seat_damage_cursor_change(struct vt_seat_t *seat) {
+  VT_PROFILE_SCOPE();
   if (seat->cursor_box_valid)
     _seat_damage_software_cursor_box(seat, &seat->cursor_box);
 
@@ -656,12 +681,14 @@ static void _seat_damage_cursor_change(struct vt_seat_t *seat) {
 }
 
 static void _seat_refresh_cursor(struct vt_seat_t *seat) {
+  VT_PROFILE_SCOPE();
   _seat_damage_cursor_change(seat);
   _seat_update_cursor_image(seat);
   _seat_update_cursor_position(seat);
 }
 
 static void _seat_update_cursor_image(struct vt_seat_t *seat) {
+  VT_PROFILE_SCOPE();
   if (!seat)
     return;
 
@@ -680,6 +707,7 @@ static void _seat_update_cursor_image(struct vt_seat_t *seat) {
 }
 
 static void _seat_update_cursor_position(struct vt_seat_t *seat) {
+  VT_PROFILE_SCOPE();
   struct vt_output_t           *output;
   struct vt_seat_cursor_image_t image = vt_seat_get_cursor_image(seat);
 
@@ -698,6 +726,7 @@ static void _seat_update_cursor_position(struct vt_seat_t *seat) {
 }
 
 void vt_seat_refresh_cursor_outputs(struct vt_seat_t *seat) {
+  VT_PROFILE_SCOPE();
   if (!seat)
     return;
   _seat_update_cursor_image(seat);
@@ -706,6 +735,7 @@ void vt_seat_refresh_cursor_outputs(struct vt_seat_t *seat) {
 
 static void _seat_damage_software_cursor_box(struct vt_seat_t      *seat,
                                              const struct vt_box_t *box) {
+  VT_PROFILE_SCOPE();
   struct vt_output_t *output;
 
   wl_list_for_each(output, &seat->comp->outputs, link_global) {
@@ -728,6 +758,7 @@ static void _seat_damage_software_cursor_box(struct vt_seat_t      *seat,
 
 static bool _seat_constrain_pointer(struct vt_seat_t *seat, double *x,
                                     double *y) {
+  VT_PROFILE_SCOPE();
   if (!isfinite(*x) || !isfinite(*y))
     return false;
 
@@ -811,6 +842,7 @@ static bool _seat_constrain_pointer(struct vt_seat_t *seat, double *x,
 
 void vt_seat_handle_pointer_motion(struct vt_seat_t *seat, double x, double y,
                                    uint32_t time) {
+  VT_PROFILE_SCOPE();
   if (!seat || !_seat_constrain_pointer(seat, &x, &y))
     return;
 
@@ -846,6 +878,7 @@ void vt_seat_handle_pointer_motion(struct vt_seat_t *seat, double x, double y,
 
 static struct vt_surface_t *
 _get_first_focusable_surface(struct vt_surface_t *surf) {
+  VT_PROFILE_SCOPE();
   while (surf) {
     if (!surf->role.impl)
       return NULL;
@@ -889,6 +922,7 @@ _get_first_focusable_surface(struct vt_surface_t *surf) {
 
 void vt_seat_handle_pointer_button(struct vt_seat_t *seat, uint32_t button,
                                    bool pressed, uint32_t time) {
+  VT_PROFILE_SCOPE();
   if (!seat)
     return;
 
@@ -935,6 +969,7 @@ void vt_seat_handle_pointer_button(struct vt_seat_t *seat, uint32_t button,
 
 void vt_seat_handle_pointer_axis(struct vt_seat_t                     *seat,
                                  const struct vt_pointer_axis_event_t *event) {
+  VT_PROFILE_SCOPE();
   if (!seat || !event || !seat->ptr_focus.client || !seat->ptr_focus.surf ||
       !seat->ptr_focus.surf->res)
     return;
@@ -1012,6 +1047,7 @@ struct vt_keybind_t *vt_seat_add_global_keybind(
     struct vt_seat_t *seat, xkb_keysym_t sym, uint32_t mods,
     void (*callback)(struct vt_compositor_t *comp, void *user_data),
     void *user_data) {
+  VT_PROFILE_SCOPE();
   if (!seat || !seat->comp)
     return NULL;
   struct vt_keybind_t *keybind = VT_ALLOC(seat->comp, sizeof(*keybind));
@@ -1026,6 +1062,7 @@ struct vt_keybind_t *vt_seat_add_global_keybind(
 }
 
 void vt_seat_send_keyboard_leave(struct vt_seat_t *seat) {
+  VT_PROFILE_SCOPE();
   if (!seat)
     return;
 
@@ -1050,6 +1087,7 @@ void vt_seat_send_keyboard_leave(struct vt_seat_t *seat) {
 }
 
 static void _send_kb_enter(struct vt_seat_t *seat, struct vt_surface_t *surf) {
+  VT_PROFILE_SCOPE();
   if (!seat || !surf || !surf->res)
     return;
 
@@ -1085,6 +1123,7 @@ static void _send_kb_enter(struct vt_seat_t *seat, struct vt_surface_t *surf) {
 
 static struct vt_xdg_toplevel_t *
 _surface_get_xdg_toplevel(struct vt_surface_t *surf) {
+  VT_PROFILE_SCOPE();
   if (!surf || !vt_surface_has_role(surf, VT_SURFACE_ROLE_XDG_TOPLEVEL))
     return NULL;
 
@@ -1097,6 +1136,7 @@ _surface_get_xdg_toplevel(struct vt_surface_t *surf) {
 
 void vt_seat_set_keyboard_focus(struct vt_seat_t    *seat,
                                 struct vt_surface_t *surf) {
+  VT_PROFILE_SCOPE();
 
   if (!seat)
     return;
@@ -1137,6 +1177,7 @@ void vt_seat_set_keyboard_focus(struct vt_seat_t    *seat,
 void vt_seat_set_pointer_focus(struct vt_seat_t    *seat,
                                struct vt_surface_t *surf, double sx,
                                double sy) {
+  VT_PROFILE_SCOPE();
   if (!seat)
     return;
   struct vt_surface_t *old = seat->ptr_focus.surf;
@@ -1193,6 +1234,7 @@ void vt_seat_set_pointer_focus(struct vt_seat_t    *seat,
 }
 
 void vt_seat_bind_global_keybinds(struct vt_seat_t *seat) {
+  VT_PROFILE_SCOPE();
   if (!seat)
     return;
   struct vt_kb_modifiers_t mods = seat->comp->input_backend->mods;
@@ -1204,6 +1246,7 @@ void vt_seat_bind_global_keybinds(struct vt_seat_t *seat) {
 
 void vt_seat_handle_surface_unmapped(struct vt_seat_t    *seat,
                                      struct vt_surface_t *surf) {
+  VT_PROFILE_SCOPE();
   if (!seat || !surf)
     return;
 
@@ -1211,6 +1254,7 @@ void vt_seat_handle_surface_unmapped(struct vt_seat_t    *seat,
     vt_seat_set_keyboard_focus(seat, NULL);
 }
 void vt_seat_repick_pointer_focus(struct vt_seat_t *seat) {
+  VT_PROFILE_SCOPE();
   struct vt_surface_t *surf =
       vt_comp_pick_surface(seat->comp, seat->pointer_x, seat->pointer_y);
 
@@ -1231,6 +1275,7 @@ void vt_seat_repick_pointer_focus(struct vt_seat_t *seat) {
 }
 
 bool vt_seat_terminate(struct vt_seat_t *seat) {
+  VT_PROFILE_SCOPE();
   if (!seat)
     return false;
   if (seat->global)
@@ -1242,6 +1287,7 @@ bool vt_seat_terminate(struct vt_seat_t *seat) {
 
 /* Notify existing keyboards when a nested host changes its keymap. */
 void vt_seat_refresh_keymap(struct vt_seat_t *seat) {
+  VT_PROFILE_SCOPE();
   struct vt_keyboard_t *kbd;
   wl_list_for_each(kbd, &seat->keyboards, link) {
     int fd = _wl_create_keymap_fd(kbd);

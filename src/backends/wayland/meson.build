@@ -57,6 +57,7 @@ shared_module(
     dep_wayland_client,
     dep_pixman,
     dep_runara_headers,
+    dep_profiling_headers,
   ],
   include_directories: vortex_inc,
   install: true,

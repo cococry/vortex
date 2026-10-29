@@ -20,6 +20,7 @@
  * SOFTWARE.
  */
 
+#include "src/core/profiling.h"
 #include "focus_policy.h"
 #include "src/core/surface.h"
 #include "src/protocols/xdg_shell.h"
@@ -31,6 +32,7 @@ static void _focus_stack_remove(struct vt_compositor_t *comp,
 
 static void _focus_stack_add(struct vt_compositor_t *comp,
                              struct vt_surface_t    *surf) {
+  VT_PROFILE_SCOPE();
   if (!comp || !surf)
     return;
 
@@ -41,6 +43,7 @@ static void _focus_stack_add(struct vt_compositor_t *comp,
 
 static void _focus_stack_remove(struct vt_compositor_t *comp,
                                 struct vt_surface_t    *surf) {
+  VT_PROFILE_SCOPE();
   if (!comp || !surf)
     return;
 
@@ -52,6 +55,7 @@ static void _focus_stack_remove(struct vt_compositor_t *comp,
 }
 
 struct vt_surface_t *_focus_stack_pop(struct vt_compositor_t *comp) {
+  VT_PROFILE_SCOPE();
   if (!comp || !comp->seat)
     return NULL;
 
@@ -67,6 +71,7 @@ struct vt_surface_t *_focus_stack_pop(struct vt_compositor_t *comp) {
 
 void vt_focus_policy_mapped(struct vt_compositor_t *comp,
                             struct vt_surface_t    *surf) {
+  VT_PROFILE_SCOPE();
   if (!comp || !surf || !comp->seat)
     return;
 
@@ -83,6 +88,7 @@ void vt_focus_policy_mapped(struct vt_compositor_t *comp,
 
 void vt_focus_policy_unmapped(struct vt_compositor_t *comp,
                               struct vt_surface_t    *surf) {
+  VT_PROFILE_SCOPE();
   if (!comp || !surf || !comp->seat)
     return;
 
