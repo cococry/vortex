@@ -25,7 +25,7 @@ jobs:
           pacman -S --noconfirm --needed \
             mesa libglvnd \
             vulkan-headers vulkan-icd-loader \
-            glslang python
+            glslang python shaderc
 
       - name: Install vortex dependencies
         run: |
