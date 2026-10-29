@@ -30,7 +30,8 @@ struct vt_buffer_t;
 struct vt_dmabuf_attr_t;
 
 enum vt_rendering_backend_t {
-  VT_RENDERING_BACKEND_EGL_OPENGL = 0,
+  VT_RENDERING_BACKEND_INVALID = 0,
+  VT_RENDERING_BACKEND_EGL_OPENGL, 
   VT_RENDERING_BACKEND_VULKAN,
 };
 

@@ -109,6 +109,11 @@ static const struct wl_region_interface region_impl = {
     .subtract = _vt_comp_wl_region_subtract,
 };
 
+struct vt_cli_flag_vals_t {
+  const char *backend_str;
+  enum vt_rendering_backend_t selected_renderer;
+};
+
 static void *_vt_comp_dl_handle = NULL;
 
 void _vt_comp_commit_handler(void *data) {
@@ -192,6 +197,40 @@ static bool _flag_cmp(const char *flag, const char *lng, const char *shrt) {
   return strcmp(flag, lng) == 0 || strcmp(flag, shrt) == 0;
 }
 
+static enum vt_rendering_backend_t
+_get_render_backend_from_str(const char *str) {
+  if (!str)
+    return VT_RENDERING_BACKEND_INVALID;
+#if VT_HAS_OPENGL
+  if (strcmp(str, "opengl") == 0)
+    return VT_RENDERING_BACKEND_EGL_OPENGL;
+#endif
+#if VT_HAS_VULKAN
+  if (strcmp(str, "vulkan") == 0)
+    return VT_RENDERING_BACKEND_VULKAN;
+#endif
+  return VT_RENDERING_BACKEND_INVALID;
+}
+
+static char **_get_valid_renderers(size_t *count_out) {
+  if(!count_out) return NULL;
+  *count_out = 0;
+
+  char **renderers = malloc(sizeof(char *) * 2);
+  if (!renderers)
+    return NULL;
+
+  size_t n = 0;
+#if VT_HAS_VULKAN
+  renderers[n++] = strdup("vulkan");
+#endif
+#if VT_HAS_OPENGL
+  renderers[n++] = strdup("opengl");
+#endif
+  *count_out = n;
+  return renderers;
+}
+
 static char **_scan_valid_backends(size_t *count_out) {
   if (count_out)
     *count_out = 0;
@@ -254,13 +293,16 @@ static char **_scan_valid_backends(size_t *count_out) {
   return list;
 }
 
-const char *_vt_comp_handle_cmd_flags(struct vt_compositor_t *c, int argc,
-                                      char **argv) {
-  if (!c || argc < 0 || (argc > 0 && !argv))
-    return NULL;
+bool _vt_comp_handle_cmd_flags(struct vt_compositor_t *c, int argc,
+                                      char **argv, struct vt_cli_flag_vals_t* o_vals) {
+  if (!c || argc < 0 || (argc > 0 && !argv) || !o_vals)
+    return false;
+
+  *o_vals = (struct vt_cli_flag_vals_t){0};
 
   const char *selected_backend = NULL;
 
+  enum vt_rendering_backend_t selected_renderer = VT_RENDERING_BACKEND_INVALID;
   if (argc > 1) {
     for (int i = 1; i < argc; i++) {
       char *flag = argv[i];
@@ -317,6 +359,46 @@ const char *_vt_comp_handle_cmd_flags(struct vt_compositor_t *c, int argc,
           free(valid_backends[j]);
         free(valid_backends);
         selected_backend = backend_str;
+      } else if (_flag_cmp(flag, "-r", "--renderer")) {
+        if (i + 1 >= argc) {
+          VT_ERROR(c->log, "Missing value for %s", flag);
+          exit(1);
+        }
+        char *render_str = argv[++i];
+        if (strlen(render_str) > 31)
+          exit(1);
+
+        size_t n_valid_renderers = 0;
+        char** valid_renderers = _get_valid_renderers(&n_valid_renderers);
+        if(!valid_renderers) {
+          VT_ERROR(c->log, "Internal error");
+          exit(1);
+        }
+
+        for(size_t i = 0; i < n_valid_renderers; i++) {
+          if(strcmp(render_str, valid_renderers[i]) == 0) {
+            selected_renderer = _get_render_backend_from_str(render_str);
+            assert(selected_renderer != VT_RENDERING_BACKEND_INVALID);
+            break;
+          }
+        }
+        if(selected_renderer == VT_RENDERING_BACKEND_INVALID) {
+          VT_ERROR(c->log, "Invalid compositor renderer: '%s'", render_str);
+          fprintf(stderr, " Valid options for backends are: [ ");
+          for (size_t j = 0; j < n_valid_renderers; j++)
+            fprintf(stderr, "%s%s ", valid_renderers[j], j != n_valid_renderers - 1 ? "," : "");
+          fprintf(stderr, "]\n");
+          for (size_t j = 0; j < n_valid_renderers; j++) {
+            free(valid_renderers[j]);
+          }
+          free(valid_renderers);
+          exit(1);
+        }
+
+        for (size_t j = 0; j < n_valid_renderers; j++) {
+          free(valid_renderers[j]);
+        }
+        free(valid_renderers);
       } else if (_flag_cmp(flag, "-bp", "--backend-path")) {
         if (i + 1 >= argc) {
           VT_ERROR(c->log, "Missing value for %s", flag);
@@ -373,7 +455,23 @@ const char *_vt_comp_handle_cmd_flags(struct vt_compositor_t *c, int argc,
       }
     }
   }
-  return selected_backend;
+
+  if (selected_renderer == VT_RENDERING_BACKEND_INVALID) {
+#if VT_HAS_VULKAN
+    selected_renderer = VT_RENDERING_BACKEND_VULKAN;
+#elif VT_HAS_OPENGL
+    selected_renderer = VT_RENDERING_BACKEND_EGL_OPENGL;
+#else
+    VT_ERROR(c->log, "Vortex has not built any GPU renderers. Exiting.")
+    exit(1);
+#endif
+  }
+
+  *o_vals = (struct vt_cli_flag_vals_t){
+    .backend_str = selected_backend,
+    .selected_renderer = selected_renderer 
+  };
+  return true;
 }
 
 void _vt_comp_log_help(void) {
@@ -393,16 +491,31 @@ void _vt_comp_log_help(void) {
          "'linux-dmabuf', 'linux-dmabuf-explicit-sync");
   printf("%-35s %s", "-b, --backend [val]",
          "Specifies the sink backend of the compositor.");
+  {
   printf(" Valid options for backends are: [ ");
   size_t n = 0;
   char **valid_backends = _scan_valid_backends(&n);
   for (size_t i = 0; i < n; i++)
     printf("'%s'%s ", valid_backends[i], i != n - 1 ? "," : "");
   printf("]\n");
-
   for (size_t i = 0; i < n; i++)
     free(valid_backends[i]);
   free(valid_backends);
+  }
+
+  printf("%-35s %s", "-r, --renderer[val]",
+         "Specifies the rendering backend of the compositor.");
+  printf(" Valid options for renderers are: [ ");
+  {
+    size_t n = 0;
+    char **valid_renderers = _get_valid_renderers(&n);
+    for (size_t i = 0; i < n; i++)
+      printf("'%s'%s ", valid_renderers[i], i != n - 1 ? "," : "");
+    printf("]\n");
+    for (size_t i = 0; i < n; i++)
+      free(valid_renderers[i]);
+    free(valid_renderers);
+  }
 
   printf("%-35s %s\n", "-bp, --backend-path [val]",
          "Specifies the path of the .so file to load as the compositor's sink "
@@ -768,12 +881,6 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
 
   wl_list_init(&c->renderer->buffer_attachments);
 
-#if VT_HAS_OPENGL
-  vt_renderer_implement(c->renderer, VT_RENDERING_BACKEND_EGL_OPENGL);
-#elif VT_HAS_VULKAN
-  vt_renderer_implement(c->renderer, VT_RENDERING_BACKEND_VULKAN);
-#endif
-
   c->input_backend = VT_ALLOC(c, sizeof(*c->input_backend));
   if (!c->input_backend)
     return false;
@@ -789,21 +896,29 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
   c->have_proto_dmabuf = true;
   c->have_proto_dmabuf_explicit_sync = true;
 
-  const char *backend_str = _vt_comp_handle_cmd_flags(c, argc, argv);
-  if (!backend_str) {
-    if (getenv("WAYLAND_DISPLAY"))
-      backend_str = "wl";
-    else if (getenv("DISPLAY"))
-      backend_str = "x11";
-    else
-      backend_str = "drm";
+  struct vt_cli_flag_vals_t flag_vals = {0};
+  if(!_vt_comp_handle_cmd_flags(c, argc, argv, &flag_vals)) {
+    exit(1);
   }
 
-  if ((strcmp(backend_str, "wl") == 0 || strcmp(backend_str, "x11") == 0) &&
+  vt_renderer_implement(c->renderer, flag_vals.selected_renderer);
+  
+
+  if (!flag_vals.backend_str) {
+    if (getenv("WAYLAND_DISPLAY"))
+      flag_vals.backend_str = "wl";
+    else if (getenv("DISPLAY"))
+      flag_vals.backend_str = "x11";
+    else
+      flag_vals.backend_str = "drm";
+  }
+
+  if ((strcmp(flag_vals.backend_str, "wl") == 0 ||
+       strcmp(flag_vals.backend_str, "x11") == 0) &&
       !c->n_virtual_outputs)
     c->n_virtual_outputs = 1;
 
-  _vt_comp_load_backend(c, backend_str, c->_cmd_line_backend_path);
+  _vt_comp_load_backend(c, flag_vals.backend_str, c->_cmd_line_backend_path);
 
   if (!c->backend->impl.init) {
     VT_ERROR(c->log, "Compositor backend does not provide an init function.");

@@ -22,6 +22,7 @@
 
 #include "renderer.h"
 #include "config.h"
+#include "core/util.h"
 
 #if VT_HAS_OPENGL
 #include "gl/egl_gl.h"
@@ -30,6 +31,8 @@
 #if VT_HAS_VULKAN
 #include "vk/vulkan.h"
 #endif
+
+#define _SUBSYS_NAME "RENDERER"
 
 void vt_renderer_implement(struct vt_renderer_t       *renderer,
                            enum vt_rendering_backend_t backend) {
@@ -61,6 +64,8 @@ void vt_renderer_implement(struct vt_renderer_t       *renderer,
         .end_frame = renderer_end_frame_egl,
         .end_scene = renderer_end_scene_egl,
         .destroy = renderer_destroy_egl};
+    VT_INFO(renderer->comp->log,
+            "Implemented Vulkan renderer (Runara v4.0.1, OpenGL 3.3 backend).");
   }
 #endif
 #if VT_HAS_VULKAN
@@ -92,6 +97,8 @@ void vt_renderer_implement(struct vt_renderer_t       *renderer,
         .end_frame = renderer_end_frame_vk,
         .end_scene = renderer_end_scene_vk,
         .destroy = renderer_destroy_vk};
+    VT_INFO(renderer->comp->log,
+            "Implemented OpenGL renderer (Runara v4.0.1, Vulkan 1.0 backend).");
   }
 #elif !VT_HAS_OPENGL
 #error "No renderer is enabled."

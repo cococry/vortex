@@ -112,8 +112,12 @@ vortex [option:s] (value:s)
 | `-q, --quiet` | Run in quiet mode (no logging) |
 | `-vo, --virtual-outputs [val]` | Specify the number of virtual outputs (windows) in nested mode |
 | `-b, --backend [val]` | Specify the compositor’s sink backend.<br>Valid options: `drm`, `wl`, `x11`. Example:<br>`vortex -b drm` |
+| `-r, --renderer [val]` | Specify the compositor’s renderer.<br>Valid options: `opengl`, `vulkan`. Example:<br>`vortex -r ` |
 | `-bp, --backend-path [val]` | Specify the **path to a `.so` file** to load as a custom sink backend |
 | `-expt,  --exclude-protocol [val(s)]` | Specify the optional protocols (space seperated) you wish to not support during runtime |
+
+> [!NOTE]
+> When no renderer is specified, OpenGL (3.3) is used by default.  
 
 ## Sink Backend Configuration
 
