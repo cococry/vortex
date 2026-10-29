@@ -45,7 +45,9 @@ enum vt_cursor_mode_t {
 struct vt_output_render_buffer_t {
   /* we borrow the backend's fds for the lifetime of the output targets. */
   struct vt_dmabuf_attr_t attr;
-  /* we reserve busy buffers through scanout and mark completed renders ready.
+  /* we own this fd until reuse or teardown, with -1 for completed rendering. */
+  int render_fence_fd;
+  /* we reserve busy buffers through scanout and mark submitted renders ready.
    */
   bool busy, ready;
 };

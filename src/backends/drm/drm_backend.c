@@ -22,14 +22,15 @@
 
 #define _GNU_SOURCE
 
-#include "src/core/profiling.h"
 #include "core/core_types.h"
+#include "src/core/profiling.h"
 #include <drm/drm_fourcc.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <gbm.h>
 #include <inttypes.h>
 #include <libinput.h>
+#include <linux/dma-buf.h>
 #include <linux/kd.h>
 #include <linux/vt.h>
 #include <poll.h>
@@ -1654,6 +1655,17 @@ _drm_acquire_render_buffer(struct vt_output_t *output) {
     struct vt_output_render_buffer_t *buffer = &output->render_buffers[index];
 
     if (!buffer->busy) {
+      if (buffer->render_fence_fd >= 0) {
+        struct pollfd fence = {.fd = buffer->render_fence_fd, .events = POLLIN};
+
+        /* we only reuse a failed commit's slot after rendering signals. */
+        if (poll(&fence, 1, 0) <= 0 || !(fence.revents & POLLIN))
+          continue;
+
+        close(buffer->render_fence_fd);
+        buffer->render_fence_fd = -1;
+      }
+
       state->render_next = (index + 1) % output->n_render_buffers;
       buffer->ready = false;
       return buffer;
@@ -1667,6 +1679,9 @@ static void _drm_render_pool_finish(struct vt_drm_output_state_t *state) {
   for (unsigned i = 0; i < 3; ++i) {
     struct vt_dmabuf_attr_t *attr = &state->render_buffers[i].attr;
 
+    if (state->render_bos[i] && state->render_buffers[i].render_fence_fd >= 0)
+      close(state->render_buffers[i].render_fence_fd);
+
     for (int p = 0; p < attr->num_planes; ++p) {
       if (attr->fds[p] >= 0)
         close(attr->fds[p]);
@@ -1679,6 +1694,7 @@ static void _drm_render_pool_finish(struct vt_drm_output_state_t *state) {
 
     state->render_bos[i] = NULL;
     memset(&state->render_buffers[i], 0, sizeof(state->render_buffers[i]));
+    state->render_buffers[i].render_fence_fd = -1;
   }
 
   state->base->render_buffers = NULL;
@@ -1692,6 +1708,9 @@ static bool _drm_render_pool_create(struct vt_drm_output_state_t *state) {
   struct vt_renderer_t          *renderer = drm->comp->renderer;
   struct wl_array                formats;
   wl_array_init(&formats);
+
+  for (unsigned i = 0; i < 3; ++i)
+    state->render_buffers[i].render_fence_fd = -1;
 
   /* vulkan supplies renderable format layouts, we filters them against the
    * primary plane’s scanout capabilities. GBM then chooses a layout from that
@@ -2827,6 +2846,31 @@ _drm_output_add_composition_layer(struct vt_drm_backend_state_t *drm,
     if (!buffer || !buffer->ready || buffer->busy)
       return false;
 
+    int fence_fd = buffer->render_fence_fd;
+
+    if (fence_fd >= 0 &&
+        (!drm->impl->atomic ||
+         !drm_output->crtc->plane_primary->props[VT_DRM_PLANE_IN_FENCE_FD])) {
+      /* we publish the render fence for kms paths using implicit
+       * synchronization when there is no hardware/implementation support for
+       * IN_FENCE_FD. */
+      const struct dma_buf_import_sync_file sync = {
+          .flags = DMA_BUF_SYNC_WRITE,
+          .fd = fence_fd,
+      };
+
+      for (int p = 0; p < buffer->attr.num_planes; ++p) {
+        if (ioctl(buffer->attr.fds[p], DMA_BUF_IOCTL_IMPORT_SYNC_FILE, &sync) <
+            0) {
+          VT_ERROR(drm->comp->log, "cannot attach output render fence: %s.",
+                   strerror(errno));
+          return false;
+        }
+      }
+
+      fence_fd = -1;
+    }
+
     struct vt_drm_layer_state_t *layer =
         wl_array_add(&drm_output->layer_plan, sizeof(*layer));
 
@@ -2843,7 +2887,7 @@ _drm_output_add_composition_layer(struct vt_drm_backend_state_t *drm,
         .has_fb = true,
         .pool_buffer = buffer,
         .role = VT_DRM_LAYER_COMPOSITED_SCENE,
-        .acquire_fence_fd = -1,
+        .acquire_fence_fd = fence_fd,
         .src = {.width = output->width, .height = output->height},
         .dst = {.width = output->width, .height = output->height},
     };

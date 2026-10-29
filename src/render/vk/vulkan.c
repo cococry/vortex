@@ -877,6 +877,7 @@ static bool _vk_create_renderer(struct vt_renderer_t      *r,
       .user = r,
       .instance_extensions = vk->external ? NULL : _vk_instance_extensions,
       .enable_dmabuf_import = true,
+      .enable_render_fence_export = vk->external,
   };
 
   struct rn_init_options_t init = {
@@ -1429,17 +1430,21 @@ void renderer_end_scene_vk(struct vt_renderer_t *r,
   vk->active = false;
 
   if (ended && vk->external) {
-    ended = _vk_runara_check(r, rn_vk_wait_for_render(vk->runara),
-                             "rn_vk_wait_for_render(scanout)");
+    ended = output->render_buffer &&
+            _vk_runara_check(
+                r,
+                rn_vk_export_render_fence(
+                    vk->runara, &output->render_buffer->render_fence_fd),
+                "rn_vk_export_render_fence");
 
-    /* if we are in external mode and we successfully completed a draw, the render buffer is
-     * ready to be scanned out by DRM */
-    if (ended && output->render_buffer)
+    if (ended)
       output->render_buffer->ready = true;
   }
 
-  if (!ended)
+  if (!ended) {
     vk->failed = true;
+    r->comp->running = false;
+  }
 }
 
 void renderer_end_frame_vk(struct vt_renderer_t *r, struct vt_output_t *output,
