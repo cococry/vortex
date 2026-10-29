@@ -23,7 +23,7 @@ jobs:
       - name: Install runara dependencies
         run: |
           pacman -S --noconfirm --needed \
-            cglm mesa libglvnd \
+            mesa libglvnd \
             vulkan-headers vulkan-icd-loader \
             glslang python libplacebo
 
