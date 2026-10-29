@@ -25,7 +25,7 @@ jobs:
           pacman -S --noconfirm --needed \
             cglm mesa libglvnd \
             vulkan-headers vulkan-icd-loader \
-            shaderc glslang python
+            glslang python libplacebo
 
       - name: Install vortex dependencies
         run: |
