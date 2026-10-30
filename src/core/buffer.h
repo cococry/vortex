@@ -99,6 +99,8 @@ struct vt_buffer_use_t {
 
   int acquire_fence_fd;
   int release_fence_fd;
+  /* used to retain readiness for this use */ 
+  bool acquire_fence_signaled;
 
   struct vt_buffer_acquire_source_t *acquire_source;
 };

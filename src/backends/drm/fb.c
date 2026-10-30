@@ -27,10 +27,36 @@
 #include <drm/drm_fourcc.h>
 #include <errno.h>
 #include <inttypes.h>
+#include <stdlib.h>
 #include <string.h>
 #include <xf86drmMode.h>
 
 #define _SUBSYS_NAME "DRM"
+
+static void _drm_fb_attachment_destroy(struct vt_buffer_t *buf,
+                                       const void *owner, void *data) {
+  (void)buf;
+
+  drm_fb_finish((struct vt_drm_backend_state_t *)owner, data);
+  free(data);
+}
+
+static const struct vt_buffer_attachment_implementation_t fb_attachment_impl = {
+    .destroy = _drm_fb_attachment_destroy,
+};
+
+void drm_fb_cache_finish(struct vt_drm_backend_state_t *drm) {
+  struct vt_buffer_attachment_t *attachment, *next;
+
+  wl_list_for_each_safe(attachment, next, &drm->framebuffer_attachments,
+                        link_owner) {
+
+    wl_list_remove(&attachment->link_owner);
+    wl_list_remove(&attachment->link_buf);
+    _drm_fb_attachment_destroy(attachment->buf, drm, attachment->data);
+    free(attachment);
+  }
+}
 
 static bool _drm_fb_add(struct vt_drm_backend_state_t *drm,
                         struct vt_drm_framebuffer_t *fb, uint32_t width,
@@ -77,7 +103,7 @@ static bool _drm_fb_add(struct vt_drm_backend_state_t *drm,
   return true;
 }
 
-bool drm_fb_init_from_buffer(struct vt_drm_backend_state_t *drm,
+static bool _drm_fb_import_buffer(struct vt_drm_backend_state_t *drm,
                              struct vt_drm_framebuffer_t   *fb,
                              struct vt_buffer_t            *buf) {
   VT_PROFILE_SCOPE();
@@ -123,6 +149,53 @@ bool drm_fb_init_from_buffer(struct vt_drm_backend_state_t *drm,
   memcpy(fb->handles, handles, sizeof(handles));
   fb->owns_handles = true;
   fb->buf = vt_buffer_ref(buf);
+
+  return true;
+}
+
+bool drm_fb_init_from_buffer(struct vt_drm_backend_state_t *drm,
+                             struct vt_drm_framebuffer_t *fb,
+                             struct vt_buffer_t *buf) {
+  VT_PROFILE_SCOPE();
+
+  if (!drm || !fb || !buf)
+    return false;
+
+  memset(fb, 0, sizeof(*fb));
+
+  struct vt_buffer_attachment_t *attachment =
+      vt_buffer_find_attachment(buf, drm, &fb_attachment_impl);
+
+  if (!attachment) {
+
+    struct vt_drm_framebuffer_t *imported = calloc(1, sizeof(*imported));
+
+    if (!imported)
+      return false;
+
+    if (!_drm_fb_import_buffer(drm, imported, buf)) {
+
+      free(imported);
+      return false;
+    }
+
+    attachment = vt_buffer_add_attachment(buf, drm, imported,
+                                          &fb_attachment_impl);
+
+    if (!attachment) {
+
+      drm_fb_finish(drm, imported);
+      free(imported);
+      return false;
+    }
+
+    vt_buffer_unref(&imported->buf);
+    wl_list_insert(&drm->framebuffer_attachments, &attachment->link_owner);
+  }
+
+  *fb = *(struct vt_drm_framebuffer_t *)attachment->data;
+  fb->buf = vt_buffer_ref(buf);
+  fb->cached = true;
 
   return true;
 }
@@ -190,6 +263,13 @@ void drm_fb_finish(struct vt_drm_backend_state_t *drm,
   VT_PROFILE_SCOPE();
   if (!drm || !fb)
     return;
+
+  if (fb->cached) {
+
+    vt_buffer_unref(&fb->buf);
+    memset(fb, 0, sizeof(*fb));
+    return;
+  }
 
   if (fb->id != 0)
     drmModeRmFB(drm->drm_fd, fb->id);

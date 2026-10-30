@@ -750,13 +750,18 @@ static bool _drm_scanout_fence_ready(struct vt_surface_t    *surface,
                                      struct vt_buffer_use_t *use) {
   VT_PROFILE_SCOPE();
   int fd = vt_buffer_use_acquire_fence(use);
-  if (fd >= 0) {
+  if (fd >= 0 && !use->acquire_fence_signaled) {
+
     struct pollfd pfd = {.fd = fd, .events = POLLIN};
-    if (poll(&pfd, 1, 0) <= 0) {
+
+    if (poll(&pfd, 1, 0) <= 0 || !(pfd.revents & POLLIN)) {
       if (surface)
         surface->scanout_backoff = VT_DRM_SCANOUT_BACKOFF_FRAMES;
       return false;
     }
+
+    /* we only poll again when a new buffer use brings a new fence. */
+    use->acquire_fence_signaled = true;
   }
 
   if (surface && surface->scanout_backoff > 0) {
@@ -914,6 +919,7 @@ static bool _drm_init_for_device(struct vt_compositor_t        *comp,
   drm->impl = NULL;
 
   wl_list_init(&drm->outputs);
+  wl_list_init(&drm->framebuffer_attachments);
   wl_array_init(&drm->crtcs);
   wl_array_init(&drm->sampling_formats);
   wl_array_init(&drm->planes);
@@ -2661,6 +2667,8 @@ static bool _drm_terminate_for_device(struct vt_drm_backend_state_t *drm) {
     drm->event_source = NULL;
   }
 
+  drm_fb_cache_finish(drm);
+
   if (drm->gbm_dev) {
     gbm_device_destroy(drm->gbm_dev);
     drm->gbm_dev = NULL;
@@ -3519,39 +3527,6 @@ bool backend_clear_buffer_drm(struct vt_backend_t *backend,
 }
 
 static bool
-_drm_output_can_scanout_dmabuf(struct vt_drm_backend_state_t *drm,
-                               struct vt_drm_output_state_t  *output,
-                               const struct vt_dmabuf_attr_t *attr) {
-  VT_PROFILE_SCOPE();
-  assert(drm && output && output->crtc && attr);
-
-  uint32_t crtc_mask = 1u << output->crtc->index;
-
-  struct vt_drm_plane_t *plane;
-  wl_array_for_each(plane, &drm->planes) {
-    if (!(plane->possible_crtcs & crtc_mask))
-      continue;
-
-    if (plane->type == DRM_PLANE_TYPE_CURSOR)
-      continue;
-
-    struct vt_drm_format_t *format;
-    wl_array_for_each(format, &plane->formats) {
-      if (format->format != attr->format)
-        continue;
-
-      struct vt_drm_format_modifier_t *modifier;
-      wl_array_for_each(modifier, &format->mods) {
-        if (modifier->mod == attr->mod)
-          return true;
-      }
-    }
-  }
-
-  return false;
-}
-
-static bool
 _drm_prepare_test_composition_layer(struct vt_drm_backend_state_t *drm,
                                     struct vt_drm_output_state_t  *drm_output,
                                     struct vt_output_t            *output) {
@@ -3717,8 +3692,6 @@ static bool _drm_test_output_layers(struct vt_backend_t            *backend,
 
     test->liftoff_layer = liftoff_layer;
 
-    struct vt_dmabuf_attr_t attr = {0};
-
     if (drm->no_direct_scanout ||
         output->cursor_mode != VT_CURSOR_MODE_HARDWARE)
       goto composited;
@@ -3730,33 +3703,8 @@ static bool _drm_test_output_layers(struct vt_backend_t            *backend,
     if (use && !_drm_scanout_fence_ready(layer->surface, use))
       goto composited;
 
-    /* 1. Prove layer has a DMABUF */
-    if (!vt_buffer_get_dmabuf(buf, &attr)) {
-      VT_TRACE(backend->comp->log,
-               "layer %zu surface=%p rejected from liftoff test: "
-               "buffer is not a DMABUF.",
-               i, (void *)layer->surface);
-      goto composited;
-    }
-
-    /* 2. Prove this output can scan out the layer's DMABUF */
-    if (!_drm_output_can_scanout_dmabuf(drm, drm_output, &attr)) {
-      const char *format_name = drmGetFormatName(attr.format);
-      char        mod_str[256];
-
-      _modifier_to_str(attr.mod, mod_str, sizeof(mod_str));
-
-      VT_TRACE(backend->comp->log,
-               "layer %zu surface=%p rejected from liftoff test: "
-               "format=%s (%4.4s) modifier=%s "
-               "is not scanout-capable on this output.",
-               i, (void *)layer->surface, format_name ? format_name : "UNKNOWN",
-               _fourcc_to_str(attr.format), mod_str);
-
-      goto composited;
-    }
-
-    /* 3. Prove the source geometry of the layer is valid */
+    /* we leave format and plane eligibility to liftoff, but reject invalid
+     * source geometry before setting plane properties. */
     if (layer->src.x < 0 || layer->src.y < 0 || layer->src.width == 0 ||
         layer->src.height == 0) {
       VT_TRACE(backend->comp->log,
@@ -3767,22 +3715,20 @@ static bool _drm_test_output_layers(struct vt_backend_t            *backend,
       goto composited;
     }
 
-    /* 4. Prove the source geometry is contained within the DMABUF of the layer
-     */
+    /* check bounds using the immutable buffer dimensions. */
     if ((uint64_t)layer->src.x + (uint64_t)layer->src.width >
-            (uint64_t)attr.width ||
+            (uint64_t)buf->width ||
         (uint64_t)layer->src.y + (uint64_t)layer->src.height >
-            (uint64_t)attr.height) {
+            (uint64_t)buf->height) {
       VT_TRACE(backend->comp->log,
                "layer %zu surface=%p rejected from liftoff test: "
                "source [%d,%d %ux%u] exceeds buffer bounds %ux%u.",
                i, (void *)layer->surface, layer->src.x, layer->src.y,
-               layer->src.width, layer->src.height, attr.width, attr.height);
+               layer->src.width, layer->src.height, buf->width, buf->height);
       goto composited;
     }
 
-    /* 5. Prove that this output can satisfy the need for a release fence
-     */
+    /* we require an output fence when the release contract needs one. */
     if (use && use->release && vt_buffer_release_needs_fence(use->release) &&
         drm_output->crtc->props[VT_DRM_CRTC_OUT_FENCE_PTR] == 0) {
       VT_TRACE(backend->comp->log,
@@ -3793,14 +3739,12 @@ static bool _drm_test_output_layers(struct vt_backend_t            *backend,
       goto composited;
     }
 
-    /* 6. Prove that we can get a PRIME fb handle from the layer's buffer
-     */
+    /* This reuses the buffer attachment after its first successful import. */
     if (!drm_fb_init_from_buffer(drm, &test->fb, buf)) {
       VT_TRACE(backend->comp->log,
                "layer %zu surface=%p rejected from liftoff test: "
-               "failed to import buffer as KMS framebuffer "
-               "(format=0x%08" PRIx32 " modifier=0x%016" PRIx64 ").",
-               i, (void *)layer->surface, attr.format, attr.mod);
+               "failed to import buffer as KMS framebuffer.",
+               i, (void *)layer->surface);
       goto composited;
     }
 

@@ -37,3 +37,5 @@ bool drm_fb_init_from_buffer(struct vt_drm_backend_state_t *drm,
 
 void drm_fb_finish(struct vt_drm_backend_state_t *drm,
                    struct vt_drm_framebuffer_t   *fb);
+
+void drm_fb_cache_finish(struct vt_drm_backend_state_t *drm);

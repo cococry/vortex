@@ -46,6 +46,8 @@ struct vt_drm_framebuffer_t {
 
   uint32_t handles[4];
   bool     owns_handles;
+  /* we borrow the attachment's KMS resources while retaining its buffer. */
+  bool     cached;
 
   struct gbm_bo      *_gbm_bo;
   struct gbm_surface *_gbm_surface;
@@ -156,6 +158,7 @@ struct vt_drm_backend_state_t {
   struct gbm_device *gbm_dev;
 
   struct wl_list outputs;
+  struct wl_list framebuffer_attachments;
 
   struct vt_compositor_t *comp;
   struct gbm_device      *native_handle;
