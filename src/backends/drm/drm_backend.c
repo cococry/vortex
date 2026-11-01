@@ -587,6 +587,8 @@ static void _drm_release_all_layers(struct vt_output_t *output) {
   _drm_layers_finish(drm_output, &drm_output->frame_layers, -1);
   drm_output->layer_plan_valid = false;
   _drm_invalidate_device_layer_plans(drm_output->drm_backend);
+  drmModeAtomicFree(drm_output->layer_plan_req);
+  drm_output->layer_plan_req = NULL;
   wl_array_release(&drm_output->layer_plan);
   wl_array_init(&drm_output->layer_plan);
 
@@ -4166,6 +4168,8 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
 
   struct vt_drm_output_state_t *drm_output =
       BACKEND_DATA(output, struct vt_drm_output_state_t);
+  drmModeAtomicFree(drm_output->layer_plan_req);
+  drm_output->layer_plan_req = NULL;
   drm_output->layer_plan_valid = false;
   drm_output->layer_plan_retry = false;
   if (drm_output->frame_layers.size)

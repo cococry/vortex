@@ -265,6 +265,9 @@ struct vt_drm_output_state_t {
   uint64_t tested_layer_plan_generation;
   bool layer_plan_valid, layer_plan_retry;
   struct vt_drm_layer_plan_output_t layer_plan_output;
+  drmModeAtomicReq *layer_plan_req;
+  uint64_t layer_plan_req_generation;
+  uint32_t layer_plan_req_flags;
 
   bool current_valid;
   bool pending_valid;

@@ -38,6 +38,60 @@
 
 #define _SUBSYS_NAME "DRM"
 
+static bool _atomic_add_cached_planes(struct vt_drm_backend_state_t *drm,
+                                      struct vt_drm_kms_commit_t *commit,
+                                      drmModeAtomicReq *req);
+
+static bool _atomic_add_cached_planes(struct vt_drm_backend_state_t *drm,
+                                      struct vt_drm_kms_commit_t *commit,
+                                      drmModeAtomicReq *req) {
+  struct vt_drm_output_state_t *output = commit->output;
+
+  if (drmModeAtomicMerge(req, output->layer_plan_req) < 0)
+    return false;
+
+  struct vt_drm_layer_state_t *layer;
+  wl_array_for_each(layer, &commit->layers) {
+    if (layer->role == VT_DRM_LAYER_COMPOSITED)
+      continue;
+
+    struct liftoff_layer *liftoff_layer =
+        layer->role == VT_DRM_LAYER_COMPOSITED_SCENE
+            ? output->liftoff_composition_layer : layer->liftoff_layer;
+    struct liftoff_plane *allocation = liftoff_layer_get_plane(liftoff_layer);
+    if (!allocation)
+      return false;
+
+    uint32_t plane_id = liftoff_plane_get_id(allocation);
+    struct vt_drm_plane_t *plane;
+    bool found = false;
+    wl_array_for_each(plane, &drm->planes) {
+      if (plane->id != plane_id)
+        continue;
+
+      /* libdrm keeps the last value when we replace a cached property. */
+      if (drmModeAtomicAddProperty(req, plane_id,
+                                   plane->props[VT_DRM_PLANE_FB_ID],
+                                   layer->fb.id) < 0)
+        return false;
+
+      if (plane->props[VT_DRM_PLANE_IN_FENCE_FD] &&
+          drmModeAtomicAddProperty(req, plane_id,
+                                   plane->props[VT_DRM_PLANE_IN_FENCE_FD],
+                                   (uint64_t)(int64_t)layer->acquire_fence_fd) < 0)
+        return false;
+
+      found = true;
+      break;
+    }
+
+    if (!found)
+      return false;
+  }
+
+  return true;
+}
+
 static bool _atomic_add_prop(struct vt_drm_backend_state_t *drm,
                              drmModeAtomicReq *req, uint32_t obj, uint32_t prop,
                              uint64_t value) {
@@ -466,14 +520,44 @@ static drmModeAtomicReq *_atomic_build_req(struct vt_drm_backend_state_t *drm,
   if (!_atomic_prepare_liftoff(drm, commit))
     goto fail;
 
-  int ret = liftoff_output_apply(output->liftoff_output, req, flags, NULL);
+  bool cached = output->layer_plan_valid && output->layer_plan_req &&
+                output->tested_layer_plan_generation ==
+                    output->base->layer_plan_generation &&
+                output->layer_plan_req_generation ==
+                    output->base->layer_plan_generation &&
+                output->layer_plan_req_flags == flags;
 
-  if (ret < 0) {
-    VT_TRACE(drm->comp->log,
-             "final liftoff_output_apply failed "
-             "for output=%p: %s",
-             (void *)output->base, strerror(-ret));
-    goto fail;
+  if (cached) {
+    if (!_atomic_add_cached_planes(drm, commit, req))
+      goto fail;
+  } else {
+    /* keep only plane properties; mode blobs and out fences belong to this commit. */
+    drmModeAtomicReq *planes = drmModeAtomicAlloc();
+    if (!planes)
+      goto fail;
+
+    int ret = liftoff_output_apply(output->liftoff_output, planes, flags, NULL);
+    if (ret == 0)
+      ret = drmModeAtomicMerge(req, planes);
+
+    drmModeAtomicFree(output->layer_plan_req);
+    output->layer_plan_req = NULL;
+
+    if (ret == 0 && output->layer_plan_valid &&
+        output->tested_layer_plan_generation == output->base->layer_plan_generation) {
+      output->layer_plan_req = planes;
+      output->layer_plan_req_generation = output->base->layer_plan_generation;
+      output->layer_plan_req_flags = flags;
+    } else {
+      drmModeAtomicFree(planes);
+    }
+
+    if (ret < 0) {
+      VT_TRACE(drm->comp->log,
+               "final Liftoff request failed for output=%p: %s",
+               (void *)output->base, strerror(-ret));
+      goto fail;
+    }
   }
 
   _atomic_trace_liftoff_allocation(drm, commit);
@@ -599,6 +683,13 @@ static bool _atomic_commit(struct vt_drm_backend_state_t *drm,
   }
 
 fail:
+  if (!commit->cursor_only) {
+    drmModeAtomicFree(output->layer_plan_req);
+    output->layer_plan_req = NULL;
+    output->layer_plan_valid = false;
+    vt_output_invalidate_layer_plan(output->base);
+  }
+
   drm_kms_commit_release_cursor(commit);
   return false;
 }
