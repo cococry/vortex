@@ -482,3 +482,37 @@ bool vt_buffer_use_set_release_fence_fd(struct vt_buffer_use_t *use, int fd) {
 
   return true;
 }
+
+bool vt_buffer_scanout_layout_equal(struct vt_buffer_t *a,
+                                     struct vt_buffer_t *b) {
+  if (a == b)
+    return true;
+
+  if (!a || !b || a->impl != b->impl || a->width != b->width ||
+      a->height != b->height)
+    return false;
+
+  struct vt_dmabuf_attr_t aa, bb;
+  bool a_dmabuf = vt_buffer_get_dmabuf(a, &aa);
+  bool b_dmabuf = vt_buffer_get_dmabuf(b, &bb);
+  if (!a_dmabuf || !b_dmabuf) {
+    struct vt_shm_attr_t sa, sb;
+    return !a_dmabuf && !b_dmabuf && vt_buffer_get_shm(a, &sa) &&
+           vt_buffer_get_shm(b, &sb) && sa.width == sb.width &&
+           sa.height == sb.height && sa.stride == sb.stride &&
+           sa.format == sb.format;
+  }
+
+  if (aa.width != bb.width || aa.height != bb.height ||
+      aa.format != bb.format || aa.mod != bb.mod ||
+      aa.num_planes != bb.num_planes || aa.num_planes <= 0 ||
+      aa.num_planes > VT_DMABUF_PLANES_CAP)
+    return false;
+
+  for (int i = 0; i < aa.num_planes; i++) {
+    if (aa.strides[i] != bb.strides[i] || aa.offsets[i] != bb.offsets[i])
+      return false;
+  }
+
+  return true;
+}

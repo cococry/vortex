@@ -92,6 +92,11 @@ struct vt_backend_interface_t {
   bool (*commit_cursor_only)(struct vt_backend_t *backend,
                              struct vt_output_t  *output);
 
+  bool (*reuse_output_layers)(struct vt_backend_t            *backend,
+                              struct vt_output_t             *output,
+                              struct vt_output_layer_state_t *layers,
+                              size_t                          layer_count);
+
   bool (*test_output_layers)(struct vt_backend_t            *backend,
                              struct vt_output_t             *output,
                              struct vt_output_layer_state_t *layers,

@@ -297,6 +297,10 @@ static bool _content_update_apply_one(struct vt_content_update_t *cu) {
     struct vt_box_t bounds = *vt_scene_node_get_global_bounds(surf->scene_node);
     bool            mapped = vt_surface_effectively_mapped(surf);
     bool geometry_changed = memcmp(&old_bounds, &bounds, sizeof(bounds)) != 0;
+    if (geometry_changed || cu->state.buffer_transform_changed ||
+        cu->state.buffer_scale_changed)
+      vt_scene_invalidate_layer_plans(surf->comp);
+
     if (was_mapped != mapped || geometry_changed ||
         cu->state.buffer_transform_changed || cu->state.buffer_scale_changed) {
       if (was_mapped)

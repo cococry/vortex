@@ -131,3 +131,5 @@ struct vt_box_t *vt_scene_node_get_global_bounds(struct vt_scene_node_t *node);
 
 struct vt_output_t *vt_scene_node_primary_output(struct vt_compositor_t *comp,
                                                  struct vt_scene_node_t *node);
+
+void vt_scene_invalidate_layer_plans(struct vt_compositor_t *comp);

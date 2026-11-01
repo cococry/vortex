@@ -484,7 +484,8 @@ vt_scene_node_create_buffer(struct vt_compositor_t *c,
 
 bool vt_scene_node_destroy(struct vt_compositor_t *c,
                            struct vt_scene_node_t *node) {
-  (void)c;
+  vt_scene_invalidate_layer_plans(c);
+
   if (node->type == VT_SCENE_NODE_BUFFER && node->use) {
     vt_buffer_use_unref(&node->use);
   }
@@ -646,6 +647,7 @@ bool vt_scene_node_add_child(struct vt_compositor_t *c,
 
   node->childs[node->child_count++] = child;
   child->parent = node;
+  vt_scene_invalidate_layer_plans(c);
 
   return true;
 }
@@ -666,6 +668,7 @@ bool vt_scene_node_remove_child(struct vt_scene_node_t *parent,
       parent->childs[j] = parent->childs[j + 1];
 
     parent->child_count--;
+    vt_scene_invalidate_layer_plans(parent->comp);
 
     if (parent->child_count == 0) {
       free(parent->childs);
@@ -703,8 +706,11 @@ void vt_scene_render(struct vt_scene_t *scene, struct vt_output_t *output) {
 
   _scene_accumulate_layers(scene, output);
 
-  /* test all accumulated layers for hardware-scanout. */
-  if (output->backend->impl.test_output_layers)
+  bool reused = output->backend->impl.reuse_output_layers &&
+                output->backend->impl.reuse_output_layers(
+                    output->backend, output, scene->layers, scene->n_layers);
+
+  if (!reused && output->backend->impl.test_output_layers)
     output->backend->impl.test_output_layers(output->backend, output,
                                              scene->layers, scene->n_layers);
 
@@ -772,6 +778,7 @@ void vt_scene_node_set_position(struct vt_scene_node_t *node, int32_t x,
     return;
 
   vt_scene_node_damage_whole(node->comp, node);
+  vt_scene_invalidate_layer_plans(node->comp);
   node->x = x;
   node->y = y;
 
@@ -880,4 +887,12 @@ struct vt_output_t *vt_scene_node_primary_output(struct vt_compositor_t *comp,
              (void *)node, rect->x, rect->y, rect->width, rect->height);
   }
   return best;
+}
+
+void vt_scene_invalidate_layer_plans(struct vt_compositor_t *comp) {
+  /* we cover both old and new subtree visibility, including unmapped children. */
+  struct vt_output_t *output;
+  wl_list_for_each(output, &comp->outputs, link_global) {
+    vt_output_invalidate_layer_plan(output);
+  }
 }

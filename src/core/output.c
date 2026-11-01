@@ -167,6 +167,12 @@ void vt_output_set_background(struct vt_output_t     *output,
 
   struct vt_buffer_use_t *next =
       vt_buffer_use_ref(use ? use : output->background.use_fallback);
+  struct vt_buffer_use_t *old = output->background.node->use;
+  if (!vt_buffer_scanout_layout_equal(old->buf, next->buf) ||
+      (old->release && vt_buffer_release_needs_fence(old->release)) !=
+          (next->release && vt_buffer_release_needs_fence(next->release)))
+    vt_output_invalidate_layer_plan(output);
+
   vt_buffer_use_unref(&output->background.node->use);
   output->background.node->use = next;
   vt_scene_node_mark_geometry_dirty(output->background.node);
@@ -211,4 +217,8 @@ void vt_output_damage_whole(struct vt_output_t *output) {
   output->needs_damage_rebuild = true;
 
   vt_comp_schedule_repaint(output->backend->comp, output);
+}
+
+void vt_output_invalidate_layer_plan(struct vt_output_t *output) {
+  output->layer_plan_generation++;
 }

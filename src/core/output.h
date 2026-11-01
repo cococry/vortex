@@ -109,6 +109,7 @@ struct vt_output_t {
   int32_t        n_damage_boxes;
   bool           needs_damage_rebuild;
   bool           had_scanout_layers;
+  uint64_t       layer_plan_generation;
 
   struct {
     struct wl_global *global;
@@ -181,3 +182,5 @@ void vt_output_set_background(struct vt_output_t     *output,
 bool vt_output_resize_background(struct vt_output_t *output);
 
 void vt_output_damage_whole(struct vt_output_t *output);
+
+void vt_output_invalidate_layer_plan(struct vt_output_t *output);

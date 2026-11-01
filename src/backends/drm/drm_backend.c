@@ -88,6 +88,16 @@
 static void _drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec,
                                    unsigned int usec, void *data);
 static void _drm_release_all_layers(struct vt_output_t *output);
+static bool _drm_scanout_fence_ready(struct vt_surface_t *surface,
+                                      struct vt_buffer_use_t *use);
+static void _drm_layers_finish(struct vt_drm_output_state_t *drm_output,
+                                struct wl_array *layers, int release_fence_fd);
+static void _drm_invalidate_device_layer_plans(struct vt_drm_backend_state_t *drm);
+static void _drm_update_layer_plan_output(struct vt_drm_output_state_t *drm_output);
+static bool _drm_reuse_output_layers(struct vt_backend_t *backend,
+                                      struct vt_output_t *output,
+                                      struct vt_output_layer_state_t *layers,
+                                      size_t layer_count);
 static bool _drm_devices_equal(drmDevicePtr a, drmDevicePtr b);
 static bool _drm_can_share_dmabuf(struct vt_device_t *main_dev,
                                   struct vt_device_t *dev);
@@ -164,6 +174,173 @@ static struct vt_output_implementation_t drm_output_impl = {
     .acquire_render_buffer = _drm_acquire_render_buffer,
     .move_cursor = _drm_output_move_cursor,
     .update_cursor_image = _drm_output_update_cursor_image};
+
+static void _drm_invalidate_device_layer_plans(struct vt_drm_backend_state_t *drm) {
+  struct vt_output_t *output;
+  wl_list_for_each(output, &drm->outputs, link_local) {
+    vt_output_invalidate_layer_plan(output);
+  }
+}
+
+static void _drm_update_layer_plan_output(struct vt_drm_output_state_t *drm_output) {
+  struct vt_output_t *output = drm_output->base;
+  struct vt_drm_layer_plan_output_t state;
+  memset(&state, 0, sizeof(state));
+  state.geometry = (struct vt_box_t){output->x, output->y,
+                                      output->width, output->height};
+  state.format = output->format;
+  state.refresh = output->refresh_rate;
+  state.transform = output->transform;
+  state.scale = output->current_scale;
+  state.cursor_mode = output->cursor_mode;
+  state.no_direct_scanout = drm_output->drm_backend->no_direct_scanout;
+  state.render_buffers = output->render_buffers;
+  state.n_render_buffers = output->n_render_buffers;
+  state.crtc = drm_output->crtc;
+  state.mode = drm_output->mode;
+
+  if (memcmp(&state, &drm_output->layer_plan_output, sizeof(state)) != 0) {
+    memcpy(&drm_output->layer_plan_output, &state, sizeof(state));
+    _drm_invalidate_device_layer_plans(drm_output->drm_backend);
+  }
+}
+
+static bool _drm_reuse_output_layers(struct vt_backend_t *backend,
+                                      struct vt_output_t *output,
+                                      struct vt_output_layer_state_t *layers,
+                                      size_t layer_count) {
+  VT_PROFILE_SCOPE();
+  (void)backend;
+  struct vt_drm_output_state_t *drm_output =
+      BACKEND_DATA(output, struct vt_drm_output_state_t);
+
+  struct vt_drm_backend_state_t *drm = drm_output->drm_backend;
+
+  if (drm_output->frame_layers.size)
+    _drm_layers_finish(drm_output, &drm_output->frame_layers, -1);
+
+  _drm_update_layer_plan_output(drm_output);
+
+  if (!drm_output->layer_plan_valid ||
+      drm_output->tested_layer_plan_generation != output->layer_plan_generation)
+    return false;
+
+  if (drm_output->layer_plan.size !=
+      layer_count * sizeof(struct vt_drm_layer_plan_t))
+    goto miss;
+
+  uint64_t direct_layers = 0, direct_fenced = 0;
+  struct vt_drm_layer_state_t *current = drm_output->current_layers.data;
+  size_t current_count =
+      drm_output->current_layers.size / sizeof(*current);
+  size_t current_index = 0;
+  struct vt_drm_layer_plan_t *plan = drm_output->layer_plan.data;
+  for (size_t i = 0; i < layer_count; i++) {
+    struct vt_output_layer_state_t *layer = &layers[i];
+    struct vt_buffer_use_t *use = layer->use;
+
+    /* we also guard against geometry changed by a caller bypassing setters. */
+    if (plan[i].surface != layer->surface ||
+        memcmp(&plan[i].src, &layer->src, sizeof(layer->src)) != 0 ||
+        memcmp(&plan[i].dst, &layer->dst, sizeof(layer->dst)) != 0)
+      goto miss;
+
+    layer->accepted = plan[i].role == VT_DRM_LAYER_DIRECT;
+    if (!plan[i].liftoff_layer)
+      continue;
+
+    struct vt_drm_layer_state_t *previous =
+        current_index < current_count ? &current[current_index] : NULL;
+    current_index++;
+
+    struct vt_drm_layer_state_t *frame =
+        wl_array_add(&drm_output->frame_layers, sizeof(*frame));
+    if (!frame)
+      goto miss;
+
+    *frame = (struct vt_drm_layer_state_t){
+        .role = plan[i].role,
+        .is_background = plan[i].is_background,
+        .surface = layer->surface,
+        .src = plan[i].src,
+        .dst = plan[i].dst,
+        .zpos = plan[i].zpos,
+        .liftoff_layer = plan[i].liftoff_layer,
+        .acquire_fence_fd = -1,
+    };
+
+    if (!plan[i].has_fb)
+      continue;
+
+    if (!use || (layer->surface && layer->surface->scanout_backoff) ||
+        !_drm_scanout_fence_ready(layer->surface, use) ||
+        (use->release && vt_buffer_release_needs_fence(use->release) &&
+         drm_output->crtc->props[VT_DRM_CRTC_OUT_FENCE_PTR] == 0))
+      goto miss;
+
+    /* we can copy the displayed framebuffer while its buffer is still held. */
+    if (previous && previous->liftoff_layer == frame->liftoff_layer &&
+        previous->has_fb && previous->fb.cached &&
+        previous->fb.buf == use->buf) {
+      frame->fb = previous->fb;
+      frame->fb.buf = vt_buffer_ref(use->buf);
+    } else if (!drm_fb_init_from_buffer(drm, &frame->fb, use->buf)) {
+      /* if it changed, we need to re-check if we can import/init it. this takes
+       * some frametime, so we first try if we can reuse the previously
+       * displayed one. */
+      goto miss;
+    }
+
+    frame->has_fb = true;
+    if (frame->fb.id == 0)
+      goto miss;
+
+    int fence_fd = vt_buffer_use_acquire_fence(use);
+    if (frame->fb.id != plan[i].fb_id) {
+      if (liftoff_layer_set_property(frame->liftoff_layer, "FB_ID",
+                                      frame->fb.id) < 0)
+        goto miss;
+
+      plan[i].fb_id = frame->fb.id;
+    }
+
+    if (fence_fd != plan[i].acquire_fence_fd) {
+      if (fence_fd >= 0) {
+        if (liftoff_layer_set_property(frame->liftoff_layer, "IN_FENCE_FD",
+                                        (uint64_t)(int64_t)fence_fd) < 0)
+          goto miss;
+      } else {
+        liftoff_layer_unset_property(frame->liftoff_layer, "IN_FENCE_FD");
+      }
+
+      plan[i].acquire_fence_fd = fence_fd;
+    }
+
+    if (frame->role == VT_DRM_LAYER_DIRECT) {
+      frame->use = vt_buffer_use_ref(use);
+      if (!frame->use)
+        goto miss;
+
+      frame->acquire_fence_fd = fence_fd;
+      direct_layers++;
+      if (fence_fd >= 0)
+        direct_fenced++;
+    }
+  }
+
+  drm_output->frame_stats.direct_layers += direct_layers;
+  drm_output->frame_stats.direct_fenced += direct_fenced;
+  return true;
+
+miss:
+  drm_output->layer_plan_valid = false;
+  vt_output_invalidate_layer_plan(output);
+  _drm_layers_finish(drm_output, &drm_output->frame_layers, -1);
+  for (size_t i = 0; i < layer_count; i++)
+    layers[i].accepted = false;
+
+  return false;
+}
 
 static struct liftoff_layer *
 _drm_output_get_liftoff_layer(struct vt_drm_output_state_t *drm_output,
@@ -407,7 +584,11 @@ static void _drm_release_all_layers(struct vt_output_t *output) {
     drm_output->current_valid = false;
   }
 
-  _drm_layers_finish(drm_output, &drm_output->layer_plan, -1);
+  _drm_layers_finish(drm_output, &drm_output->frame_layers, -1);
+  drm_output->layer_plan_valid = false;
+  _drm_invalidate_device_layer_plans(drm_output->drm_backend);
+  wl_array_release(&drm_output->layer_plan);
+  wl_array_init(&drm_output->layer_plan);
 
   if (drm_output->pending_out_fence_fd >= 0) {
     close(drm_output->pending_out_fence_fd);
@@ -850,6 +1031,7 @@ static bool _drm_resume(struct vt_drm_backend_state_t *backend) {
   if (!backend || !backend->comp || backend->drm_fd < 0)
     return false;
 
+  _drm_invalidate_device_layer_plans(backend);
   VT_TRACE(backend->comp->log, "Resuming seat session (VT switch back)...");
 
   if (!backend->event_source) {
@@ -1682,6 +1864,8 @@ _drm_acquire_render_buffer(struct vt_output_t *output) {
 }
 
 static void _drm_render_pool_finish(struct vt_drm_output_state_t *state) {
+  vt_output_invalidate_layer_plan(state->base);
+
   for (unsigned i = 0; i < 3; ++i) {
     struct vt_dmabuf_attr_t *attr = &state->render_buffers[i].attr;
 
@@ -1841,6 +2025,7 @@ static bool _drm_create_output_for_device(struct vt_drm_backend_state_t *drm,
   drm_output->drm_backend = drm;
   wl_array_init(&drm_output->current_layers);
   wl_array_init(&drm_output->pending_layers);
+  wl_array_init(&drm_output->frame_layers);
   wl_array_init(&drm_output->layer_plan);
   wl_array_init(&drm_output->liftoff_layers);
   drm_output->pending_out_fence_fd = -1;
@@ -2196,6 +2381,7 @@ static void _drm_on_drm_change(struct wl_listener *listener, void *data) {
     if (strcmp(node, event->device_node_name) != 0)
       continue;
 
+    _drm_invalidate_device_layer_plans(drm);
     VT_TRACE(master->comp->log, "Rescanning DRM connectors on %s.",
              drm->dev->path);
 
@@ -2806,6 +2992,7 @@ static bool _drm_output_sync_refresh(struct vt_drm_output_state_t *drm_output) {
     return false;
   }
 
+  _drm_invalidate_device_layer_plans(drm_output->drm_backend);
   drm_output->mode = *match;
   drm_output->needs_modeset = true;
 
@@ -2880,7 +3067,7 @@ _drm_output_add_composition_layer(struct vt_drm_backend_state_t *drm,
     }
 
     struct vt_drm_layer_state_t *layer =
-        wl_array_add(&drm_output->layer_plan, sizeof(*layer));
+        wl_array_add(&drm_output->frame_layers, sizeof(*layer));
 
     if (!layer)
       return false;
@@ -2918,7 +3105,7 @@ _drm_output_add_composition_layer(struct vt_drm_backend_state_t *drm,
   }
 
   struct vt_drm_layer_state_t *layer =
-      wl_array_add(&drm_output->layer_plan, sizeof(*layer));
+      wl_array_add(&drm_output->frame_layers, sizeof(*layer));
 
   if (!layer) {
     gbm_surface_release_buffer(drm_output->gbm_surf, bo);
@@ -2952,7 +3139,7 @@ _drm_output_add_composition_layer(struct vt_drm_backend_state_t *drm,
      */
     gbm_surface_release_buffer(drm_output->gbm_surf, bo);
 
-    drm_output->layer_plan.size -= sizeof(*layer);
+    drm_output->frame_layers.size -= sizeof(*layer);
 
     VT_ERROR(drm->comp->log,
              "Failed to import compositor GBM buffer for connector %u.",
@@ -2986,26 +3173,19 @@ static bool _drm_handle_frame_for_device(struct vt_drm_backend_state_t *drm,
     return false;
   }
 
-  if (!_drm_output_sync_refresh(drm_output)) {
-    VT_WARN(
-        comp->log,
-        "Requested DRM output refresh rate is not available on connector %u.",
-        drm_output->conn_id);
-  }
-
   VT_TRACE(comp->log, "Handling frame...");
 
   if (drm_output->needs_compositing) {
     if (!_drm_output_add_composition_layer(drm, drm_output, output)) {
-      _drm_layers_finish(drm_output, &drm_output->layer_plan, -1);
+      _drm_layers_finish(drm_output, &drm_output->frame_layers, -1);
 
       output->needs_repaint = true;
       return false;
     }
   }
 
-  drm_output->pending_layers = drm_output->layer_plan;
-  wl_array_init(&drm_output->layer_plan);
+  drm_output->pending_layers = drm_output->frame_layers;
+  wl_array_init(&drm_output->frame_layers);
 
   struct vt_drm_kms_commit_t commit = {
       .output = drm_output,
@@ -3022,6 +3202,8 @@ static bool _drm_handle_frame_for_device(struct vt_drm_backend_state_t *drm,
 
   bool was_bootstrapped = drm_output->modeset_bootstrapped;
   if (!drm->impl->commit(drm, &commit)) {
+    drm_output->layer_plan_valid = false;
+    _drm_invalidate_device_layer_plans(drm);
     _drm_layers_finish(drm_output, &drm_output->pending_layers, -1);
     drm_output->pending_valid = false;
     output->needs_repaint = true;
@@ -3617,6 +3799,7 @@ static bool _drm_test_output_layers(struct vt_backend_t            *backend,
     return false;
 
   drm_output->needs_compositing = true;
+  drm_output->layer_plan.size = 0;
 
   if (!drm_output->crtc)
     return false;
@@ -3642,11 +3825,17 @@ static bool _drm_test_output_layers(struct vt_backend_t            *backend,
   memset(test_layers, 0, layer_count * sizeof(*test_layers));
 
   /*
-   * Remember where this test's additions to layer_plan begin so that a
+   * Remember where this test's additions to frame_layers begin so that a
    * failure while promoting accepted layers can roll back only the layers
    * created by this invocation.
    */
-  const size_t layer_plan_start = drm_output->layer_plan.size;
+  const size_t frame_layers_start = drm_output->frame_layers.size;
+
+  struct vt_drm_layer_plan_t *plan =
+      wl_array_add(&drm_output->layer_plan, layer_count * sizeof(*plan));
+
+  if (!plan)
+    return false;
 
   bool ok = false;
   bool have_scanout_candidate = false;
@@ -3700,8 +3889,10 @@ static bool _drm_test_output_layers(struct vt_backend_t            *backend,
      * stall the whole output. Compositing waits on the GPU instead. Back off
      * for a while so a client that is late half the time does not flap
      * between plane and composition every frame. */
-    if (use && !_drm_scanout_fence_ready(layer->surface, use))
+    if (use && !_drm_scanout_fence_ready(layer->surface, use)) {
+      drm_output->layer_plan_retry = true;
       goto composited;
+    }
 
     /* we leave format and plane eligibility to liftoff, but reject invalid
      * source geometry before setting plane properties. */
@@ -3741,6 +3932,10 @@ static bool _drm_test_output_layers(struct vt_backend_t            *backend,
 
     /* This reuses the buffer attachment after its first successful import. */
     if (!drm_fb_init_from_buffer(drm, &test->fb, buf)) {
+      struct vt_dmabuf_attr_t attr;
+      if (vt_buffer_get_dmabuf(buf, &attr))
+        drm_output->layer_plan_retry = true;
+
       VT_TRACE(backend->comp->log,
                "layer %zu surface=%p rejected from liftoff test: "
                "failed to import buffer as KMS framebuffer.",
@@ -3767,6 +3962,7 @@ static bool _drm_test_output_layers(struct vt_backend_t            *backend,
                i, (void *)layer->surface);
 
       liftoff_layer_set_fb_composited(test->liftoff_layer);
+      drm_output->layer_plan_retry = true;
 
       continue;
     }
@@ -3813,6 +4009,21 @@ static bool _drm_test_output_layers(struct vt_backend_t            *backend,
     struct vt_output_layer_state_t     *layer = &layers[i];
     struct vt_drm_liftoff_test_layer_t *test = &test_layers[i];
 
+    plan[i] = (struct vt_drm_layer_plan_t){
+        .role = VT_DRM_LAYER_COMPOSITED,
+        .is_background = i == 0 && output->background.node &&
+                         layer->use == output->background.node->use,
+        .surface = layer->surface,
+        .src = layer->src,
+        .dst = layer->dst,
+        .zpos = i,
+        .liftoff_layer = test->liftoff_layer,
+        .has_fb = test->has_fb,
+        .fb_id = test->fb.id,
+        .acquire_fence_fd =
+            test->has_fb ? vt_buffer_use_acquire_fence(layer->use) : -1,
+    };
+
     if (!test->liftoff_layer) {
       layers[i].accepted = false;
       all_accepted = false;
@@ -3845,24 +4056,23 @@ static bool _drm_test_output_layers(struct vt_backend_t            *backend,
     }
 
     struct vt_drm_layer_state_t *planned =
-        wl_array_add(&drm_output->layer_plan, sizeof(*planned));
+        wl_array_add(&drm_output->frame_layers, sizeof(*planned));
 
     if (!planned)
       goto fail_plan;
 
     memset(planned, 0, sizeof(*planned));
 
-    planned->role =
+    plan[i].role =
         layer_needs_composition ? VT_DRM_LAYER_COMPOSITED : VT_DRM_LAYER_DIRECT;
 
-    planned->is_background = i == 0 && output->background.node &&
-                             layer->use == output->background.node->use;
-    planned->surface = layer->surface;
-    planned->src = layer->src;
-    planned->dst = layer->dst;
-    planned->zpos = i;
-
-    planned->liftoff_layer = test->liftoff_layer;
+    planned->role = plan[i].role;
+    planned->is_background = plan[i].is_background;
+    planned->surface = plan[i].surface;
+    planned->src = plan[i].src;
+    planned->dst = plan[i].dst;
+    planned->zpos = plan[i].zpos;
+    planned->liftoff_layer = plan[i].liftoff_layer;
 
     if (test->has_fb) {
       planned->fb = test->fb;
@@ -3906,9 +4116,10 @@ fail_plan:
    * must be fully finished here with _drm_layer_finish()
    */
   {
-    uint8_t *base = drm_output->layer_plan.data;
+    uint8_t *base = drm_output->frame_layers.data;
 
-    for (size_t offset = layer_plan_start; offset < drm_output->layer_plan.size;
+    for (size_t offset = frame_layers_start;
+         offset < drm_output->frame_layers.size;
          offset += sizeof(struct vt_drm_layer_state_t)) {
       struct vt_drm_layer_state_t *planned =
           (struct vt_drm_layer_state_t *)(base + offset);
@@ -3916,7 +4127,7 @@ fail_plan:
       _drm_layer_finish(drm_output, planned, -1);
     }
 
-    drm_output->layer_plan.size = layer_plan_start;
+    drm_output->frame_layers.size = frame_layers_start;
   }
 
   for (size_t i = 0; i < layer_count; i++) {
@@ -3934,8 +4145,10 @@ done_req:
     drmModeAtomicFree(req);
 
 done:
-  if (!ok)
+  if (!ok) {
+    drm_output->layer_plan.size = 0;
     _drm_output_disable_unused_liftoff_layers(drm_output, 0);
+  }
 
   drm_liftoff_testing_finish(drm, test_layers, layer_count);
 
@@ -3951,7 +4164,20 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
       (layer_count && !layers))
     return false;
 
-  return _drm_test_output_layers(backend, output, layers, layer_count);
+  struct vt_drm_output_state_t *drm_output =
+      BACKEND_DATA(output, struct vt_drm_output_state_t);
+  drm_output->layer_plan_valid = false;
+  drm_output->layer_plan_retry = false;
+  if (drm_output->frame_layers.size)
+    _drm_layers_finish(drm_output, &drm_output->frame_layers, -1);
+
+  _drm_update_layer_plan_output(drm_output);
+  bool ok = _drm_test_output_layers(backend, output, layers, layer_count);
+  drm_output->layer_plan_valid =
+      ok && !drm_output->layer_plan_retry &&
+      drm_output->layer_plan.size == layer_count * sizeof(struct vt_drm_layer_plan_t);
+  drm_output->tested_layer_plan_generation = output->layer_plan_generation;
+  return ok;
 }
 
 bool backend_build_surface_feedback(struct vt_backend_t         *backend,
@@ -4180,6 +4406,13 @@ bool backend_prepare_output_frame_drm(struct vt_backend_t *backend,
   if (!output->needs_repaint && drm_output->modeset_bootstrapped)
     return false;
 
+  if (!_drm_output_sync_refresh(drm_output)) {
+    VT_WARN(
+        backend->comp->log,
+        "Requested DRM output refresh rate is not available on connector %u.",
+        drm_output->conn_id);
+  }
+
   return true;
 }
 
@@ -4200,6 +4433,7 @@ bool backend_implement_drm(struct vt_compositor_t *comp) {
       .commit_cursor_only = backend_commit_cursor_only_drm,
       .terminate = backend_terminate_drm,
       .prepare_output_frame = backend_prepare_output_frame_drm,
+      .reuse_output_layers = _drm_reuse_output_layers,
       .test_output_layers = backend_test_output_layers_drm,
       .build_surface_feedback = backend_build_surface_feedback_drm,
   };

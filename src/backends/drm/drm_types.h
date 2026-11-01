@@ -100,6 +100,19 @@ enum vt_drm_layer_role_t {
   VT_DRM_LAYER_COMPOSITED_SCENE,
 };
 
+/* allocation decisions; frame resources belong to vt_drm_layer_state_t. */
+struct vt_drm_layer_plan_t {
+  struct vt_box_t          src, dst;
+  uint64_t                 zpos;
+  struct vt_surface_t     *surface;
+  struct liftoff_layer    *liftoff_layer;
+  enum vt_drm_layer_role_t role;
+  bool                     is_background;
+  bool                     has_fb;
+  uint32_t                 fb_id;
+  int                      acquire_fence_fd;
+};
+
 struct vt_drm_layer_state_t {
   struct vt_drm_framebuffer_t fb;
   bool                        has_fb;
@@ -227,6 +240,18 @@ struct vt_drm_cursor_state_t {
   bool visible;
 };
 
+struct vt_drm_layer_plan_output_t {
+  struct vt_box_t geometry;
+  uint32_t format, refresh, transform;
+  int32_t scale;
+  enum vt_cursor_mode_t cursor_mode;
+  bool no_direct_scanout;
+  struct vt_output_render_buffer_t *render_buffers;
+  unsigned n_render_buffers;
+  struct vt_drm_crtc_t *crtc;
+  drmModeModeInfo mode;
+};
+
 struct vt_drm_output_state_t {
   struct vt_output_t            *base;
   struct vt_drm_backend_state_t *drm_backend;
@@ -234,7 +259,12 @@ struct vt_drm_output_state_t {
 
   struct wl_array current_layers;
   struct wl_array pending_layers;
+  struct wl_array frame_layers;
+  /* retained vt_drm_layer_plan_t entries; surface/liftoff pointers are borrowed. */
   struct wl_array layer_plan;
+  uint64_t tested_layer_plan_generation;
+  bool layer_plan_valid, layer_plan_retry;
+  struct vt_drm_layer_plan_output_t layer_plan_output;
 
   bool current_valid;
   bool pending_valid;

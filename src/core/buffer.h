@@ -157,3 +157,6 @@ int vt_buffer_use_acquire_fence(struct vt_buffer_use_t *use);
 
 bool vt_buffer_use_set_release_fence_fd(struct vt_buffer_use_t *use,
                                         int                     release_fd);
+
+bool vt_buffer_scanout_layout_equal(struct vt_buffer_t *a,
+                                     struct vt_buffer_t *b);

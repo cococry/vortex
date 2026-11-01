@@ -41,6 +41,7 @@ static void background_resource_destroy(struct wl_resource *resource) {
   struct vt_background_t *bg = wl_resource_get_user_data(resource);
 
   if (bg->output && bg->output->background.owner == bg) {
+    vt_output_invalidate_layer_plan(bg->output);
     bg->output->background.owner = NULL;
     vt_output_set_background(bg->output, NULL);
   }
@@ -105,6 +106,7 @@ static void get_background(struct wl_client *client, struct wl_resource *shell,
   bg->surface_destroy.notify = background_surface_destroy;
   wl_resource_add_destroy_listener(surf->res, &bg->surface_destroy);
   output->background.owner = bg;
+  vt_output_invalidate_layer_plan(output);
 
   wl_resource_set_implementation(res, &background_impl, bg,
                                  background_resource_destroy);
