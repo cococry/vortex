@@ -197,6 +197,7 @@ struct vt_drm_backend_state_t {
 
   // VT_DRM_NO_DIRECT_SCANOUT: composite every surface
   bool no_direct_scanout;
+  bool no_layer_plan_cache;
 
   struct wl_array sampling_formats;
 

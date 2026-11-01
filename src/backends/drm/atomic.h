@@ -21,7 +21,7 @@ drm_atomic_create_test_req(struct vt_drm_backend_state_t *drm,
 bool drm_liftoff_set_layer_props(struct liftoff_layer *liftoff_layer,
                                  const struct vt_output_layer_state_t *layer,
                                  uint32_t fb_id, int in_fence_fd,
-                                 uint64_t zpos);
+                                 uint64_t zpos, bool keep_fence);
 
 bool drm_liftoff_set_layer_props_composited(
     struct liftoff_layer                 *liftoff_layer,

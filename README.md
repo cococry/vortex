@@ -124,5 +124,6 @@ Vortex handles the following environment variables:
 | `VT_DRM_NO_ATOMIC` | Force legacy DRM/KMS implementation |
 | `VT_DRM_NO_HARDWARE_CURSOR` | Force cursor compositing |
 | `VT_DRM_NO_DIRECT_SCANOUT` | Composite every surface, never try to put client buffers on hardware planes. |
+| `VT_DRM_NO_LAYER_PLAN_CACHE` | Disable layer-plan caching, reevaluating Liftoff each frame (Worse performance, more realiable). |
 
 ---

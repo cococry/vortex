@@ -184,7 +184,8 @@ static uint32_t _atomic_commit_flags(const struct vt_drm_kms_commit_t *commit,
 
 static bool _liftoff_set_drm_layer_props(
     struct vt_drm_backend_state_t *drm, struct liftoff_layer *liftoff_layer,
-    const struct vt_drm_layer_state_t *layer, bool composited) {
+    const struct vt_drm_layer_state_t *layer, bool composited,
+    bool keep_fence) {
   VT_PROFILE_SCOPE();
   if (!drm || !liftoff_layer || !layer)
     return false;
@@ -225,7 +226,7 @@ static bool _liftoff_set_drm_layer_props(
 
   if (composited) {
     liftoff_layer_set_fb_composited(liftoff_layer);
-  } else if (layer->acquire_fence_fd >= 0) {
+  } else if (layer->acquire_fence_fd >= 0 || keep_fence) {
     if (liftoff_layer_set_property(liftoff_layer, "IN_FENCE_FD",
                                    (uint64_t)(int64_t)layer->acquire_fence_fd) <
         0) {
@@ -281,7 +282,9 @@ static bool _atomic_prepare_liftoff(struct vt_drm_backend_state_t *drm,
     }
 
     if (!_liftoff_set_drm_layer_props(drm, liftoff_layer, layer,
-                                      layer->role == VT_DRM_LAYER_COMPOSITED)) {
+                                      layer->role == VT_DRM_LAYER_COMPOSITED,
+                                      output->crtc->plane_primary->props[
+                                          VT_DRM_PLANE_IN_FENCE_FD] != 0)) {
       VT_ERROR(drm->comp->log,
                "failed to configure Liftoff layer "
                "role=%d fb=%" PRIu32 ".",
@@ -750,7 +753,7 @@ fail:
 bool drm_liftoff_set_layer_props(struct liftoff_layer *liftoff_layer,
                                  const struct vt_output_layer_state_t *layer,
                                  uint32_t fb_id, int in_fence_fd,
-                                 uint64_t zpos) {
+                                 uint64_t zpos, bool keep_fence) {
   VT_PROFILE_SCOPE();
   assert(liftoff_layer && layer);
 
@@ -784,7 +787,9 @@ bool drm_liftoff_set_layer_props(struct liftoff_layer *liftoff_layer,
     return false;
   }
 
-  if (in_fence_fd >= 0) {
+  /* keep the composition fence property in the test too, so the final fence
+   * only changes its value instead of invalidating liftoff's allocation. */
+  if (in_fence_fd >= 0 || keep_fence) {
     if (liftoff_layer_set_property(liftoff_layer, "IN_FENCE_FD",
                                    (uint64_t)(int64_t)in_fence_fd) < 0) {
       return false;

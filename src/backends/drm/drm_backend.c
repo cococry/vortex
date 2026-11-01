@@ -1170,6 +1170,8 @@ static bool _drm_init_for_device(struct vt_compositor_t        *comp,
   // the bench forwards unset variables as empty strings
   const char *no_direct = getenv("VT_DRM_NO_DIRECT_SCANOUT");
   drm->no_direct_scanout = no_direct && *no_direct;
+  const char *no_layer_plan_cache = getenv("VT_DRM_NO_LAYER_PLAN_CACHE");
+  drm->no_layer_plan_cache = no_layer_plan_cache && *no_layer_plan_cache;
   drm->impl = use_atomic ? &drm_kms_atomic_impl : &drm_kms_legacy_impl;
 
   _drm_update_tearing_cap(drm);
@@ -3730,6 +3732,8 @@ _drm_prepare_test_composition_layer(struct vt_drm_backend_state_t *drm,
   VT_PROFILE_SCOPE();
   struct vt_drm_framebuffer_t *fb = &drm_output->composition_test_fb;
   uint32_t                     format = output->format;
+  bool keep_fence = drm_output->crtc->plane_primary->props[
+                        VT_DRM_PLANE_IN_FENCE_FD] != 0;
 
   if (output->n_render_buffers) {
     struct vt_output_layer_state_t layer = {
@@ -3738,7 +3742,7 @@ _drm_prepare_test_composition_layer(struct vt_drm_backend_state_t *drm,
     };
     return drm_liftoff_set_layer_props(drm_output->liftoff_composition_layer,
                                        &layer, drm_output->render_fbs[0].id, -1,
-                                       0);
+                                       0, keep_fence);
   }
 
   /* prefer the real swapchain layout once a composed frame exists. */
@@ -3754,7 +3758,8 @@ _drm_prepare_test_composition_layer(struct vt_drm_backend_state_t *drm,
           .dst = {.width = output->width, .height = output->height},
       };
       return drm_liftoff_set_layer_props(drm_output->liftoff_composition_layer,
-                                         &layer, current->fb.id, -1, 0);
+                                         &layer, current->fb.id, -1, 0,
+                                         keep_fence);
     }
   }
 
@@ -3791,7 +3796,7 @@ _drm_prepare_test_composition_layer(struct vt_drm_backend_state_t *drm,
       .dst = {.width = output->width, .height = output->height},
   };
   return drm_liftoff_set_layer_props(drm_output->liftoff_composition_layer,
-                                     &layer, fb->id, -1, 0);
+                                     &layer, fb->id, -1, 0, keep_fence);
 }
 
 static bool _drm_test_output_layers(struct vt_backend_t            *backend,
@@ -3970,7 +3975,8 @@ static bool _drm_test_output_layers(struct vt_backend_t            *backend,
     }
 
     if (!drm_liftoff_set_layer_props(test->liftoff_layer, layer, test->fb.id,
-                                     vt_buffer_use_acquire_fence(use), i)) {
+                                     vt_buffer_use_acquire_fence(use), i,
+                                     false)) {
       VT_TRACE(backend->comp->log,
                "layer %zu surface=%p rejected from liftoff test: "
                "failed to set liftoff layer properties.",
@@ -4191,7 +4197,8 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
   _drm_update_layer_plan_output(drm_output);
   bool ok = _drm_test_output_layers(backend, output, layers, layer_count);
   drm_output->layer_plan_valid =
-      ok && !drm_output->layer_plan_retry &&
+      ok && !drm_output->drm_backend->no_layer_plan_cache &&
+      !drm_output->layer_plan_retry &&
       drm_output->layer_plan.size == layer_count * sizeof(struct vt_drm_layer_plan_t);
   drm_output->tested_layer_plan_generation = output->layer_plan_generation;
   return ok;
