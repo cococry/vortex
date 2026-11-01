@@ -1000,8 +1000,8 @@ static bool _drm_suspend(struct vt_drm_backend_state_t *backend) {
     output->needs_repaint = false;
   }
 
-  if (!_drm_drain_flips(backend))
-    return false;
+  /* we still need to detach scanout buffers if a flip event never arrives. */
+  bool ok = _drm_drain_flips(backend);
 
   wl_list_for_each(output, &backend->outputs, link_local) {
     if (!output->user_data)
@@ -1017,7 +1017,20 @@ static bool _drm_suspend(struct vt_drm_backend_state_t *backend) {
       VT_WARN(backend->comp->log,
               "Failed to disable connector %u while suspending.",
               drm_output->conn_id);
+      ok = false;
     }
+  }
+
+  /* drop cached client framebuffers before giving their buffers back, even if
+   * disabling an output failed. */
+  drm_fb_cache_finish(backend);
+
+  wl_list_for_each(output, &backend->outputs, link_local) {
+    if (!output->user_data)
+      continue;
+
+    struct vt_drm_output_state_t *drm_output =
+        BACKEND_DATA(output, struct vt_drm_output_state_t);
 
     _drm_release_all_layers(output);
     drm_output->needs_modeset = true;
@@ -1026,7 +1039,7 @@ static bool _drm_suspend(struct vt_drm_backend_state_t *backend) {
     drm_output->frame_stats.busy = false;
   }
 
-  return true;
+  return ok;
 }
 
 static bool _drm_resume(struct vt_drm_backend_state_t *backend) {
