@@ -26,6 +26,7 @@
 #include "src/core/buffer.h"
 #include "src/core/buffer_orchestrator.h"
 #include "src/core/content_update.h"
+#include "src/core/output.h"
 #include "src/core/scene.h"
 #include "src/core/surface.h"
 #include "src/core/util.h"
@@ -485,6 +486,21 @@ void _wl_surface_handle_resource_destroy(struct wl_resource *resource) {
   }
 
   VT_TRACE(surf->comp->log, "Got wl_surface.destroy")
+
+  /* A submitted frame may still be awaiting its page-flip event. Drop all
+   * borrowed references before freeing the surface, including duplicates
+   * and entries on other outputs. */
+  struct vt_output_t *output;
+  wl_list_for_each(output, &surf->comp->outputs, link_global) {
+    struct vt_presented_surface_t *entry, *tmp;
+    wl_list_for_each_safe(entry, tmp, &output->presented_surfaces, link) {
+      if (entry->surf != surf)
+        continue;
+
+      wl_list_remove(&entry->link);
+      free(entry);
+    }
+  }
 
   vt_subsurface_surface_destroy(surf);
 
