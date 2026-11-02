@@ -253,6 +253,13 @@ struct vt_drm_layer_plan_output_t {
   drmModeModeInfo mode;
 };
 
+/* One entry per layer slot; no borrowed surface or buffer pointers. */
+struct vt_drm_scanout_eligibility_t {
+  uint32_t format;
+  uint64_t modifier;
+  bool valid, has_dmabuf, eligible;
+};
+
 struct vt_drm_output_state_t {
   struct vt_output_t            *base;
   struct vt_drm_backend_state_t *drm_backend;
@@ -263,6 +270,11 @@ struct vt_drm_output_state_t {
   struct wl_array frame_layers;
   /* retained vt_drm_layer_plan_t entries; surface/liftoff pointers are borrowed. */
   struct wl_array layer_plan;
+  /* Renderer/plane intersection shared by feedback and layer testing. */
+  struct wl_array scanout_formats;
+  struct wl_array scanout_eligibility;
+  struct vt_drm_crtc_t *scanout_formats_crtc;
+  bool scanout_formats_valid;
   uint64_t tested_layer_plan_generation;
   bool layer_plan_valid, layer_plan_retry;
   struct vt_drm_layer_plan_output_t layer_plan_output;
