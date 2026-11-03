@@ -2232,6 +2232,11 @@ static bool _drm_create_output_for_device(struct vt_drm_backend_state_t *drm,
   output->physical.model = strdup("Unknown");
   output->physical.serial_number = NULL;
 
+  /* manually set the output's dimensions to temporarily store them for the later 
+   * vt_output_init_geom() */
+  output->width = selected->width;
+  output->height = selected->height;
+
   const char *type_name = _drm_connector_type_name(conn->connector_type);
   char        name[64];
   snprintf(name, sizeof(name), "%s-%u", type_name, conn->connector_type_id);
@@ -2242,10 +2247,6 @@ static bool _drm_create_output_for_device(struct vt_drm_backend_state_t *drm,
     VT_ERROR(comp->log, "Failed to allocate DRM output metadata.");
     return false;
   }
-
-  if (!vt_output_init_geom(output, (uint32_t)selected->width,
-                           (uint32_t)selected->height))
-    return false;
 
   wl_list_insert(&drm->outputs, &output->link_local);
   wl_list_insert(&drm->comp->outputs, &output->link_global);
@@ -2396,6 +2397,10 @@ static bool _drm_scan_connectors(struct vt_drm_backend_state_t *drm) {
       _drm_destroy_output_for_device(drm, output);
       continue;
     }
+
+    if (!vt_output_init_geom(output, (uint32_t)output->width,
+                             (uint32_t)output->height))
+      return false;
 
     drm_output->renderable_setup = true;
 
