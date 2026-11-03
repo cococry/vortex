@@ -119,7 +119,7 @@ bool _init_output_bg(struct vt_output_t *output) {
     goto fail;
 
   if (!output->backend->impl.clear_buffer(output->backend, fallback_buf,
-                                          0xff0000))
+                                          0x181818))
     goto fail;
 
   fallback_use = vt_buffer_use_create_take(output->backend->comp, output,
