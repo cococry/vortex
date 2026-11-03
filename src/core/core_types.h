@@ -78,9 +78,15 @@ struct vt_backend_interface_t {
   bool (*is_dmabuf_importable)(struct vt_backend_t     *backend,
                                struct vt_dmabuf_attr_t *attr,
                                int32_t                  device_fd);
+  /* DMA-BUF allocations require an explicit modifier; SHM backends ignore it. */
   struct vt_buffer_t *(*allocate_buffer)(struct vt_backend_t *backend,
                                          uint32_t width, uint32_t height,
-                                         uint32_t format);
+                                         uint32_t format, uint64_t modifier);
+
+  /* Optional for SHM backends, which keep the default XRGB8888 layout. */
+  bool (*get_ideal_format_for_output)(struct vt_backend_t *backend,
+                                       struct vt_output_t *output,
+                                       uint32_t *format, uint64_t *modifier);
 
   bool (*clear_buffer)(struct vt_backend_t *backend, struct vt_buffer_t *buf,
                        uint32_t col);

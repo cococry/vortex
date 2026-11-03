@@ -67,6 +67,7 @@
 #include "protocols/wl_shm.h"
 #include "render/dmabuf.h"
 #include "render/drm_format.h"
+#include "render/dmabuf_attr.h"
 
 #include "atomic.h"
 #include "cursor.h"
@@ -2214,10 +2215,6 @@ static bool _drm_create_output_for_device(struct vt_drm_backend_state_t *drm,
            drm_output->mode.vdisplay, drm_output->mode.vrefresh,
            (void *)output);
 
-  if (!vt_output_init_geom(output, (uint32_t)selected->width,
-                           (uint32_t)selected->height))
-    return false;
-
   output->needs_repaint = true;
   output->refresh_rate = selected->refresh;
   output->native_window = drm_output->gbm_surf;
@@ -2245,6 +2242,10 @@ static bool _drm_create_output_for_device(struct vt_drm_backend_state_t *drm,
     VT_ERROR(comp->log, "Failed to allocate DRM output metadata.");
     return false;
   }
+
+  if (!vt_output_init_geom(output, (uint32_t)selected->width,
+                           (uint32_t)selected->height))
+    return false;
 
   wl_list_insert(&drm->outputs, &output->link_local);
   wl_list_insert(&drm->comp->outputs, &output->link_global);
@@ -3736,7 +3737,8 @@ bool backend_is_dmabuf_importable_drm(struct vt_backend_t     *backend,
 
 struct vt_buffer_t *backend_allocate_buffer_drm(struct vt_backend_t *backend,
                                                 uint32_t width, uint32_t height,
-                                                uint32_t format) {
+                                                uint32_t format,
+                                                uint64_t modifier) {
   VT_PROFILE_SCOPE();
   assert(backend);
 
@@ -3750,7 +3752,79 @@ struct vt_buffer_t *backend_allocate_buffer_drm(struct vt_backend_t *backend,
     return NULL;
 
   return drm_gbm_buffer_allocator_alloc(
-      backend->comp, master->main_drm->gbm_dev, width, height, format);
+      backend->comp, master->main_drm->gbm_dev, width, height, format, modifier);
+}
+
+bool backend_get_ideal_format_for_output_drm(struct vt_backend_t *backend,
+                                             struct vt_output_t *output,
+                                             uint32_t *format,
+                                             uint64_t *modifier) {
+  VT_PROFILE_SCOPE();
+  if (!backend || !output || output->backend != backend || !format || !modifier)
+    return false;
+
+  struct vt_drm_output_state_t *state = output->user_data;
+  struct vt_renderer_t *renderer = backend->comp->renderer;
+  if (!state || !state->crtc ||
+      !renderer->impl.query_dmabuf_formats_with_renderer)
+    return false;
+
+  struct wl_array sampling, planes, shared;
+  wl_array_init(&sampling);
+  wl_array_init(&planes);
+  wl_array_init(&shared);
+
+  bool found = false;
+  if (!renderer->impl.query_dmabuf_formats_with_renderer(renderer, &sampling) ||
+      !_drm_output_scanout_formats(state->drm_backend, state, &planes) ||
+      !vt_drm_format_array_intersect(&shared, &sampling, &planes))
+    goto done;
+
+  /* prefer the primary plane, opaque pixels, and a layout we can fill cheaply */
+  const uint32_t preferred[] = {DRM_FORMAT_XRGB8888, DRM_FORMAT_ARGB8888};
+  unsigned best_score = 0;
+  for (size_t i = 0; i < sizeof(preferred) / sizeof(preferred[0]); i++) {
+    struct vt_drm_format_t key = {.format = preferred[i]};
+    struct vt_drm_format_t *fmt = vt_drm_format_array_get_format(&shared, &key);
+    if (!fmt)
+      continue;
+
+    struct vt_drm_format_modifier_t *mod;
+    wl_array_for_each(mod, &fmt->mods) {
+      if (mod->mod == DRM_FORMAT_MOD_INVALID || mod->_egl_ext_only ||
+          (!state->drm_backend->caps[VT_DRM_CAP_ADDFB2_MODIFIERS] &&
+           mod->mod != DRM_FORMAT_MOD_LINEAR))
+        continue;
+
+      unsigned score = 1;
+      if (_drm_plane_has_format(state->crtc->plane_primary, fmt->format, mod->mod))
+        score += 8;
+      if (fmt->format == DRM_FORMAT_XRGB8888)
+        score += 4;
+      if (mod->mod == DRM_FORMAT_MOD_LINEAR)
+        score += 2;
+
+      if (score <= best_score)
+        continue;
+
+      best_score = score;
+      *format = fmt->format;
+      *modifier = mod->mod;
+      found = true;
+    }
+  }
+
+  if (found)
+    VT_TRACE(backend->comp->log,
+             "selected background layout for output %s: format=0x%08" PRIx32
+             " modifier=0x%016" PRIx64 ".", output->physical.name,
+             *format, *modifier);
+
+done:
+  vt_drm_format_array_free(&sampling);
+  vt_drm_format_array_free(&planes);
+  vt_drm_format_array_free(&shared);
+  return found;
 }
 
 bool backend_clear_buffer_drm(struct vt_backend_t *backend,
@@ -3958,11 +4032,19 @@ static bool _drm_test_output_layers(struct vt_backend_t            *backend,
      * scanout on the output. */
     bool format_changed = false;
     if (!_drm_layer_format_eligible(drm_output, buf, i, &format_changed)) {
-      if (format_changed)
+      if (format_changed && buf->impl->get_dmabuf) {
+        struct vt_dmabuf_attr_t dmabuf;
+        assert(vt_buffer_get_dmabuf(buf, &dmabuf));
+        const char *format_name = drmGetFormatName(dmabuf.format);
+        char        mod_str[256];
+        _modifier_to_str(dmabuf.mod, mod_str, sizeof(mod_str));
+
         VT_TRACE(backend->comp->log,
                  "layer %zu surface=%p rejected from liftoff test: "
-                 "buffer format/modifier is not in the output scanout tranche.",
-                 i, (void *)layer->surface);
+                 "buffer format/modifier (format: %s, modifier: %s) is not in "
+                 "the output scanout tranche.",
+                 i, (void *)layer->surface, format_name, mod_str);
+      }
       goto composited;
     }
 
@@ -4588,6 +4670,7 @@ bool backend_implement_drm(struct vt_compositor_t *comp) {
       .init = backend_init_drm,
       .is_dmabuf_importable = backend_is_dmabuf_importable_drm,
       .allocate_buffer = backend_allocate_buffer_drm,
+      .get_ideal_format_for_output = backend_get_ideal_format_for_output_drm,
       .clear_buffer = backend_clear_buffer_drm,
       .handle_frame = backend_handle_frame_drm,
       .commit_cursor_only = backend_commit_cursor_only_drm,

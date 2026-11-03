@@ -121,7 +121,7 @@ static bool _x11_init_dmabuf_feedback(struct vt_compositor_t *c);
 
 static struct vt_buffer_t *
 backend_allocate_buffer_x11(struct vt_backend_t *backend, uint32_t width,
-                            uint32_t height, uint32_t format);
+                            uint32_t height, uint32_t format, uint64_t modifier);
 
 static bool backend_clear_buffer_x11(struct vt_backend_t *backend,
                                      struct vt_buffer_t *buf, uint32_t color);
@@ -579,8 +579,10 @@ done:
 // ===================================================
 static struct vt_buffer_t *
 backend_allocate_buffer_x11(struct vt_backend_t *backend, uint32_t width,
-                            uint32_t height, uint32_t format) {
+                            uint32_t height, uint32_t format, uint64_t modifier) {
   VT_PROFILE_SCOPE();
+  (void)modifier;
+
   size_t size;
   if (!_x11_buffer_check_size(width, height, &size) ||
       (format != DRM_FORMAT_XRGB8888 && format != DRM_FORMAT_ARGB8888))

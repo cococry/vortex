@@ -1,12 +1,17 @@
 #include "src/core/profiling.h"
 #include "gbm_allocator.h"
+#include "core/util.h"
 
 #include <drm/drm_fourcc.h>
+#include <errno.h>
 #include <gbm.h>
+#include <inttypes.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#define _SUBSYS_NAME "GBM_ALLOCATOR"
 
 struct gbm_attachment_data {
   struct gbm_bo *bo;
@@ -135,18 +140,65 @@ struct vt_buffer_t *drm_gbm_buffer_allocator_alloc(struct vt_compositor_t *comp,
                                                    struct gbm_device      *gbm,
                                                    uint32_t width,
                                                    uint32_t height,
-                                                   uint32_t format) {
+                                                   uint32_t format,
+                                                   uint64_t modifier) {
   VT_PROFILE_SCOPE();
-  if (!comp || !gbm || width == 0 || height == 0 || width > UINT32_MAX / 4u)
+  if (!comp)
     return NULL;
 
-  const uint32_t usage = GBM_BO_USE_SCANOUT | GBM_BO_USE_LINEAR;
-  struct gbm_bo *bo = gbm_bo_create(gbm, width, height, format, usage);
-  if (!bo)
+  const char fourcc[] = {format & 0xff, (format >> 8) & 0xff,
+                         (format >> 16) & 0xff, (format >> 24) & 0xff, 0};
+  VT_TRACE(comp->log,
+           "Allocating %" PRIu32 "x%" PRIu32 " format=%.4s (0x%08" PRIx32
+           ") modifier=0x%016" PRIx64 ".", width, height, fourcc, format,
+           modifier);
+
+  if (!gbm) {
+    VT_TRACE(comp->log, "Allocation failed: no GBM device.");
     return NULL;
+  }
+
+  if (width == 0 || height == 0 || width > UINT32_MAX / 4u) {
+    VT_TRACE(comp->log, "Allocation failed: invalid buffer dimensions.");
+    return NULL;
+  }
+
+  if (modifier == DRM_FORMAT_MOD_INVALID) {
+    VT_TRACE(comp->log, "Allocation failed: an explicit modifier is required.");
+    return NULL;
+  }
+
+  if (format != DRM_FORMAT_XRGB8888 && format != DRM_FORMAT_ARGB8888) {
+    VT_TRACE(comp->log, "Allocation failed: unsupported pixel format.");
+    return NULL;
+  }
+
+  /* the modifier specifies the layout; GBM rejects USE_LINEAR with modifiers */
+  const uint32_t usage = GBM_BO_USE_SCANOUT;
+
+  VT_TRACE(comp->log, "Creating GBM BO with usage=0x%08" PRIx32 ".", usage);
+
+  struct gbm_bo *bo = gbm_bo_create_with_modifiers2(
+      gbm, width, height, format, &modifier, 1, usage);
+  if (!bo) {
+    int error = errno;
+    VT_TRACE(comp->log, "Allocation failed: gbm_bo_create_with_modifiers2: %s "
+                        "(errno=%d).", strerror(error), error);
+    return NULL;
+  }
+
+  uint64_t actual_modifier = gbm_bo_get_modifier(bo);
+  if (actual_modifier != modifier) {
+    VT_TRACE(comp->log,
+             "Allocation failed: GBM returned modifier=0x%016" PRIx64
+             ", requested=0x%016" PRIx64 ".", actual_modifier, modifier);
+    gbm_bo_destroy(bo);
+    return NULL;
+  }
 
   struct gbm_attachment_data *data = calloc(1, sizeof(*data));
   if (!data) {
+    VT_TRACE(comp->log, "Allocation failed: cannot allocate GBM attachment data.");
     gbm_bo_destroy(bo);
     return NULL;
   }
@@ -158,6 +210,8 @@ struct vt_buffer_t *drm_gbm_buffer_allocator_alloc(struct vt_compositor_t *comp,
 
   int plane_count = gbm_bo_get_plane_count(bo);
   if (plane_count < 1 || plane_count > VT_DMABUF_PLANES_CAP) {
+    VT_TRACE(comp->log, "Allocation failed: GBM returned %d planes (capacity=%d).",
+             plane_count, VT_DMABUF_PLANES_CAP);
     _gbm_attachment_destroy(NULL, NULL, data);
     return NULL;
   }
@@ -165,31 +219,54 @@ struct vt_buffer_t *drm_gbm_buffer_allocator_alloc(struct vt_compositor_t *comp,
   /* get_dmabuf callers borrow these FDs for the buffer's lifetime. */
   for (int i = 0; i < plane_count; i++) {
     data->dma_fds[i] = gbm_bo_get_fd_for_plane(bo, i);
-    if (data->dma_fds[i] < 0 || !gbm_bo_get_stride_for_plane(bo, i)) {
+    if (data->dma_fds[i] < 0) {
+      int error = errno;
+      VT_TRACE(comp->log, "Allocation failed: exporting plane %d: %s (errno=%d).",
+               i, strerror(error), error);
       _gbm_attachment_destroy(NULL, NULL, data);
       return NULL;
     }
+
+    uint32_t stride = gbm_bo_get_stride_for_plane(bo, i);
+    if (!stride) {
+      VT_TRACE(comp->log, "Allocation failed: plane %d has zero stride.", i);
+      _gbm_attachment_destroy(NULL, NULL, data);
+      return NULL;
+    }
+
+    VT_TRACE(comp->log, "Exported plane %d/%d: fd=%d stride=%" PRIu32
+                        " offset=%" PRIu32 ".", i, plane_count,
+             data->dma_fds[i], stride, gbm_bo_get_offset(bo, i));
   }
 
   struct vt_buffer_t *buffer =
       vt_buffer_create(comp, width, height, &allocated_gbm_buffer_impl);
   if (!buffer) {
+    VT_TRACE(comp->log, "Allocation failed: cannot create vt_buffer_t.");
     _gbm_attachment_destroy(NULL, NULL, data);
     return NULL;
   }
 
   if (!vt_buffer_add_attachment(buffer, &gbm_attachment_owner_key, data,
                                 &gbm_attachment_impl)) {
+    VT_TRACE(comp->log, "Allocation failed: cannot attach GBM BO to buffer.");
     _gbm_attachment_destroy(NULL, NULL, data);
     vt_buffer_unref(&buffer);
     return NULL;
   }
 
   if (!drm_gbm_buffer_allocator_clear(buffer, 0x000000u)) {
+    VT_TRACE(comp->log, "Allocation failed: cannot map/clear buffer to black.");
     /* destroys the attachment */
     vt_buffer_unref(&buffer);
     return NULL;
   }
+
+  VT_TRACE(comp->log,
+           "Allocated buffer=%p: %" PRIu32 "x%" PRIu32
+           " format=%.4s (0x%08" PRIx32 ") modifier=0x%016" PRIx64
+           " planes=%d, cleared to black.", (void *)buffer, width, height,
+           fourcc, format, actual_modifier, plane_count);
 
   return buffer;
 }

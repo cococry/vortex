@@ -200,7 +200,7 @@ static bool _wl_buffer_check_size(uint32_t width, uint32_t height,
 
 static struct vt_buffer_t *
 backend_allocate_buffer_wl(struct vt_backend_t *backend, uint32_t width,
-                           uint32_t height, uint32_t format);
+                           uint32_t height, uint32_t format, uint64_t modifier);
 
 static bool backend_is_dmabuf_importable_wl(struct vt_backend_t     *backend,
                                             struct vt_dmabuf_attr_t *attr,
@@ -980,8 +980,10 @@ bool backend_init_wl(struct vt_backend_t *backend) {
 
 static struct vt_buffer_t *
 backend_allocate_buffer_wl(struct vt_backend_t *backend, uint32_t width,
-                           uint32_t height, uint32_t format) {
+                           uint32_t height, uint32_t format, uint64_t modifier) {
   VT_PROFILE_SCOPE();
+  (void)modifier;
+
   size_t size;
   if (!_wl_buffer_check_size(width, height, &size) ||
       (format != DRM_FORMAT_XRGB8888 && format != DRM_FORMAT_ARGB8888))

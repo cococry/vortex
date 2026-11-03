@@ -20,6 +20,7 @@
  * SOFTWARE.
  */
 
+#include "core/util.h"
 #include "src/core/profiling.h"
 #include "output.h"
 
@@ -30,6 +31,27 @@
 #include <drm/drm_fourcc.h>
 
 static int32_t output_x_ptr = 0;
+
+#define _SUBSYS_NAME "OUTPUT"
+
+static struct vt_buffer_t *_allocate_background_buffer(struct vt_output_t *output);
+
+static struct vt_buffer_t *_allocate_background_buffer(struct vt_output_t *output) {
+  struct vt_backend_t *backend = output->backend;
+  uint32_t             format = DRM_FORMAT_XRGB8888;
+  uint64_t             modifier = DRM_FORMAT_MOD_LINEAR;
+
+  /* we allocate the background buffer with the layout that is both ideal for
+   * scanout and able to be sampled in case of potential composition fallback.
+   */
+  if (backend->impl.get_ideal_format_for_output &&
+      !backend->impl.get_ideal_format_for_output(backend, output, &format,
+                                                &modifier))
+    return NULL;
+
+  return backend->impl.allocate_buffer(backend, output->width, output->height,
+                                       format, modifier);
+}
 
 struct vt_output_t *vt_output_init(struct vt_backend_t               *backend,
                                    struct vt_output_implementation_t *impl) {
@@ -91,14 +113,13 @@ bool _init_output_bg(struct vt_output_t *output) {
   struct vt_buffer_use_t *fallback_use = NULL;
 
   /* initial reference owned by the allocation */
-  fallback_buf = output->backend->impl.allocate_buffer(
-      output->backend, output->width, output->height, DRM_FORMAT_XRGB8888);
+  fallback_buf = _allocate_background_buffer(output);
 
   if (!fallback_buf)
     goto fail;
 
   if (!output->backend->impl.clear_buffer(output->backend, fallback_buf,
-                                          0x181818))
+                                          0xff0000))
     goto fail;
 
   fallback_use = vt_buffer_use_create_take(output->backend->comp, output,
@@ -114,8 +135,15 @@ bool _init_output_bg(struct vt_output_t *output) {
   output->background.node = bg_node;
   output->background.use_fallback = fallback_use;
 
+  VT_TRACE(output->backend->comp->log,
+           "Initialized output background for output %s (%ix%i)",
+           output->physical.name, output->width, output->height);
+
   return true;
 fail:
+  VT_ERROR(output->backend->comp->log,
+           "Failed to initialize output background for output %s (%ix%i)",
+           output->physical.name, output->width, output->height);
   if (bg_node)
     vt_scene_node_destroy(output->backend->comp, bg_node);
   if (fallback_buf) {
@@ -186,8 +214,7 @@ bool vt_output_resize_background(struct vt_output_t *output) {
     return true;
 
   struct vt_backend_t *backend = output->backend;
-  struct vt_buffer_t  *buf = backend->impl.allocate_buffer(
-      backend, output->width, output->height, DRM_FORMAT_XRGB8888);
+  struct vt_buffer_t  *buf = _allocate_background_buffer(output);
   if (!buf)
     return false;
   if (!backend->impl.clear_buffer(backend, buf, 0x181818)) {
