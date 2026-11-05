@@ -108,3 +108,5 @@ struct vt_renderer_t {
 
 void vt_renderer_implement(struct vt_renderer_t       *renderer,
                            enum vt_rendering_backend_t backend);
+
+bool vt_renderer_try_fallback(struct vt_renderer_t       *renderer, void* backend_handle); 

@@ -35,7 +35,8 @@
 #include <wayland-server-core.h>
 #include <wayland-util.h>
 
-#include "../..//core/output.h"
+#include "../../core/output.h"
+#include "../../core/util.h"
 #include "../../core/compositor.h"
 #include "../../protocols/linux_dmabuf.h"
 #include "../../protocols/linux_explicit_sync.h"
@@ -903,8 +904,10 @@ bool backend_init_wl(struct vt_backend_t *backend) {
     return false;
 
   if (!backend->comp->renderer->impl.init(c->backend, backend->comp->renderer,
-                                          wl->parent_display))
-    return false;
+                                          wl->parent_display)) {
+    if (!vt_renderer_try_fallback(backend->comp->renderer, wl->parent_display))
+      return false;
+  }
 
   uint32_t *shm_formats = calloc(2, sizeof(uint32_t));
   shm_formats[0] = _VT_DRM_FORMAT_XRGB8888;

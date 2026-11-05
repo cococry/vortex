@@ -108,6 +108,7 @@ static PFNEGLWAITSYNCKHRPROC             eglWaitSyncKHR_ptr = NULL;
 static PFNEGLDUPNATIVEFENCEFDANDROIDPROC eglDupNativeFenceFDANDROID_ptr = NULL;
 
 struct egl_backend_state_t {
+  void *native_display;
   EGLDisplay egl_dsp;
   EGLContext egl_ctx;
   EGLConfig  egl_conf;
@@ -578,12 +579,18 @@ bool _egl_pick_config_from_format(struct vt_compositor_t     *c,
   }
 
   EGLConfig *configs = VT_ALLOC(c, sizeof(EGLConfig) * num);
-  eglGetConfigs(egl->egl_dsp, configs, num, &num);
+  if (!configs ||
+      !eglGetConfigs(egl->egl_dsp, configs, num, &num)) {
+    VT_ERROR(c->log, "failed to retrieve DRM EGL configs");
+    return false;
+  }
 
   EGLConfig match = NULL;
   EGLint    vis;
   for (int i = 0; i < num; i++) {
-    eglGetConfigAttrib(egl->egl_dsp, configs[i], EGL_NATIVE_VISUAL_ID, &vis);
+    if (!eglGetConfigAttrib(egl->egl_dsp, configs[i], EGL_NATIVE_VISUAL_ID,
+                            &vis))
+      continue;
     if ((uint32_t)vis == format) {
       match = configs[i];
       break;
@@ -592,17 +599,13 @@ bool _egl_pick_config_from_format(struct vt_compositor_t     *c,
 
   if (!match) {
     VT_ERROR(c->log,
-             "could not find config for GBM format 0x%x, falling back to first "
-             "config",
+             "could not find config for GBM format 0x%x",
              format);
-    match = configs[0];
+    return false;
   }
 
   egl->egl_conf = match;
-  eglGetConfigAttrib(egl->egl_dsp, match, EGL_NATIVE_VISUAL_ID, &vis);
-  if (match) {
-    VT_TRACE(c->log, "picked config with visual 0x%x", vis);
-  }
+  VT_TRACE(c->log, "picked config with visual 0x%x", vis);
   egl->egl_native_vis = vis;
 
   return true;
@@ -915,6 +918,7 @@ bool _egl_create_renderer(struct vt_renderer_t      *renderer,
   struct egl_backend_state_t *egl =
       BACKEND_DATA(renderer, struct egl_backend_state_t);
 
+  egl->native_display = native_handle;
   wl_array_init(&egl->formats);
   wl_list_init(&egl->surface_textures);
 
@@ -1198,6 +1202,20 @@ bool renderer_is_handle_renderable_egl(struct vt_renderer_t *renderer,
   if (!renderer || !renderer->comp || !renderer->comp->backend ||
       !native_handle)
     return false;
+  if (renderer->user_data) {
+    struct egl_backend_state_t *egl =
+        BACKEND_DATA(renderer, struct egl_backend_state_t);
+    if (egl->native_display == native_handle)
+      return egl->egl_dsp != EGL_NO_DISPLAY;
+
+    EGLDisplay display = _egl_create_display(
+        renderer->comp, renderer->comp->backend->platform, native_handle, false);
+    if (display == EGL_NO_DISPLAY)
+      return false;
+    if (display != egl->egl_dsp)
+      eglTerminate(display);
+    return true;
+  }
   return _egl_create_renderer(renderer, renderer->comp->backend->platform,
                               native_handle, false);
 }

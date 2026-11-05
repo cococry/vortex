@@ -1224,11 +1224,21 @@ static bool _drm_init_for_device(struct vt_compositor_t        *comp,
     comp->renderer->device = dev->dev;
   }
 
-  if (!drm_master->main_drm &&
-      comp->renderer->impl.is_handle_renderable(comp->renderer,
-                                                drm->native_handle) &&
-      comp->renderer->impl.init(comp->backend, comp->renderer,
+  if (!drm_master->main_drm) {
+    if(!comp->renderer->impl.init(comp->backend, comp->renderer,
                                 drm->native_handle)) {
+      if (!vt_renderer_try_fallback(comp->renderer, drm->native_handle)) {
+        return false;
+      }
+    }
+
+    if(!comp->renderer->impl.is_handle_renderable(
+        comp->renderer, drm->native_handle)) {
+      log_fatal(comp->log,
+                "Renderer initialized, but DRM handle is not renderable.");
+      return false;
+    }
+
     drm_master->main_drm = drm;
 
     VT_TRACE(comp->log, "Chose DRM main device: GPU %s (FD: %i).", dev->path,

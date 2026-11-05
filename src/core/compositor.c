@@ -765,7 +765,7 @@ bool _vt_comp_wl_init(struct vt_compositor_t *c) {
     goto error;
   }
 
-  if (!vt_proto_xdg_shell_init(c, 1)) {
+  if (!vt_proto_xdg_shell_init(c, 7)) {
     VT_ERROR(c->log, "Cannot initialize XDG shell protocol.");
     goto error;
   }

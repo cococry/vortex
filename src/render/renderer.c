@@ -105,3 +105,33 @@ void vt_renderer_implement(struct vt_renderer_t       *renderer,
 #error "No renderer is enabled."
 #endif
 }
+
+bool vt_renderer_try_fallback(struct vt_renderer_t *renderer,
+                              void                 *backend_handle) {
+  assert(renderer);
+
+  struct vt_compositor_t *c = renderer->comp;
+  struct vt_backend_t    *backend = renderer->comp->backend;
+#if VT_HAS_VULKAN && VT_HAS_OPENGL
+  VT_INFO(c->log,
+          "Primary renderer failed to initialize, trying secondary options.");
+  // Try all other built renderers
+  for (enum vt_rendering_backend_t try = VT_RENDERING_BACKEND_EGL_OPENGL;
+       try < VT_RENDERING_BACKEND_VULKAN; try++) {
+    if (try == backend->comp->renderer->rendering_backend) {
+      continue;
+    }
+    // Try again with different backend
+    vt_renderer_implement(backend->comp->renderer, try);
+    if (!backend->comp->renderer->impl.init(
+            c->backend, c->backend->comp->renderer, backend_handle)) {
+      log_fatal(c->log, "All available renderers failed to initialize.");
+      return false;
+    }
+    return true;
+  }
+#else
+  return false;
+#endif
+  return false;
+}

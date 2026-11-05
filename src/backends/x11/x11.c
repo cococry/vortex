@@ -793,8 +793,10 @@ static bool backend_init_x11(struct vt_backend_t *backend) {
       XCreatePixmapCursor(x->display, bitmap, bitmap, &color, &color, 0, 0);
   XFreePixmap(x->display, bitmap);
 
-  if (!c->renderer->impl.init(backend, c->renderer, x->display))
-    goto fail;
+  if (!c->renderer->impl.init(backend, c->renderer, x->display)) {
+    if (!vt_renderer_try_fallback(backend->comp->renderer, x->display))
+      goto fail;
+  }
 
   /* get appropriate visual desired by the renderer */
   XVisualInfo *visual;
