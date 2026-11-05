@@ -525,6 +525,17 @@ void _vt_comp_log_help(void) {
   printf("%-35s %s\n", "-bp, --backend-path [val]",
          "Specifies the path of the .so file to load as the compositor's sink "
          "backend");
+
+  printf("\nEnvironment Variables (set to any value if you want to enable one of them): \n\n");
+  printf("%-35s %s\n", "VT_DRM_NO_ATOMIC",
+         "Force legacy DRM/KMS implementation (ignored when not running DRM "
+         "backend)");
+  printf("%-35s %s\n", "VT_DRM_NO_HARDWARE_CURSOR",
+         "Force cursor compositing (ignored when not running DRM "
+         "backend)");
+  printf("%-35s %s\n", "VT_DRM_NO_DIRECT_SCANOUT",
+         "Disable layer-plan caching, re-evaluating Liftoff each frame (worse "
+         "performance, more realiable) (ignored when not running DRM backend)");
   exit(0);
 }
 
