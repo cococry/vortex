@@ -118,6 +118,7 @@ struct egl_backend_state_t {
       has_explicit_sync_support;
   bool has_gl_image_import_support;
 
+  bool has_buffer_age;
   bool has_swap_buffers_with_damage_khr;
   bool has_swap_buffers_with_damage_ext;
 
@@ -131,8 +132,13 @@ struct egl_backend_state_t {
   struct wl_array formats;
 };
 
+#define EGL_DAMAGE_HISTORY 8
+
 struct egl_output_state_t {
   GLuint fbo_id, fbo_tex_id, rbo_tex_depth;
+  pixman_region32_t damage_history[EGL_DAMAGE_HISTORY];
+  unsigned damage_count, damage_next;
+  uint32_t damage_width, damage_height;
 
   struct wl_list rendered_buffer_uses;
 };
@@ -151,7 +157,8 @@ static bool _egl_pick_config(struct vt_compositor_t     *comp,
                              struct egl_backend_state_t *egl,
                              struct vt_backend_t        *backend);
 static bool _egl_record_surface_release_fences(struct vt_renderer_t *renderer,
-                                               struct vt_output_t   *output);
+                                               struct vt_output_t   *output,
+                                               EGLSyncKHR end_sync, bool flushed);
 static bool _egl_gl_create_output_fbo(struct vt_output_t *output,
                                       uint32_t width, uint32_t height);
 
@@ -690,10 +697,17 @@ bool _egl_buffer_use_is_ready(struct vt_renderer_t   *renderer,
       !egl->has_explicit_sync_support)
     return true;
 
-  // a pending fence here makes the composite wait on the client's GPU work
+  // a pending fence here makes the compositer wait on the client's GPU work
   struct pollfd pfd = {.fd = use->acquire_fence_fd, .events = POLLIN};
   egl->fenced_draws++;
-  if (poll(&pfd, 1, 0) == 0)
+  int ready = poll(&pfd, 1, 0);
+  if (ready > 0 && (pfd.revents & POLLIN)) {
+    /* A completed acquire fence needs no GPU-side import or wait. */
+    close(use->acquire_fence_fd);
+    use->acquire_fence_fd = -1;
+    return true;
+  }
+  if (ready == 0)
     egl->fence_pending_draws++;
 
   EGLint attribs[] = {
@@ -738,7 +752,8 @@ static bool _output_needs_release_fence(struct egl_output_state_t *egl_output) {
 }
 
 bool _egl_record_surface_release_fences(struct vt_renderer_t *renderer,
-                                        struct vt_output_t   *output) {
+                                        struct vt_output_t   *output,
+                                        EGLSyncKHR end_sync, bool flushed) {
   VT_PROFILE_SCOPE();
   if (!renderer || !output)
     return false;
@@ -746,28 +761,23 @@ bool _egl_record_surface_release_fences(struct vt_renderer_t *renderer,
   struct egl_backend_state_t *egl =
       BACKEND_DATA(output->backend->comp->renderer, struct egl_backend_state_t);
 
-  bool explicit_sync = renderer->comp->have_proto_dmabuf_explicit_sync &&
-                       egl->has_explicit_sync_support;
-
-  struct egl_output_state_t *egl_output =
-      (struct egl_output_state_t *)output->user_data_render;
-
-  bool need_fence = explicit_sync && _output_needs_release_fence(egl_output);
-
+  struct egl_output_state_t *egl_output = output->user_data_render;
   int fence_fd = -1;
-  if (need_fence) {
-    EGLSyncKHR end_sync = eglCreateSyncKHR_ptr(
-        egl->egl_dsp, EGL_SYNC_NATIVE_FENCE_ANDROID, (EGLint[]){EGL_NONE});
+  if (end_sync != EGL_NO_SYNC_KHR) {
+    /* A successful window swap already flushed this context. */
+    if (!flushed) {
+      VT_PROFILE_SCOPE_NAMED("EGL release fence: fallback flush");
+      glFlush();
+    }
 
-    if (end_sync == EGL_NO_SYNC_KHR)
-      return false;
-
-    glFlush();
-
-    // Get a single end-of-frame fence FD for this output's GPU commands
-    fence_fd = eglDupNativeFenceFDANDROID_ptr(egl->egl_dsp, end_sync);
-
-    eglDestroySyncKHR_ptr(egl->egl_dsp, end_sync);
+    {
+      VT_PROFILE_SCOPE_NAMED("EGL release fence: export FD");
+      fence_fd = eglDupNativeFenceFDANDROID_ptr(egl->egl_dsp, end_sync);
+    }
+    {
+      VT_PROFILE_SCOPE_NAMED("EGL release fence: destroy sync");
+      eglDestroySyncKHR_ptr(egl->egl_dsp, end_sync);
+    }
 
     if (fence_fd < 0) {
 
@@ -783,6 +793,7 @@ bool _egl_record_surface_release_fences(struct vt_renderer_t *renderer,
   struct egl_rendered_buffer_use_t *entry, *tmp;
 
   wl_list_for_each_safe(entry, tmp, &egl_output->rendered_buffer_uses, link) {
+    VT_PROFILE_SCOPE_NAMED("EGL release fence: retire buffer use");
     struct vt_buffer_use_t *use = entry->use;
 
     if (use && fence_fd >= 0 && vt_buffer_release_needs_fence(use->release)) {
@@ -1117,10 +1128,10 @@ bool renderer_init_egl(struct vt_backend_t *backend, struct vt_renderer_t *r,
   }
 
   egl->has_swap_buffers_with_damage_khr =
-      strstr(exts, "EGL_KHR_swap_buffers_with_damage");
+      _egl_has_extension(exts, "EGL_KHR_swap_buffers_with_damage");
 
   egl->has_swap_buffers_with_damage_ext =
-      strstr(exts, "EGL_EXT_swap_buffers_with_damage");
+      _egl_has_extension(exts, "EGL_EXT_swap_buffers_with_damage");
 
   if (egl->has_swap_buffers_with_damage_ext) {
     eglSwapBuffersWithDamageEXT_ptr =
@@ -1132,8 +1143,17 @@ bool renderer_init_egl(struct vt_backend_t *backend, struct vt_renderer_t *r,
     eglSwapBuffersWithDamageKHR_ptr =
         (PFNEGLSWAPBUFFERSWITHDAMAGEKHRPROC)eglGetProcAddress(
             "eglSwapBuffersWithDamageKHR");
-    egl->has_swap_buffers_with_damage_khr = true;
+    egl->has_swap_buffers_with_damage_khr =
+        eglSwapBuffersWithDamageKHR_ptr != NULL;
   }
+
+  egl->has_swap_buffers_with_damage_ext &=
+      eglSwapBuffersWithDamageEXT_ptr != NULL;
+  egl->has_buffer_age = _egl_has_extension(exts, "EGL_EXT_buffer_age");
+  if (!egl->has_swap_buffers_with_damage_khr &&
+      !egl->has_swap_buffers_with_damage_ext)
+    VT_WARN(r->comp->log, "EGL damage-aware buffer swapping unavailable; "
+                         "using eglSwapBuffers.");
 
   egl->has_dmabuf_support =
       _egl_has_extension(exts, "EGL_EXT_image_dma_buf_import");
@@ -1441,6 +1461,10 @@ bool renderer_setup_renderable_output_egl(struct vt_renderer_t *r,
   struct egl_output_state_t *egl_output =
       (struct egl_output_state_t *)output->user_data_render;
 
+  egl_output->damage_count = egl_output->damage_next = 0;
+  egl_output->damage_width = egl_output->damage_height = 0;
+  for (unsigned i = 0; i < EGL_DAMAGE_HISTORY; i++)
+    pixman_region32_init(&egl_output->damage_history[i]);
   wl_list_init(&egl_output->rendered_buffer_uses);
 
   // If we're running the wayland sink backend, we create the egl_window
@@ -1544,6 +1568,7 @@ bool renderer_resize_renderable_output_egl(struct vt_renderer_t *r,
   if (r->backend->platform == VT_BACKEND_WAYLAND)
     wl_egl_window_resize(output->native_window, w, h, 0, 0);
 
+  ((struct egl_output_state_t *)output->user_data_render)->damage_count = 0;
   if (!_egl_gl_create_output_fbo(output, w, h))
     return false;
 
@@ -1576,6 +1601,8 @@ bool renderer_destroy_renderable_output_egl(struct vt_renderer_t *r,
       wl_list_remove(&entry->link);
       free(entry);
     }
+    for (unsigned i = 0; i < EGL_DAMAGE_HISTORY; i++)
+      pixman_region32_fini(&egl_output->damage_history[i]);
     glDeleteTextures(1, &egl_output->fbo_tex_id);
     glDeleteFramebuffers(1, &egl_output->fbo_id);
     glDeleteRenderbuffers(1, &egl_output->rbo_tex_depth);
@@ -2068,8 +2095,7 @@ void renderer_end_scene_egl(struct vt_renderer_t *r,
 void renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,
                             const pixman_box32_t *damaged, int32_t n_damaged) {
   VT_PROFILE_SCOPE();
-  (void)damaged;
-  (void)n_damaged;
+
 
   if (!r || !output)
     return;
@@ -2093,24 +2119,140 @@ void renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,
   glDisable(GL_STENCIL_TEST);
   glDisable(GL_SCISSOR_TEST);
 
-  glBlitFramebuffer(0, 0, output->width, output->height, 0, 0, output->width,
-                    output->height, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+  if (egl_output->damage_width != output->width ||
+      egl_output->damage_height != output->height) {
+    egl_output->damage_count = 0;
+    egl_output->damage_width = output->width;
+    egl_output->damage_height = output->height;
+  }
+
+  pixman_region32_t current, repair;
+  EGLint age = 0;
+  int n_rects;
+  pixman_box32_t *rects;
+  EGLint *swap_rects;
+  EGLBoolean swapped;
+  {
+    VT_PROFILE_SCOPE_NAMED("EGL damage: build current region");
+    pixman_region32_init(&current);
+    if (damaged && n_damaged > 0) {
+      pixman_region32_fini(&current);
+      pixman_region32_init_rects(&current, damaged, n_damaged);
+    }
+    pixman_region32_intersect_rect(&current, &current, 0, 0,
+                                   output->width, output->height);
+    pixman_region32_init(&repair);
+    pixman_region32_copy(&repair, &current);
+  }
+  {
+    VT_PROFILE_SCOPE_NAMED("EGL damage: query buffer age");
+    const pixman_box32_t full = {0, 0, output->width, output->height};
+    if (pixman_region32_contains_rectangle(&current, &full) == PIXMAN_REGION_IN) {
+      /* Every pixel will be overwritten; querying an older buffer is wasted
+       * driver work. Age one selects just the current (full) damage below. */
+      age = 1;
+    } else if (egl->has_buffer_age &&
+               !eglQuerySurface(egl->egl_dsp, output->render_surface,
+                                EGL_BUFFER_AGE_EXT, &age)) {
+      age = 0;
+    }
+  }
+  {
+    VT_PROFILE_SCOPE_NAMED("EGL damage: union repair history");
+    if (age <= 0 || (unsigned)(age - 1) > egl_output->damage_count) {
+      pixman_region32_union_rect(&repair, &repair, 0, 0,
+                                 output->width, output->height);
+    } else {
+      for (int i = 1; i < age; i++) {
+        unsigned index = (egl_output->damage_next + EGL_DAMAGE_HISTORY - i) %
+                         EGL_DAMAGE_HISTORY;
+        pixman_region32_union(&repair, &repair,
+                              &egl_output->damage_history[index]);
+      }
+    }
+  }
+  {
+    VT_PROFILE_SCOPE_NAMED("EGL damage: submit blits");
+    rects = pixman_region32_rectangles(&repair, &n_rects);
+    for (int i = 0; i < n_rects; i++) {
+      int x1 = rects[i].x1, x2 = rects[i].x2;
+      int y1 = output->height - rects[i].y2;
+      int y2 = output->height - rects[i].y1;
+      glBlitFramebuffer(x1, y1, x2, y2, x1, y1, x2, y2,
+                        GL_COLOR_BUFFER_BIT, GL_NEAREST);
+    }
+  }
+  pixman_region32_fini(&repair);
 
   GLenum gl_err = glGetError();
   if (gl_err != GL_NO_ERROR) {
     VT_ERROR(r->comp->log,
              "glBlitFramebuffer failed for output %p: GL error 0x%x",
              (void *)output, gl_err);
+    egl_output->damage_count = 0;
+    pixman_region32_fini(&current);
     return;
   }
 
-  if (!_egl_record_surface_release_fences(r, output)) {
-    VT_ERROR(r->comp->log,
-             "Cannot record surface release fences after render for output %p.",
-             (void *)output);
+  EGLSyncKHR release_sync = EGL_NO_SYNC_KHR;
+  {
+    VT_PROFILE_SCOPE_NAMED("EGL release fence: create");
+    if (r->comp->have_proto_dmabuf_explicit_sync &&
+        egl->has_explicit_sync_support && _output_needs_release_fence(egl_output)) {
+      release_sync = eglCreateSyncKHR_ptr(egl->egl_dsp,
+          EGL_SYNC_NATIVE_FENCE_ANDROID, (EGLint[]){EGL_NONE});
+      if (release_sync == EGL_NO_SYNC_KHR) {
+        VT_ERROR(r->comp->log, "Failed to create output release fence.");
+        egl_output->damage_count = 0;
+        pixman_region32_fini(&current);
+        return;
+      }
+    }
   }
-
-  if (!eglSwapBuffers(egl->egl_dsp, output->render_surface)) {
+  /* Populating the EGL rects the damage of this output and do damaged swapping.
+   */
+  {
+    VT_PROFILE_SCOPE_NAMED("EGL damage: allocate and convert swap rectangles");
+    rects = pixman_region32_rectangles(&current, &n_rects);
+    swap_rects = n_rects ? calloc(n_rects, 4 * sizeof(EGLint)) : NULL;
+    for (int i = 0; swap_rects && i < n_rects; i++) {
+      swap_rects[4*i] = rects[i].x1;
+      swap_rects[4*i+1] = output->height - rects[i].y2;
+      swap_rects[4*i+2] = rects[i].x2 - rects[i].x1;
+      swap_rects[4*i+3] = rects[i].y2 - rects[i].y1;
+    }
+  }
+  {
+    VT_PROFILE_SCOPE_NAMED("EGL presentation: swap buffers");
+    if (egl->has_swap_buffers_with_damage_khr)
+      swapped = eglSwapBuffersWithDamageKHR_ptr(egl->egl_dsp,
+          output->render_surface, swap_rects, swap_rects ? n_rects : 0);
+    else if (egl->has_swap_buffers_with_damage_ext)
+      swapped = eglSwapBuffersWithDamageEXT_ptr(egl->egl_dsp,
+          output->render_surface, swap_rects, swap_rects ? n_rects : 0);
+    else
+      swapped = eglSwapBuffers(egl->egl_dsp, output->render_surface);
+  }
+  {
+    VT_PROFILE_SCOPE_NAMED("EGL presentation: release fences");
+    if (!_egl_record_surface_release_fences(r, output, release_sync, swapped))
+      VT_ERROR(r->comp->log, "Failed to record output release fences.");
+  }
+  {
+    VT_PROFILE_SCOPE_NAMED("EGL damage: save history and cleanup");
+    free(swap_rects);
+    if (swapped) {
+      pixman_region32_copy(&egl_output->damage_history[egl_output->damage_next],
+                           &current);
+      egl_output->damage_next = (egl_output->damage_next + 1) % EGL_DAMAGE_HISTORY;
+      if (egl_output->damage_count < EGL_DAMAGE_HISTORY)
+        egl_output->damage_count++;
+    } else {
+      egl_output->damage_count = 0;
+    }
+    pixman_region32_fini(&current);
+  }
+  if (!swapped) {
     VT_ERROR(r->comp->log,
              "eglSwapBuffers failed for output %p: EGL error 0x%x",
              (void *)output, eglGetError());

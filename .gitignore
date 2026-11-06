@@ -6,4 +6,5 @@ subprojects/packagecache/
 subprojects/libliftoff/
 subprojects/runara/
 subprojects/tracy/
+*.tracy
 **/**.log
