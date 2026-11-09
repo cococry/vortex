@@ -123,7 +123,10 @@ class ComparisonTests(unittest.TestCase):
                 code = ('import os,time,pathlib\n'
                         'if os.fork()==0:\n'
                         ' os.setsid()\n'
-                        f' pathlib.Path({str(marker)!r}).write_text(str(os.getpid()))\n'
+                        f' marker=pathlib.Path({str(marker)!r})\n'
+                        ' pending=marker.with_suffix(".tmp")\n'
+                        ' pending.write_text(str(os.getpid()))\n'
+                        ' pending.replace(marker)\n'
                         ' time.sleep(60)\n')
                 parent = subprocess.Popen([sys.executable, '-c', code], start_new_session=True)
                 processes.append(parent)

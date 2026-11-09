@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
-"""Build GUI-free Tracy tools, serially, from the repository's Tracy source."""
+"""Build GUI-free Tracy tools in parallel, from the repository's Tracy source."""
 import argparse
 import hashlib
+import os
 import pathlib
 import shutil
 import subprocess
@@ -12,7 +13,10 @@ ROOT = HERE.parents[1]
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--configure-only', action='store_true')
+    parser.add_argument('-j', '--jobs', type=int, default=os.cpu_count() or 1)
     args = parser.parse_args()
+    if args.jobs < 1:
+        parser.error('--jobs must be positive')
     original = ROOT / 'subprojects/tracy'
     source = HERE.parent / '.cache/tracy-source'
     build = HERE.parent / '.cache/tools'
@@ -50,7 +54,7 @@ def main():
     flags = subprocess.check_output(['pkg-config', '--cflags', '--libs', 'wayland-client'], text=True).split()
     subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', str(HERE/'output-info.c'), '-o', str(build/'output-info'), *flags], check=True)
     if not args.configure_only:
-        subprocess.run(['cmake', '--build', str(build), '--parallel', '1'], check=True)
+        subprocess.run(['cmake', '--build', str(build), '--parallel', str(args.jobs)], check=True)
         stamp.write_text(fingerprint)
 
 if __name__ == '__main__':

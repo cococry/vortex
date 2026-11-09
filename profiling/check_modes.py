@@ -24,3 +24,25 @@ void probe(void) {{
    timestamps=len(re.findall(r'\b(?:call|jmp)\s+___tracy_emit_zone_value(?:@PLT)?\b',text))
    if timestamps!=(1 if mode=='comparison' else 0):raise RuntimeError(f'{header}/{mode}: incorrect coarse timestamp probes')
    print(f'{header}: {mode}: {calls} zone calls OK')
+
+# Compile the actual Runara Vulkan implementation, including named driver-call
+# zones. Coarse/release must erase all its detailed probes.
+with tempfile.TemporaryDirectory() as directory:
+ assembly=pathlib.Path(directory)/'runara-vulkan.s'
+ for mode,flags in [('off',[]),('detailed',['-DTRACY_ENABLE']),('comparison',['-DTRACY_ENABLE','-DVT_PROFILE_COMPARISON'])]:
+  subprocess.run(['cc','-std=c11','-D_POSIX_C_SOURCE=200809L','-O2','-S',
+   '-I'+str(ROOT/'subprojects/runara'),
+   '-I'+str(ROOT/'subprojects/runara/include'),
+   '-I'+str(ROOT/'subprojects/runara/vendor/vma/include'),
+   '-I'+str(ROOT/'subprojects/tracy/public'),
+   '-include',str(ROOT/'src/core/profiling.h'),
+   '-DRN_PROFILE_SCOPE=VT_PROFILE_SCOPE',
+   '-DRN_PROFILE_SCOPE_NAMED=VT_PROFILE_SCOPE_NAMED',
+   *flags,str(ROOT/'subprojects/runara/src/vulkan/backend.c'),'-o',str(assembly)],check=True)
+  text=assembly.read_text()
+  calls=len(re.findall(r'\b(?:call|jmp)\s+___tracy_emit_zone_begin(?:_callstack)?(?:@PLT)?\b',text))
+  if (calls > 0) != (mode=='detailed'):
+   raise RuntimeError(f'Runara Vulkan/{mode}: incorrect detailed probes ({calls})')
+  if mode=='detailed' and 'Vulkan: present' not in text:
+   raise RuntimeError('Runara Vulkan: named presentation scope missing')
+  print(f'Runara Vulkan: {mode}: {calls} zone calls OK')

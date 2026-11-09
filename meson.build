@@ -29,6 +29,60 @@ build_vulkan = renderers in ['vulkan', 'all']
 # Runara
 # ============================================================
 
+# Profiling must be configured before Runara so its optional hook can use
+# the same client and compile definitions as Vortex.
+profiling_deps = []
+if get_option('profiling_comparison')
+  add_project_arguments('-DVT_PROFILE_COMPARISON', '-D_POSIX_C_SOURCE=200809L', language: 'c')
+endif
+dep_profiling_headers = declare_dependency()
+if get_option('profiling') or get_option('profiling_comparison')
+  # We build tracy only if profiling is specifically enabled
+  tracy_options = ['tracy_enable=true', 'cpp_std=c++17']
+  if get_option('profiling_comparison')
+    # Match wlroots' shared -O2 client; detailed profiling keeps its defaults.
+    tracy_options += ['default_library=shared', 'optimization=2']
+  else
+    tracy_options += ['default_library=static']
+  endif
+  tracy_sp = subproject('tracy', default_options: tracy_options)
+  tracy_dep = tracy_sp.get_variable('tracy_dep')
+  profiling_deps += tracy_dep
+  # Backend modules use the client exported by Vortex, rather than embedding
+  # separate Tracy clients in each module.
+  dep_profiling_headers = tracy_dep.partial_dependency(
+    compile_args: true,
+    includes: true,
+  )
+  # This is a separate reference compositor, not a Vortex build dependency.
+  # Profiling configuration prepares its pinned sources; the comparison script
+  # builds them in parallel when requested. Release-only setup does not fetch it.
+  wlroots_prepare_args = [
+    files('profiling/prepare_wlroots.py'),
+  ]
+  if get_option('wrap_mode') == 'nodownload'
+    wlroots_prepare_args += ['--no-download']
+  endif
+  wlroots_prepared = run_command(find_program('python3'), wlroots_prepare_args, check: true)
+  message(wlroots_prepared.stdout().strip())
+endif
+
+if get_option('profiling') and not get_option('profiling_comparison')
+  runara_profiler = declare_dependency(
+    dependencies: dep_profiling_headers,
+    compile_args: [
+      '-D_POSIX_C_SOURCE=200809L',
+      '-include', meson.current_source_dir() / 'src/core/profiling.h',
+      '-DRN_PROFILE_SCOPE=VT_PROFILE_SCOPE',
+      '-DRN_PROFILE_SCOPE_NAMED=VT_PROFILE_SCOPE_NAMED',
+    ],
+  )
+else
+  # Coarse comparison/release builds must never inherit detailed Runara probes.
+  runara_profiler = declare_dependency()
+endif
+meson.override_dependency('runara-profiling', runara_profiler)
+
 runara_backends = renderers
 
 runara_sp = subproject(
@@ -89,41 +143,8 @@ deps = [
   dep_libdrm,
   runara_dep,
 ]
+deps += profiling_deps
 
-if get_option('profiling_comparison')
-  add_project_arguments('-DVT_PROFILE_COMPARISON', '-D_POSIX_C_SOURCE=200809L', language: 'c')
-endif
-dep_profiling_headers = declare_dependency()
-if get_option('profiling') or get_option('profiling_comparison')
-  # We build tracy only if profiling is specifically enabled  
-  tracy_options = ['tracy_enable=true', 'cpp_std=c++17']
-  if get_option('profiling_comparison')
-    # Match wlroots' shared -O2 client; detailed profiling keeps its defaults.
-    tracy_options += ['default_library=shared', 'optimization=2']
-  else
-    tracy_options += ['default_library=static']
-  endif
-  tracy_sp = subproject('tracy', default_options: tracy_options)
-  tracy_dep = tracy_sp.get_variable('tracy_dep')
-  deps += tracy_dep
-  # Backend modules use the client exported by Vortex, rather than embedding
-  # separate Tracy clients in each module.
-  dep_profiling_headers = tracy_dep.partial_dependency(
-    compile_args: true,
-    includes: true,
-  )
-  # This is a separate reference compositor, not a Vortex build dependency.
-  # Profiling configuration prepares its pinned sources; the comparison script
-  # builds them serially when requested. Release-only setup does not fetch it.
-  wlroots_prepare_args = [
-    files('profiling/prepare_wlroots.py'),
-  ]
-  if get_option('wrap_mode') == 'nodownload'
-    wlroots_prepare_args += ['--no-download']
-  endif
-  wlroots_prepared = run_command(find_program('python3'), wlroots_prepare_args, check: true)
-  message(wlroots_prepared.stdout().strip())
-endif
 
 if dep_xkbcommon.found()
   deps += dep_xkbcommon

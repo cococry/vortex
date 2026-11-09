@@ -51,7 +51,8 @@ probes; release CPU is measured without Tracy. Mean frame time is from the coars
 profiled runs. CPU includes all compositor threads and excludes client processes.
 Frame-stage rates describe instrumented work, not display presentation FPS.
 OpenGL selects desktop GL in Vortex and GLES2 in wlroots.
-Builds use one job and the capture/export tools have no GUI.
+Builds default to one parallel job per CPU; override with --jobs.
+The capture/export tools have no GUI.
 Profiling configuration fetches the pinned, already-profiled wlroots/dwl checkout
 over SSH. Release-only Meson setup does not fetch it.
 ''')
@@ -59,11 +60,14 @@ over SSH. Release-only Meson setup does not fetch it.
     parser.add_argument('--seconds', type=float, default=30, help='Workload measurement window per run (default: 30)')
     parser.add_argument('--repeats', type=int, default=3, help='Alternating repetitions of each compositor/build (default: 3)')
     parser.add_argument('--output', type=Path, help='New output directory; default: profiling/results/compare-TIMESTAMP')
+    parser.add_argument('-j', '--jobs', type=int, default=os.cpu_count() or 1, help='Parallel build jobs (default: CPU count)')
     parser.add_argument('--no-build', action='store_true', help='Use existing binaries/tools; still audit profiling configuration')
     parser.add_argument('--width', type=int, default=1024, help='X11 nested window width (default: 1024)')
     parser.add_argument('--height', type=int, default=768, help='X11 nested window height (default: 768)')
     parser.add_argument('workload', nargs=argparse.REMAINDER, help='-- SCRIPT [ARG ...]')
     args = parser.parse_args(argv)
+    if args.jobs < 1:
+        parser.error('--jobs must be positive')
     if args.seconds < 1 or args.repeats < 1 or args.width < 1 or args.height < 1:
         parser.error('seconds, repeats and dimensions must be positive (seconds >= 1)')
     if args.workload and args.workload[0] == '--':
@@ -465,11 +469,11 @@ def main(argv=None):
     try:
         with (output / 'build.log').open('w') as log:
             if not args.no_build:
-                print('Building coarse-profiled/release compositors and minimal tools with one job...', flush=True)
+                print('Building coarse-profiled/release compositors and minimal tools...', flush=True)
                 for mode in ['comparison', 'off']:
-                    subprocess.run([sys.executable, str(ROOT / 'profiling/build.py'), '--mode', mode],
+                    subprocess.run([sys.executable, str(ROOT / 'profiling/build.py'), '--mode', mode, '--jobs', str(args.jobs)],
                                    cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)
-                subprocess.run([sys.executable, str(ROOT / 'profiling/tools/build.py')],
+                subprocess.run([sys.executable, str(ROOT / 'profiling/tools/build.py'), '--jobs', str(args.jobs)],
                                cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)
             subprocess.run([sys.executable, str(ROOT / 'profiling/check_builds.py')],
                            stdout=log, stderr=subprocess.STDOUT, check=True)
