@@ -20,8 +20,8 @@
  * SOFTWARE.
  */
 
-#include "src/core/profiling.h"
 #include "focus_policy.h"
+#include "src/core/profiling.h"
 #include "src/core/surface.h"
 #include "src/protocols/xdg_shell.h"
 

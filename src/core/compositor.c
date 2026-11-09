@@ -23,8 +23,8 @@
 #define _GNU_SOURCE
 #define _POSIX_C_SOURCE 200809L
 
-#include "src/core/profiling.h"
 #include "protocols/vt_background.h"
+#include "src/core/profiling.h"
 #include "vt-background-v1-server-protocol.h"
 
 #include "src/input/input.h"
@@ -111,7 +111,7 @@ static const struct wl_region_interface region_impl = {
 };
 
 struct vt_cli_flag_vals_t {
-  const char *backend_str;
+  const char                 *backend_str;
   enum vt_rendering_backend_t selected_renderer;
 };
 
@@ -132,6 +132,7 @@ void _vt_comp_commit_handler(void *data) {
   }
 
   if (output->needs_repaint) {
+    VT_PROFILE_COMPARE("compare.frame");
     if (c->backend->impl.prepare_output_frame &&
         !c->backend->impl.prepare_output_frame(c->backend, output)) {
       return;
@@ -218,7 +219,8 @@ _get_render_backend_from_str(const char *str) {
 }
 
 static char **_get_valid_renderers(size_t *count_out) {
-  if(!count_out) return NULL;
+  if (!count_out)
+    return NULL;
   *count_out = 0;
 
   char **renderers = malloc(sizeof(char *) * 2);
@@ -298,8 +300,8 @@ static char **_scan_valid_backends(size_t *count_out) {
   return list;
 }
 
-bool _vt_comp_handle_cmd_flags(struct vt_compositor_t *c, int argc,
-                                      char **argv, struct vt_cli_flag_vals_t* o_vals) {
+bool _vt_comp_handle_cmd_flags(struct vt_compositor_t *c, int argc, char **argv,
+                               struct vt_cli_flag_vals_t *o_vals) {
   if (!c || argc < 0 || (argc > 0 && !argv) || !o_vals)
     return false;
 
@@ -374,24 +376,25 @@ bool _vt_comp_handle_cmd_flags(struct vt_compositor_t *c, int argc,
           exit(1);
 
         size_t n_valid_renderers = 0;
-        char** valid_renderers = _get_valid_renderers(&n_valid_renderers);
-        if(!valid_renderers) {
+        char **valid_renderers = _get_valid_renderers(&n_valid_renderers);
+        if (!valid_renderers) {
           VT_ERROR(c->log, "Internal error");
           exit(1);
         }
 
-        for(size_t i = 0; i < n_valid_renderers; i++) {
-          if(strcmp(render_str, valid_renderers[i]) == 0) {
+        for (size_t i = 0; i < n_valid_renderers; i++) {
+          if (strcmp(render_str, valid_renderers[i]) == 0) {
             selected_renderer = _get_render_backend_from_str(render_str);
             assert(selected_renderer != VT_RENDERING_BACKEND_INVALID);
             break;
           }
         }
-        if(selected_renderer == VT_RENDERING_BACKEND_INVALID) {
+        if (selected_renderer == VT_RENDERING_BACKEND_INVALID) {
           VT_ERROR(c->log, "Invalid compositor renderer: '%s'", render_str);
           fprintf(stderr, " Valid options for backends are: [ ");
           for (size_t j = 0; j < n_valid_renderers; j++)
-            fprintf(stderr, "%s%s ", valid_renderers[j], j != n_valid_renderers - 1 ? "," : "");
+            fprintf(stderr, "%s%s ", valid_renderers[j],
+                    j != n_valid_renderers - 1 ? "," : "");
           fprintf(stderr, "]\n");
           for (size_t j = 0; j < n_valid_renderers; j++) {
             free(valid_renderers[j]);
@@ -472,10 +475,8 @@ bool _vt_comp_handle_cmd_flags(struct vt_compositor_t *c, int argc,
 #endif
   }
 
-  *o_vals = (struct vt_cli_flag_vals_t){
-    .backend_str = selected_backend,
-    .selected_renderer = selected_renderer 
-  };
+  *o_vals = (struct vt_cli_flag_vals_t){.backend_str = selected_backend,
+                                        .selected_renderer = selected_renderer};
   return true;
 }
 
@@ -497,15 +498,15 @@ void _vt_comp_log_help(void) {
   printf("%-35s %s", "-b, --backend [val]",
          "Specifies the sink backend of the compositor.");
   {
-  printf(" Valid options for backends are: [ ");
-  size_t n = 0;
-  char **valid_backends = _scan_valid_backends(&n);
-  for (size_t i = 0; i < n; i++)
-    printf("'%s'%s ", valid_backends[i], i != n - 1 ? "," : "");
-  printf("]\n");
-  for (size_t i = 0; i < n; i++)
-    free(valid_backends[i]);
-  free(valid_backends);
+    printf(" Valid options for backends are: [ ");
+    size_t n = 0;
+    char **valid_backends = _scan_valid_backends(&n);
+    for (size_t i = 0; i < n; i++)
+      printf("'%s'%s ", valid_backends[i], i != n - 1 ? "," : "");
+    printf("]\n");
+    for (size_t i = 0; i < n; i++)
+      free(valid_backends[i]);
+    free(valid_backends);
   }
 
   printf("%-35s %s", "-r, --renderer[val]",
@@ -526,7 +527,8 @@ void _vt_comp_log_help(void) {
          "Specifies the path of the .so file to load as the compositor's sink "
          "backend");
 
-  printf("\nEnvironment Variables (set to any value if you want to enable one of them): \n\n");
+  printf("\nEnvironment Variables (set to any value if you want to enable one "
+         "of them): \n\n");
   printf("%-35s %s\n", "VT_DRM_NO_ATOMIC",
          "Force legacy DRM/KMS implementation (ignored when not running DRM "
          "backend)");
@@ -914,12 +916,11 @@ bool vt_comp_init(struct vt_compositor_t *c, int argc, char **argv) {
   c->have_proto_dmabuf_explicit_sync = true;
 
   struct vt_cli_flag_vals_t flag_vals = {0};
-  if(!_vt_comp_handle_cmd_flags(c, argc, argv, &flag_vals)) {
+  if (!_vt_comp_handle_cmd_flags(c, argc, argv, &flag_vals)) {
     exit(1);
   }
 
   vt_renderer_implement(c->renderer, flag_vals.selected_renderer);
-  
 
   if (!flag_vals.backend_str) {
     if (getenv("WAYLAND_DISPLAY"))

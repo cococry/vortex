@@ -47,7 +47,7 @@ struct vt_drm_framebuffer_t {
   uint32_t handles[4];
   bool     owns_handles;
   /* we borrow the attachment's KMS resources while retaining its buffer. */
-  bool     cached;
+  bool cached;
 
   struct gbm_bo      *_gbm_bo;
   struct gbm_surface *_gbm_surface;
@@ -114,8 +114,8 @@ struct vt_drm_layer_plan_t {
 };
 
 struct vt_drm_layer_state_t {
-  struct vt_drm_framebuffer_t fb;
-  bool                        has_fb;
+  struct vt_drm_framebuffer_t       fb;
+  bool                              has_fb;
   struct vt_output_render_buffer_t *pool_buffer;
 
   struct vt_box_t src;
@@ -242,22 +242,22 @@ struct vt_drm_cursor_state_t {
 };
 
 struct vt_drm_layer_plan_output_t {
-  struct vt_box_t geometry;
-  uint32_t format, refresh, transform;
-  int32_t scale;
-  enum vt_cursor_mode_t cursor_mode;
-  bool no_direct_scanout;
+  struct vt_box_t                   geometry;
+  uint32_t                          format, refresh, transform;
+  int32_t                           scale;
+  enum vt_cursor_mode_t             cursor_mode;
+  bool                              no_direct_scanout;
   struct vt_output_render_buffer_t *render_buffers;
-  unsigned n_render_buffers;
-  struct vt_drm_crtc_t *crtc;
-  drmModeModeInfo mode;
+  unsigned                          n_render_buffers;
+  struct vt_drm_crtc_t             *crtc;
+  drmModeModeInfo                   mode;
 };
 
 /* One entry per layer slot; no borrowed surface or buffer pointers. */
 struct vt_drm_scanout_eligibility_t {
   uint32_t format;
   uint64_t modifier;
-  bool valid, has_dmabuf, eligible;
+  bool     valid, has_dmabuf, eligible;
 };
 
 struct vt_drm_output_state_t {
@@ -268,19 +268,20 @@ struct vt_drm_output_state_t {
   struct wl_array current_layers;
   struct wl_array pending_layers;
   struct wl_array frame_layers;
-  /* retained vt_drm_layer_plan_t entries; surface/liftoff pointers are borrowed. */
+  /* retained vt_drm_layer_plan_t entries; surface/liftoff pointers are
+   * borrowed. */
   struct wl_array layer_plan;
   /* Renderer/plane intersection shared by feedback and layer testing. */
-  struct wl_array scanout_formats;
-  struct wl_array scanout_eligibility;
-  struct vt_drm_crtc_t *scanout_formats_crtc;
-  bool scanout_formats_valid;
-  uint64_t tested_layer_plan_generation;
-  bool layer_plan_valid, layer_plan_retry;
+  struct wl_array                   scanout_formats;
+  struct wl_array                   scanout_eligibility;
+  struct vt_drm_crtc_t             *scanout_formats_crtc;
+  bool                              scanout_formats_valid;
+  uint64_t                          tested_layer_plan_generation;
+  bool                              layer_plan_valid, layer_plan_retry;
   struct vt_drm_layer_plan_output_t layer_plan_output;
-  drmModeAtomicReq *layer_plan_req;
-  uint64_t layer_plan_req_generation;
-  uint32_t layer_plan_req_flags;
+  drmModeAtomicReq                 *layer_plan_req;
+  uint64_t                          layer_plan_req_generation;
+  uint32_t                          layer_plan_req_flags;
 
   bool current_valid;
   bool pending_valid;
@@ -304,8 +305,8 @@ struct vt_drm_output_state_t {
   struct gbm_bo                   *render_bos[3];
   struct vt_drm_framebuffer_t      render_fbs[3];
   unsigned                         render_next;
-  bool connector_seen;
-  bool allow_tearing;
+  bool                             connector_seen;
+  bool                             allow_tearing;
 
   struct gbm_surface *gbm_surf;
 

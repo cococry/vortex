@@ -22,8 +22,8 @@
 
 #define _GNU_SOURCE
 
-#include "src/core/profiling.h"
 #include "wl_shm.h"
+#include "src/core/profiling.h"
 
 #include "../core/buffer.h"
 #include "../core/util.h"

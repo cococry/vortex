@@ -20,8 +20,8 @@
  * SOFTWARE.
  */
 
-#include "src/core/profiling.h"
 #include "dmabuf.h"
+#include "src/core/profiling.h"
 #include "src/render/drm_format.h"
 #include <assert.h>
 #include <string.h>

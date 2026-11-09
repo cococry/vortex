@@ -22,8 +22,8 @@
 
 #define _GNU_SOURCE
 
-#include "src/core/profiling.h"
 #include "xdg_shell.h"
+#include "src/core/profiling.h"
 #include "src/core/util.h"
 
 #include "src/core/content_update.h"

@@ -20,10 +20,10 @@
  * SOFTWARE.
  */
 
-#include "src/core/profiling.h"
 #include "wl_subcompositor.h"
 #include "src/core/content_update.h"
 #include "src/core/core_types.h"
+#include "src/core/profiling.h"
 #include "src/core/scene.h"
 #include "src/core/surface.h"
 #include "src/protocols/xdg_shell.h"

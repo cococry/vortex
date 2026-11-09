@@ -35,9 +35,9 @@
 #include <wayland-server-core.h>
 #include <wayland-util.h>
 
+#include "../../core/compositor.h"
 #include "../../core/output.h"
 #include "../../core/util.h"
-#include "../../core/compositor.h"
 #include "../../protocols/linux_dmabuf.h"
 #include "../../protocols/linux_explicit_sync.h"
 #include "../../protocols/wl_output.h"
@@ -983,7 +983,8 @@ bool backend_init_wl(struct vt_backend_t *backend) {
 
 static struct vt_buffer_t *
 backend_allocate_buffer_wl(struct vt_backend_t *backend, uint32_t width,
-                           uint32_t height, uint32_t format, uint64_t modifier) {
+                           uint32_t height, uint32_t format,
+                           uint64_t modifier) {
   VT_PROFILE_SCOPE();
   (void)modifier;
 

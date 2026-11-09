@@ -22,10 +22,11 @@
 
 #define _POSIX_C_SOURCE 200809L
 
-#include "src/core/profiling.h"
 #include "src/core/buffer.h"
 #include "src/core/compositor.h"
 #include "src/core/output.h"
+#include "src/core/profiling.h"
+#include "src/core/surface.h"
 #include "src/input/backends/x11/x11_input.h"
 #include "src/input/wl_seat.h"
 #include "src/protocols/linux_dmabuf.h"
@@ -37,6 +38,7 @@
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
 #include <X11/XKBlib.h>
+#include <X11/Xcursor/Xcursor.h>
 #include <X11/Xlib-xcb.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -64,10 +66,12 @@ struct x11_backend {
   struct wl_event_source *events;
   Atom                    wm_protocols, wm_delete;
   Cursor                  hidden_cursor;
+  bool                    native_cursor;
 };
 
 struct x11_output {
   Window                  window;
+  Cursor                  cursor;
   Colormap                colormap;
   struct wl_event_source *frame_timer;
   bool                    frame_pending, mapped;
@@ -121,7 +125,8 @@ static bool _x11_init_dmabuf_feedback(struct vt_compositor_t *c);
 
 static struct vt_buffer_t *
 backend_allocate_buffer_x11(struct vt_backend_t *backend, uint32_t width,
-                            uint32_t height, uint32_t format, uint64_t modifier);
+                            uint32_t height, uint32_t format,
+                            uint64_t modifier);
 
 static bool backend_clear_buffer_x11(struct vt_backend_t *backend,
                                      struct vt_buffer_t *buf, uint32_t color);
@@ -150,7 +155,94 @@ static const struct vt_buffer_implementation_t x11_buffer_impl = {
     .get_shm = _x11_buffer_attachment_get_shm,
 };
 
-static struct vt_output_implementation_t output_impl = {0};
+static bool _x11_update_cursor_image(struct vt_output_t     *output,
+                                     struct vt_buffer_use_t *use) {
+  VT_PROFILE_SCOPE();
+  struct x11_backend           *x = output->backend->user_data;
+  struct x11_output            *xo = output->user_data;
+  struct vt_seat_cursor_image_t cursor =
+      vt_seat_get_cursor_image(output->backend->comp->seat);
+  Cursor next = None;
+  bool   native = x->native_cursor;
+
+  if (use && native) {
+    struct vt_shm_attr_t shm = {0};
+    struct vt_surface_t *surface = cursor.surf;
+    /* X cursors follow the host pointer. Unsupported surface geometry or
+     * fenced/GPU-only buffers keep using the compositor's cursor path. */
+    native = surface && surface->applied.buffer_scale == 1 &&
+             surface->applied.buffer_transform == WL_OUTPUT_TRANSFORM_NORMAL &&
+             output->current_scale == 1 &&
+             output->transform == WL_OUTPUT_TRANSFORM_NORMAL &&
+             !use->acquire_source && use->acquire_fence_fd < 0 &&
+             vt_buffer_get_shm(use->buf, &shm) && shm.data && shm.width > 0 &&
+             shm.height > 0 && shm.width <= 256 && shm.height <= 256 &&
+             surface->applied.width == shm.width &&
+             surface->applied.height == shm.height &&
+             (shm.format == DRM_FORMAT_ARGB8888 ||
+              shm.format == DRM_FORMAT_XRGB8888 ||
+              shm.format == WL_SHM_FORMAT_ARGB8888 ||
+              shm.format == WL_SHM_FORMAT_XRGB8888) &&
+             shm.stride >= shm.width * 4 &&
+             shm.size >= (size_t)(shm.height - 1) * shm.stride +
+                             (size_t)shm.width * 4 &&
+             cursor.hotspot_x >= 0 && cursor.hotspot_x < shm.width &&
+             cursor.hotspot_y >= 0 && cursor.hotspot_y < shm.height;
+    if (native) {
+      XcursorImage *image = XcursorImageCreate(shm.width, shm.height);
+      if (image) {
+        image->xhot = cursor.hotspot_x;
+        image->yhot = cursor.hotspot_y;
+        for (int32_t y = 0; y < shm.height; y++) {
+          memcpy(image->pixels + y * shm.width,
+                 (uint8_t *)shm.data + (size_t)y * shm.stride,
+                 (size_t)shm.width * 4);
+          if (shm.format == DRM_FORMAT_XRGB8888 ||
+              shm.format == WL_SHM_FORMAT_XRGB8888)
+            for (int32_t col = 0; col < shm.width; col++)
+              image->pixels[y * shm.width + col] |= 0xff000000;
+        }
+        next = XcursorImageLoadCursor(x->display, image);
+        XcursorImageDestroy(image);
+      }
+      native = next != None;
+    }
+  }
+
+  XDefineCursor(x->display, xo->window, next ? next : x->hidden_cursor);
+  if (xo->cursor)
+    XFreeCursor(x->display, xo->cursor);
+  xo->cursor = next;
+  XFlush(x->display);
+
+  enum vt_cursor_mode_t mode =
+      native ? VT_CURSOR_MODE_HARDWARE : VT_CURSOR_MODE_SOFTWARE;
+  if (output->cursor_mode != mode) {
+    output->cursor_mode = mode;
+    VT_INFO(output->backend->comp->log, "X11 cursor: %s",
+            native ? "native" : "software fallback");
+    /* Erase a previously composited cursor, or introduce the fallback. */
+    vt_output_damage_whole(output);
+  }
+  if (native && cursor.surf && !wl_list_empty(&cursor.surf->frame_callbacks)) {
+    vt_output_track_presented_surface(output, cursor.surf);
+    if (!xo->frame_pending && xo->mapped)
+      backend_handle_frame_x11(output->backend, output);
+  }
+  return native;
+}
+
+static void _x11_move_cursor(struct vt_output_t *output, int32_t x, int32_t y) {
+  /* The X server moves the native cursor with its pointer, as in wlroots. */
+  (void)output;
+  (void)x;
+  (void)y;
+}
+
+static struct vt_output_implementation_t output_impl = {
+    .update_cursor_image = _x11_update_cursor_image,
+    .move_cursor = _x11_move_cursor,
+};
 
 static void _x11_buffer_attachment_destroy(struct vt_buffer_t *buf,
                                            const void *owner, void *ptr) {
@@ -218,7 +310,7 @@ static int _x11_parent_frame_done(void *data) {
 
 static void _x11_release_keys(struct vt_compositor_t *c,
                               struct x11_output      *xo) {
-  for (unsigned i = 8; i < sizeof(xo->pressed_keys); ++i) {
+  for (unsigned i = 8; i < sizeof(xo->pressed_keys); i++) {
     if (xo->pressed_keys[i]) {
       vt_seat_handle_key(c->seat, i, VT_KEY_STATE_RELEASED,
                          vt_util_get_time_msec());
@@ -412,6 +504,8 @@ static void _x11_backend_destroy_output(struct vt_backend_t *backend,
         backend->comp->renderer, output);
   if (output->proto.global)
     wl_global_destroy(output->proto.global);
+  if (xo->cursor)
+    XFreeCursor(x->display, xo->cursor);
   if (xo->window)
     XDestroyWindow(x->display, xo->window);
   if (xo->colormap)
@@ -579,7 +673,8 @@ done:
 // ===================================================
 static struct vt_buffer_t *
 backend_allocate_buffer_x11(struct vt_backend_t *backend, uint32_t width,
-                            uint32_t height, uint32_t format, uint64_t modifier) {
+                            uint32_t height, uint32_t format,
+                            uint64_t modifier) {
   VT_PROFILE_SCOPE();
   (void)modifier;
 
@@ -626,7 +721,7 @@ static bool backend_clear_buffer_x11(struct vt_backend_t *backend,
   uint32_t pixel = 0xff000000u | (color & 0xffffffu);
   if (data->solid && data->clear_pixel == pixel)
     return true;
-  for (size_t i = 0; i < count; ++i)
+  for (size_t i = 0; i < count; i++)
     pixels[i] = pixel;
   data->solid = true;
   data->clear_pixel = pixel;
@@ -705,16 +800,21 @@ static bool backend_handle_frame_x11(struct vt_backend_t *backend,
   VT_PROFILE_SCOPE();
   struct x11_backend *x = backend->user_data;
   struct x11_output  *xo = output->user_data;
-  XFlush(x->display);
   xo->frame_pending = true;
 
   /* fallback timeout for when X11 Present is not available */
   int timeout_ms = 17;
   if (xo->present_queue) {
-    xcb_present_notify_msc(x->connection, xo->window, ++xo->present_serial,
+    /* XCB takes the shared socket from Xlib, flushing its pending requests.
+     * Avoid XFlush here: it also proactively reads events and adds a second
+     * display-lock/socket handoff to each submission. */
+    xo->present_serial++;
+    xcb_present_notify_msc(x->connection, xo->window, xo->present_serial,
                            xo->msc ? xo->msc + 1 : 0, 0, 0);
     xcb_flush(x->connection);
     timeout_ms = 100;
+  } else {
+    XFlush(x->display);
   }
   return wl_event_source_timer_update(xo->frame_timer, timeout_ms) == 0;
 }
@@ -756,6 +856,8 @@ static bool backend_init_x11(struct vt_backend_t *backend) {
   c->session->native_handle = x->display;
   snprintf(c->session->name, sizeof(c->session->name), "x11");
   x->connection = XGetXCBConnection(x->display);
+  x->native_cursor =
+      XcursorSupportsARGB(x->display) && !getenv("VT_X11_SOFTWARE_CURSOR");
 
   const xcb_query_extension_reply_t *present =
       xcb_get_extension_data(x->connection, &xcb_present_id);
@@ -812,7 +914,7 @@ static bool backend_init_x11(struct vt_backend_t *backend) {
 
   bool outputs_ok = true;
   /* create virtual outputs */
-  for (uint32_t i = 0; i < c->n_virtual_outputs; ++i) {
+  for (uint32_t i = 0; i < c->n_virtual_outputs; i++) {
     if (!_x11_backend_create_output(backend, visual, i)) {
       outputs_ok = false;
       break;

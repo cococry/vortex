@@ -20,9 +20,9 @@
  * SOFTWARE.
  */
 
-#include "src/core/profiling.h"
 #include "src/core/buffer.h"
 #include "src/core/buffer_orchestrator.h"
+#include "src/core/profiling.h"
 #include <stdlib.h>
 #include <wayland-server.h>
 #define _GNU_SOURCE

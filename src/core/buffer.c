@@ -20,9 +20,9 @@
  * SOFTWARE.
  */
 
-#include "src/core/profiling.h"
 #include "buffer.h"
 #include "src/core/core_types.h"
+#include "src/core/profiling.h"
 #include "src/core/util.h"
 #include "src/render/dmabuf_attr.h"
 #include "src/render/renderer.h"
@@ -484,7 +484,7 @@ bool vt_buffer_use_set_release_fence_fd(struct vt_buffer_use_t *use, int fd) {
 }
 
 bool vt_buffer_scanout_layout_equal(struct vt_buffer_t *a,
-                                     struct vt_buffer_t *b) {
+                                    struct vt_buffer_t *b) {
   if (a == b)
     return true;
 
@@ -493,8 +493,8 @@ bool vt_buffer_scanout_layout_equal(struct vt_buffer_t *a,
     return false;
 
   struct vt_dmabuf_attr_t aa, bb;
-  bool a_dmabuf = vt_buffer_get_dmabuf(a, &aa);
-  bool b_dmabuf = vt_buffer_get_dmabuf(b, &bb);
+  bool                    a_dmabuf = vt_buffer_get_dmabuf(a, &aa);
+  bool                    b_dmabuf = vt_buffer_get_dmabuf(b, &bb);
   if (!a_dmabuf || !b_dmabuf) {
     struct vt_shm_attr_t sa, sb;
     return !a_dmabuf && !b_dmabuf && vt_buffer_get_shm(a, &sa) &&

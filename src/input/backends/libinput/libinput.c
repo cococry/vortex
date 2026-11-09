@@ -20,8 +20,8 @@
  * SOFTWARE.
  */
 
-#include "src/core/profiling.h"
 #include "libinput.h"
+#include "src/core/profiling.h"
 
 #include "src/core/core_types.h"
 #include "src/core/session.h"

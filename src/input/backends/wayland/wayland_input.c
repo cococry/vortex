@@ -20,8 +20,8 @@
  * SOFTWARE.
  */
 
-#include "src/core/profiling.h"
 #include "src/core/output.h"
+#include "src/core/profiling.h"
 #include "src/input/input.h"
 #include "src/input/wl_seat.h"
 #include <string.h>

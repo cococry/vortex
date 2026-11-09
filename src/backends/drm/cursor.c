@@ -1,6 +1,6 @@
-#include "src/core/profiling.h"
 #include "cursor.h"
 #include "fb.h"
+#include "src/core/profiling.h"
 
 static void _drm_cursor_image_finish(struct vt_drm_backend_state_t *drm,
                                      struct vt_drm_cursor_image_t  *image) {

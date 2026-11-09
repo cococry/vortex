@@ -24,10 +24,10 @@
  * so the existing acquire/release fence paths (EGL wait, KMS IN_FENCE_FD,
  * render/scanout release fences) do the actual synchronization. */
 
-#include "src/core/profiling.h"
 #include "linux_drm_syncobj.h"
 #include "src/core/buffer.h"
 #include "src/core/content_update.h"
+#include "src/core/profiling.h"
 #include "src/core/surface.h"
 #include "src/core/util.h"
 

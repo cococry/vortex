@@ -66,8 +66,8 @@
 #include "protocols/wl_output.h"
 #include "protocols/wl_shm.h"
 #include "render/dmabuf.h"
-#include "render/drm_format.h"
 #include "render/dmabuf_attr.h"
+#include "render/drm_format.h"
 
 #include "atomic.h"
 #include "cursor.h"
@@ -89,33 +89,37 @@
 static void _drm_page_flip_handler(int fd, unsigned int frame, unsigned int sec,
                                    unsigned int usec, void *data);
 static void _drm_release_all_layers(struct vt_output_t *output);
-static bool _drm_scanout_fence_ready(struct vt_surface_t *surface,
-                                      struct vt_buffer_use_t *use);
+static bool _drm_scanout_fence_ready(struct vt_surface_t    *surface,
+                                     struct vt_buffer_use_t *use);
 static void _drm_layers_finish(struct vt_drm_output_state_t *drm_output,
-                                struct wl_array *layers, int release_fence_fd);
-static void _drm_invalidate_device_layer_plans(struct vt_drm_backend_state_t *drm);
-static void _drm_update_layer_plan_output(struct vt_drm_output_state_t *drm_output);
-static bool _drm_reuse_output_layers(struct vt_backend_t *backend,
-                                      struct vt_output_t *output,
-                                      struct vt_output_layer_state_t *layers,
-                                      size_t layer_count);
+                               struct wl_array *layers, int release_fence_fd);
+static void
+_drm_invalidate_device_layer_plans(struct vt_drm_backend_state_t *drm);
+static void
+_drm_update_layer_plan_output(struct vt_drm_output_state_t *drm_output);
+static bool _drm_reuse_output_layers(struct vt_backend_t            *backend,
+                                     struct vt_output_t             *output,
+                                     struct vt_output_layer_state_t *layers,
+                                     size_t layer_count);
 static bool _drm_devices_equal(drmDevicePtr a, drmDevicePtr b);
-static bool _drm_output_scanout_formats(struct vt_drm_backend_state_t *drm,
-                                        struct vt_drm_output_state_t *drm_output,
-                                        struct wl_array *formats);
-static bool _drm_ensure_scanout_formats(struct vt_backend_t *backend,
+static bool
+            _drm_output_scanout_formats(struct vt_drm_backend_state_t *drm,
+                                        struct vt_drm_output_state_t  *drm_output,
+                                        struct wl_array               *formats);
+static bool _drm_ensure_scanout_formats(struct vt_backend_t          *backend,
                                         struct vt_drm_output_state_t *output);
 static bool _drm_layer_format_eligible(struct vt_drm_output_state_t *output,
                                        struct vt_buffer_t *buf, size_t index,
                                        bool *changed);
 
-static void _drm_invalidate_scanout_formats(struct vt_drm_output_state_t *output) {
+static void
+_drm_invalidate_scanout_formats(struct vt_drm_output_state_t *output) {
   output->scanout_formats_valid = false;
   output->scanout_eligibility.size = 0;
 }
 
-static bool _drm_can_share_dmabuf(struct vt_device_t *main_dev,
-                                  struct vt_device_t *dev);
+static bool        _drm_can_share_dmabuf(struct vt_device_t *main_dev,
+                                         struct vt_device_t *dev);
 static const char *_fourcc_to_str(uint32_t fmt);
 static const char *_modifier_to_str(uint64_t mod, char *buf, size_t len);
 static void        _log_dmabuf_tranche(struct vt_compositor_t           *comp,
@@ -190,7 +194,8 @@ static struct vt_output_implementation_t drm_output_impl = {
     .move_cursor = _drm_output_move_cursor,
     .update_cursor_image = _drm_output_update_cursor_image};
 
-static void _drm_invalidate_device_layer_plans(struct vt_drm_backend_state_t *drm) {
+static void
+_drm_invalidate_device_layer_plans(struct vt_drm_backend_state_t *drm) {
   struct vt_output_t *output;
   wl_list_for_each(output, &drm->outputs, link_local) {
     vt_output_invalidate_layer_plan(output);
@@ -208,12 +213,13 @@ _drm_invalidate_device_scanout_formats(struct vt_drm_backend_state_t *drm) {
   }
 }
 
-static void _drm_update_layer_plan_output(struct vt_drm_output_state_t *drm_output) {
-  struct vt_output_t *output = drm_output->base;
+static void
+_drm_update_layer_plan_output(struct vt_drm_output_state_t *drm_output) {
+  struct vt_output_t               *output = drm_output->base;
   struct vt_drm_layer_plan_output_t state;
   memset(&state, 0, sizeof(state));
-  state.geometry = (struct vt_box_t){output->x, output->y,
-                                      output->width, output->height};
+  state.geometry =
+      (struct vt_box_t){output->x, output->y, output->width, output->height};
   state.format = output->format;
   state.refresh = output->refresh_rate;
   state.transform = output->transform;
@@ -231,10 +237,10 @@ static void _drm_update_layer_plan_output(struct vt_drm_output_state_t *drm_outp
   }
 }
 
-static bool _drm_reuse_output_layers(struct vt_backend_t *backend,
-                                      struct vt_output_t *output,
-                                      struct vt_output_layer_state_t *layers,
-                                      size_t layer_count) {
+static bool _drm_reuse_output_layers(struct vt_backend_t            *backend,
+                                     struct vt_output_t             *output,
+                                     struct vt_output_layer_state_t *layers,
+                                     size_t layer_count) {
   VT_PROFILE_SCOPE();
   (void)backend;
   struct vt_drm_output_state_t *drm_output =
@@ -258,15 +264,14 @@ static bool _drm_reuse_output_layers(struct vt_backend_t *backend,
   if (!_drm_ensure_scanout_formats(backend, drm_output))
     goto miss;
 
-  uint64_t direct_layers = 0, direct_fenced = 0;
+  uint64_t                     direct_layers = 0, direct_fenced = 0;
   struct vt_drm_layer_state_t *current = drm_output->current_layers.data;
-  size_t current_count =
-      drm_output->current_layers.size / sizeof(*current);
+  size_t current_count = drm_output->current_layers.size / sizeof(*current);
   size_t current_index = 0;
   struct vt_drm_layer_plan_t *plan = drm_output->layer_plan.data;
   for (size_t i = 0; i < layer_count; i++) {
     struct vt_output_layer_state_t *layer = &layers[i];
-    struct vt_buffer_use_t *use = layer->use;
+    struct vt_buffer_use_t         *use = layer->use;
 
     /* we also guard against geometry changed by a caller bypassing setters. */
     if (plan[i].surface != layer->surface ||
@@ -335,7 +340,7 @@ static bool _drm_reuse_output_layers(struct vt_backend_t *backend,
     int fence_fd = vt_buffer_use_acquire_fence(use);
     if (frame->fb.id != plan[i].fb_id) {
       if (liftoff_layer_set_property(frame->liftoff_layer, "FB_ID",
-                                      frame->fb.id) < 0)
+                                     frame->fb.id) < 0)
         goto miss;
 
       plan[i].fb_id = frame->fb.id;
@@ -344,7 +349,7 @@ static bool _drm_reuse_output_layers(struct vt_backend_t *backend,
     if (fence_fd != plan[i].acquire_fence_fd) {
       if (fence_fd >= 0) {
         if (liftoff_layer_set_property(frame->liftoff_layer, "IN_FENCE_FD",
-                                        (uint64_t)(int64_t)fence_fd) < 0)
+                                       (uint64_t)(int64_t)fence_fd) < 0)
           goto miss;
       } else {
         liftoff_layer_unset_property(frame->liftoff_layer, "IN_FENCE_FD");
@@ -937,7 +942,7 @@ formats_done:
   {
     struct vt_drm_backend_state_t *drm;
     wl_list_for_each(drm, &master->backends, link)
-      _drm_invalidate_device_scanout_formats(drm);
+        _drm_invalidate_device_scanout_formats(drm);
   }
   drmFreeDevice(&dev_main_drm);
 
@@ -1225,15 +1230,15 @@ static bool _drm_init_for_device(struct vt_compositor_t        *comp,
   }
 
   if (!drm_master->main_drm) {
-    if(!comp->renderer->impl.init(comp->backend, comp->renderer,
-                                drm->native_handle)) {
+    if (!comp->renderer->impl.init(comp->backend, comp->renderer,
+                                   drm->native_handle)) {
       if (!vt_renderer_try_fallback(comp->renderer, drm->native_handle)) {
         return false;
       }
     }
 
-    if(!comp->renderer->impl.is_handle_renderable(
-        comp->renderer, drm->native_handle)) {
+    if (!comp->renderer->impl.is_handle_renderable(comp->renderer,
+                                                   drm->native_handle)) {
       log_fatal(comp->log,
                 "Renderer initialized, but DRM handle is not renderable.");
       return false;
@@ -2242,8 +2247,8 @@ static bool _drm_create_output_for_device(struct vt_drm_backend_state_t *drm,
   output->physical.model = strdup("Unknown");
   output->physical.serial_number = NULL;
 
-  /* manually set the output's dimensions to temporarily store them for the later 
-   * vt_output_init_geom() */
+  /* manually set the output's dimensions to temporarily store them for the
+   * later vt_output_init_geom() */
   output->width = selected->width;
   output->height = selected->height;
 
@@ -3766,20 +3771,21 @@ struct vt_buffer_t *backend_allocate_buffer_drm(struct vt_backend_t *backend,
   if (!width || !height)
     return NULL;
 
-  return drm_gbm_buffer_allocator_alloc(
-      backend->comp, master->main_drm->gbm_dev, width, height, format, modifier);
+  return drm_gbm_buffer_allocator_alloc(backend->comp,
+                                        master->main_drm->gbm_dev, width,
+                                        height, format, modifier);
 }
 
 bool backend_get_ideal_format_for_output_drm(struct vt_backend_t *backend,
-                                             struct vt_output_t *output,
-                                             uint32_t *format,
-                                             uint64_t *modifier) {
+                                             struct vt_output_t  *output,
+                                             uint32_t            *format,
+                                             uint64_t            *modifier) {
   VT_PROFILE_SCOPE();
   if (!backend || !output || output->backend != backend || !format || !modifier)
     return false;
 
   struct vt_drm_output_state_t *state = output->user_data;
-  struct vt_renderer_t *renderer = backend->comp->renderer;
+  struct vt_renderer_t         *renderer = backend->comp->renderer;
   if (!state || !state->crtc ||
       !renderer->impl.query_dmabuf_formats_with_renderer)
     return false;
@@ -3795,11 +3801,12 @@ bool backend_get_ideal_format_for_output_drm(struct vt_backend_t *backend,
       !vt_drm_format_array_intersect(&shared, &sampling, &planes))
     goto done;
 
-  /* prefer the primary plane, opaque pixels, and a layout we can fill cheaply */
+  /* prefer the primary plane, opaque pixels, and a layout we can fill cheaply
+   */
   const uint32_t preferred[] = {DRM_FORMAT_XRGB8888, DRM_FORMAT_ARGB8888};
-  unsigned best_score = 0;
+  unsigned       best_score = 0;
   for (size_t i = 0; i < sizeof(preferred) / sizeof(preferred[0]); i++) {
-    struct vt_drm_format_t key = {.format = preferred[i]};
+    struct vt_drm_format_t  key = {.format = preferred[i]};
     struct vt_drm_format_t *fmt = vt_drm_format_array_get_format(&shared, &key);
     if (!fmt)
       continue;
@@ -3812,7 +3819,8 @@ bool backend_get_ideal_format_for_output_drm(struct vt_backend_t *backend,
         continue;
 
       unsigned score = 1;
-      if (_drm_plane_has_format(state->crtc->plane_primary, fmt->format, mod->mod))
+      if (_drm_plane_has_format(state->crtc->plane_primary, fmt->format,
+                                mod->mod))
         score += 8;
       if (fmt->format == DRM_FORMAT_XRGB8888)
         score += 4;
@@ -3832,8 +3840,8 @@ bool backend_get_ideal_format_for_output_drm(struct vt_backend_t *backend,
   if (found)
     VT_TRACE(backend->comp->log,
              "selected background layout for output %s: format=0x%08" PRIx32
-             " modifier=0x%016" PRIx64 ".", output->physical.name,
-             *format, *modifier);
+             " modifier=0x%016" PRIx64 ".",
+             output->physical.name, *format, *modifier);
 
 done:
   vt_drm_format_array_free(&sampling);
@@ -3867,8 +3875,8 @@ _drm_prepare_test_composition_layer(struct vt_drm_backend_state_t *drm,
   VT_PROFILE_SCOPE();
   struct vt_drm_framebuffer_t *fb = &drm_output->composition_test_fb;
   uint32_t                     format = output->format;
-  bool keep_fence = drm_output->crtc->plane_primary->props[
-                        VT_DRM_PLANE_IN_FENCE_FD] != 0;
+  bool                         keep_fence =
+      drm_output->crtc->plane_primary->props[VT_DRM_PLANE_IN_FENCE_FD] != 0;
 
   if (output->n_render_buffers) {
     struct vt_output_layer_state_t layer = {
@@ -4357,7 +4365,8 @@ bool backend_test_output_layers_drm(struct vt_backend_t            *backend,
   drm_output->layer_plan_valid =
       ok && !drm_output->drm_backend->no_layer_plan_cache &&
       !drm_output->layer_plan_retry &&
-      drm_output->layer_plan.size == layer_count * sizeof(struct vt_drm_layer_plan_t);
+      drm_output->layer_plan.size ==
+          layer_count * sizeof(struct vt_drm_layer_plan_t);
   drm_output->tested_layer_plan_generation = output->layer_plan_generation;
   return ok;
 }
@@ -4440,7 +4449,7 @@ bool backend_build_surface_feedback(struct vt_backend_t         *backend,
   return true;
 }
 
-static bool _drm_ensure_scanout_formats(struct vt_backend_t *backend,
+static bool _drm_ensure_scanout_formats(struct vt_backend_t          *backend,
                                         struct vt_drm_output_state_t *output) {
   /* formats still valid, return. */
   if (output->scanout_formats_valid &&
@@ -4463,8 +4472,8 @@ static bool _drm_ensure_scanout_formats(struct vt_backend_t *backend,
 
   bool ok = _drm_output_scanout_formats(output->drm_backend, output,
                                         &plane_formats) &&
-            vt_drm_format_array_intersect(&formats,
-                &master->main_drm->sampling_formats, &plane_formats);
+            vt_drm_format_array_intersect(
+                &formats, &master->main_drm->sampling_formats, &plane_formats);
 
   vt_drm_format_array_free(&plane_formats);
   if (!ok) {
@@ -4483,8 +4492,8 @@ static bool _drm_layer_format_eligible(struct vt_drm_output_state_t *output,
                                        struct vt_buffer_t *buf, size_t index,
                                        bool *changed) {
   struct vt_dmabuf_attr_t attr = {0};
-  bool has_dmabuf = buf && vt_buffer_get_dmabuf(buf, &attr);
-  struct wl_array *cache = &output->scanout_eligibility;
+  bool                    has_dmabuf = buf && vt_buffer_get_dmabuf(buf, &attr);
+  struct wl_array        *cache = &output->scanout_eligibility;
   size_t count = cache->size / sizeof(struct vt_drm_scanout_eligibility_t);
 
   /* ensure capacity */
@@ -4504,20 +4513,22 @@ static bool _drm_layer_format_eligible(struct vt_drm_output_state_t *output,
       &((struct vt_drm_scanout_eligibility_t *)cache->data)[index];
 
   *changed = !entry->valid || entry->has_dmabuf != has_dmabuf ||
-             (has_dmabuf && (entry->format != attr.format ||
-                            entry->modifier != attr.mod));
+             (has_dmabuf &&
+              (entry->format != attr.format || entry->modifier != attr.mod));
   if (!*changed)
     return entry->eligible;
 
   /* no cache hit, re-evaluate eligibility */
   *entry = (struct vt_drm_scanout_eligibility_t){
-      .valid = true, .has_dmabuf = has_dmabuf,
-      .format = attr.format, .modifier = attr.mod,
+      .valid = true,
+      .has_dmabuf = has_dmabuf,
+      .format = attr.format,
+      .modifier = attr.mod,
   };
   if (has_dmabuf) {
     /* if the layer has a dmabuf, test if the scanout formats of the output
      * still include the layer's format */
-    struct vt_drm_format_t key = {.format = attr.format};
+    struct vt_drm_format_t  key = {.format = attr.format};
     struct vt_drm_format_t *format =
         vt_drm_format_array_get_format(&output->scanout_formats, &key);
     entry->eligible = format && vt_drm_format_get_mod(format, attr.mod);
@@ -4607,7 +4618,7 @@ bool backend_build_surface_feedback_drm(struct vt_backend_t         *backend,
     return false;
 
   bool ok = vt_drm_format_array_copy(&scanout_tranche->formats,
-                                      &drm_output->scanout_formats);
+                                     &drm_output->scanout_formats);
 
   if (!ok)
     return false;

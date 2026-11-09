@@ -1,7 +1,7 @@
-#include "src/core/profiling.h"
 #include "vt_background.h"
 #include "core/output.h"
 #include "core/surface.h"
+#include "src/core/profiling.h"
 #include "vt-background-v1-server-protocol.h"
 
 #include <wayland-server.h>

@@ -90,17 +90,20 @@ deps = [
   runara_dep,
 ]
 
+if get_option('profiling_comparison')
+  add_project_arguments('-DVT_PROFILE_COMPARISON', '-D_POSIX_C_SOURCE=200809L', language: 'c')
+endif
 dep_profiling_headers = declare_dependency()
-if get_option('profiling')
+if get_option('profiling') or get_option('profiling_comparison')
   # We build tracy only if profiling is specifically enabled  
-  tracy_sp = subproject(
-    'tracy',
-    default_options: [
-      'tracy_enable=true',
-      'default_library=static',
-      'cpp_std=c++17',
-    ],
-  )
+  tracy_options = ['tracy_enable=true', 'cpp_std=c++17']
+  if get_option('profiling_comparison')
+    # Match wlroots' shared -O2 client; detailed profiling keeps its defaults.
+    tracy_options += ['default_library=shared', 'optimization=2']
+  else
+    tracy_options += ['default_library=static']
+  endif
+  tracy_sp = subproject('tracy', default_options: tracy_options)
   tracy_dep = tracy_sp.get_variable('tracy_dep')
   deps += tracy_dep
   # Backend modules use the client exported by Vortex, rather than embedding
@@ -109,6 +112,18 @@ if get_option('profiling')
     compile_args: true,
     includes: true,
   )
+  # This is a separate reference compositor, not a Vortex build dependency.
+  # Profiling configuration prepares its pinned sources; the comparison script
+  # builds them serially when requested. Release-only setup does not fetch it.
+  wlroots_prepare_args = [
+    files('profiling/apply_wlroots_patch.py'),
+    '--patch', files('profiling/tools/wlroots-comparison.patch'),
+  ]
+  if get_option('wrap_mode') == 'nodownload'
+    wlroots_prepare_args += ['--no-download']
+  endif
+  wlroots_prepared = run_command(find_program('python3'), wlroots_prepare_args, check: true)
+  message(wlroots_prepared.stdout().strip())
 endif
 
 if dep_xkbcommon.found()
@@ -399,7 +414,8 @@ summary(
     'GPU renderers': renderers,
     'OpenGL': build_opengl,
     'Vulkan': build_vulkan,
-    'CPU profiling (Tracy)': get_option('profiling'),
+    'CPU profiling (Tracy)': get_option('profiling') or get_option('profiling_comparison'),
+    'Comparison scopes only': get_option('profiling_comparison'),
   },
   section: 'Vortex',
   bool_yn: true,

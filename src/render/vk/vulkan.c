@@ -38,19 +38,19 @@ struct vk_texture_t {
 struct vk_surface_texture_t {
   struct vt_surface_addon_t addon;
   struct wl_list            link;
-  struct vk_texture_t         texture;
+  struct vk_texture_t       texture;
   bool                      valid;
 };
 
 struct vk_frame_use_t {
   struct vt_buffer_use_t *use;
-  struct vk_texture_t      *texture;
+  struct vk_texture_t    *texture;
 };
 
 struct vk_pending_frame_t {
-  uint64_t submission;
+  uint64_t               submission;
   struct vk_frame_use_t *uses;
-  size_t count, capacity;
+  size_t                 count, capacity;
 };
 
 struct vk_render_target_t {
@@ -61,26 +61,26 @@ struct vk_render_target_t {
 };
 
 struct vk_output_t {
-  rn_color_t clear_color;
+  rn_color_t                 clear_color;
   struct vk_render_target_t *targets;
 };
 
 struct vt_vk_backend_state_t {
-  struct wl_array      formats;
-  struct wl_list       surface_textures;
-  struct rn_state_t   *runara;
+  struct wl_array               formats;
+  struct wl_list                surface_textures;
+  struct rn_state_t            *runara;
   struct rn_vk_native_handles_t native;
   bool                          external;
-  void                *native_display;
-  bool                 vsync, active, failed;
-  struct vt_output_t  *output;
-  struct vk_frame_use_t *uses;
-  size_t               use_count, use_capacity;
-  struct vk_pending_frame_t pending[RN_VK_FRAMES_IN_FLIGHT];
-  struct wl_event_source *completion_timer;
-  uint64_t             submission;
-  uint8_t             *pixels;
-  size_t               pixel_capacity;
+  void                         *native_display;
+  bool                          vsync, active, failed;
+  struct vt_output_t           *output;
+  struct vk_frame_use_t        *uses;
+  size_t                        use_count, use_capacity;
+  struct vk_pending_frame_t     pending[RN_VK_FRAMES_IN_FLIGHT];
+  struct wl_event_source       *completion_timer;
+  uint64_t                      submission;
+  uint8_t                      *pixels;
+  size_t                        pixel_capacity;
 };
 
 static bool _vk_runara_check(struct vt_renderer_t *r, rn_result_t result,
@@ -135,9 +135,9 @@ static const struct vt_buffer_attachment_implementation_t vk_buffer_impl = {
     .end_use = _vk_buffer_end_use,
 };
 
-static struct vk_texture_t *_vk_buffer_texture_get_or_create(struct vt_renderer_t *r,
-                                             struct vt_buffer_t   *buf,
-                                             bool                  create) {
+static struct vk_texture_t *
+_vk_buffer_texture_get_or_create(struct vt_renderer_t *r,
+                                 struct vt_buffer_t *buf, bool create) {
   VT_PROFILE_SCOPE();
   struct vt_buffer_attachment_t *attachment =
       vt_buffer_find_attachment(buf, r, &vk_buffer_impl);
@@ -206,7 +206,8 @@ _vk_surface_texture(struct vt_renderer_t *r, struct vt_surface_t *surface,
   return texture;
 }
 
-static bool _vk_import_shm(struct vt_renderer_t *r, struct vk_texture_t *texture,
+static bool _vk_import_shm(struct vt_renderer_t       *r,
+                           struct vk_texture_t        *texture,
                            const struct vt_shm_attr_t *shm,
                            const pixman_region32_t    *damage) {
   VT_PROFILE_SCOPE();
@@ -311,7 +312,7 @@ static bool _vk_query_formats(struct vt_renderer_t *r) {
 }
 
 static bool _vk_import_dmabuf(struct vt_renderer_t          *r,
-                              struct vk_texture_t             *texture,
+                              struct vk_texture_t           *texture,
                               const struct vt_dmabuf_attr_t *attr,
                               int                            acquire_fd) {
   VT_PROFILE_SCOPE();
@@ -380,10 +381,10 @@ static void _vk_frame_uses_finish(struct vt_vk_backend_state_t *vk) {
 
 static int _vk_retire_submissions(void *data) {
   VT_PROFILE_SCOPE();
-  struct vt_renderer_t *r = data;
+  struct vt_renderer_t         *r = data;
   struct vt_vk_backend_state_t *vk = r->user_data;
-  uint64_t completed;
-  rn_result_t result =
+  uint64_t                      completed;
+  rn_result_t                   result =
       rn_vk_submission_status(vk->runara, &vk->submission, &completed);
   if (!_vk_runara_check(r, result, "rn_vk_submission_status")) {
     vk->failed = true;
@@ -441,7 +442,7 @@ static bool _vk_prepare_use(struct vt_renderer_t   *r,
   }
 
   int                     fd = vt_buffer_use_acquire_fence(use);
-  struct vk_texture_t      *texture;
+  struct vk_texture_t    *texture;
   struct vt_dmabuf_attr_t dmabuf;
   struct vt_shm_attr_t    shm;
 
@@ -463,7 +464,8 @@ static bool _vk_prepare_use(struct vt_renderer_t   *r,
       return false;
 
     if (surface) {
-      struct vk_surface_texture_t *cached = _vk_surface_texture(r, surface, true);
+      struct vk_surface_texture_t *cached =
+          _vk_surface_texture(r, surface, true);
 
       if (!cached ||
           !_vk_import_shm(r, &cached->texture, &shm,
@@ -903,8 +905,8 @@ static bool _vk_create_renderer(struct vt_renderer_t      *r,
   if (!_vk_query_formats(r))
     goto fail;
 
-  vk->completion_timer = wl_event_loop_add_timer(
-      r->comp->wl.evloop, _vk_retire_submissions, r);
+  vk->completion_timer =
+      wl_event_loop_add_timer(r->comp->wl.evloop, _vk_retire_submissions, r);
   if (!vk->completion_timer)
     goto fail;
 
@@ -985,7 +987,7 @@ bool renderer_setup_renderable_output_vk(struct vt_renderer_t *r,
     return true;
 
   struct vt_vk_backend_state_t *vk = r->user_data;
-  struct vk_output_t             *state = calloc(1, sizeof(*state));
+  struct vk_output_t           *state = calloc(1, sizeof(*state));
 
   if (!state)
     return false;
@@ -1146,7 +1148,7 @@ bool renderer_is_dmabuf_importable_vk(struct vt_renderer_t          *r,
     return false;
 
   struct vk_texture_t texture = {.renderer = r};
-  bool              imported = _vk_import_dmabuf(r, &texture, attr, -1);
+  bool                imported = _vk_import_dmabuf(r, &texture, attr, -1);
   _vk_texture_finish(&texture);
   return imported;
 }
@@ -1481,9 +1483,9 @@ void renderer_end_frame_vk(struct vt_renderer_t *r, struct vt_output_t *output,
     /* Runara waits for a frame slot before recycling its submission fence. */
     assert(!frame->submission);
     struct vk_frame_use_t *spare = frame->uses;
-    size_t capacity = frame->capacity;
+    size_t                 capacity = frame->capacity;
     *frame = (struct vk_pending_frame_t){vk->submission, vk->uses,
-                                      vk->use_count, vk->use_capacity};
+                                         vk->use_count, vk->use_capacity};
     vk->uses = spare;
     vk->use_count = 0;
     vk->use_capacity = capacity;

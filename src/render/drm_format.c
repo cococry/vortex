@@ -20,8 +20,8 @@
  * SOFTWARE.
  */
 
-#include "src/core/profiling.h"
 #include "drm_format.h"
+#include "src/core/profiling.h"
 #include <assert.h>
 #include <wayland-util.h>
 

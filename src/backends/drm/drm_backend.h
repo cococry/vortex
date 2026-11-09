@@ -37,9 +37,9 @@ struct vt_buffer_t *backend_allocate_buffer_drm(struct vt_backend_t *backend,
                                                 uint64_t modifier);
 
 bool backend_get_ideal_format_for_output_drm(struct vt_backend_t *backend,
-                                             struct vt_output_t *output,
-                                             uint32_t *format,
-                                             uint64_t *modifier);
+                                             struct vt_output_t  *output,
+                                             uint32_t            *format,
+                                             uint64_t            *modifier);
 
 bool backend_clear_buffer_drm(struct vt_backend_t *backend,
                               struct vt_buffer_t *buf, uint32_t col);

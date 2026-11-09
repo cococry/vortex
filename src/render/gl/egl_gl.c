@@ -108,7 +108,7 @@ static PFNEGLWAITSYNCKHRPROC             eglWaitSyncKHR_ptr = NULL;
 static PFNEGLDUPNATIVEFENCEFDANDROIDPROC eglDupNativeFenceFDANDROID_ptr = NULL;
 
 struct egl_backend_state_t {
-  void *native_display;
+  void      *native_display;
   EGLDisplay egl_dsp;
   EGLContext egl_ctx;
   EGLConfig  egl_conf;
@@ -116,7 +116,9 @@ struct egl_backend_state_t {
 
   bool has_dmabuf_modifiers_support, has_dmabuf_support,
       has_explicit_sync_support;
-  bool has_gl_image_import_support;
+  bool     has_gl_image_import_support;
+  bool     clear_color_valid;
+  uint32_t clear_color;
 
   bool has_buffer_age;
   bool has_swap_buffers_with_damage_khr;
@@ -135,11 +137,18 @@ struct egl_backend_state_t {
 #define EGL_DAMAGE_HISTORY 8
 
 struct egl_output_state_t {
-  GLuint fbo_id, fbo_tex_id, rbo_tex_depth;
+  GLuint            fbo_id, fbo_tex_id, rbo_tex_depth;
   pixman_region32_t damage_history[EGL_DAMAGE_HISTORY];
-  unsigned damage_count, damage_next;
-  uint32_t damage_width, damage_height;
+  unsigned          damage_count, damage_next;
+  uint32_t          damage_width, damage_height;
+  bool              direct_output;
+  pixman_region32_t frame_damage;
 
+  /* Optional diagnostic timing; never blocks waiting for query results. */
+  GLuint         gpu_queries[16];
+  bool           gpu_timing, gpu_query_active;
+  unsigned       gpu_next, gpu_pending;
+  uint64_t       gpu_ns, gpu_samples;
   struct wl_list rendered_buffer_uses;
 };
 
@@ -158,7 +167,8 @@ static bool _egl_pick_config(struct vt_compositor_t     *comp,
                              struct vt_backend_t        *backend);
 static bool _egl_record_surface_release_fences(struct vt_renderer_t *renderer,
                                                struct vt_output_t   *output,
-                                               EGLSyncKHR end_sync, bool flushed);
+                                               EGLSyncKHR            end_sync,
+                                               bool                  flushed);
 static bool _egl_gl_create_output_fbo(struct vt_output_t *output,
                                       uint32_t width, uint32_t height);
 
@@ -555,7 +565,8 @@ bool _egl_gl_import_buffer_dmabuf(struct vt_renderer_t    *r,
     return false;
   }
 
-  /* we commit only after the EGLImage, the texture and Runara handle all exist. */
+  /* we commit only after the EGLImage, the texture and Runara handle all exist.
+   */
   if (egl_buf->rn_img_registered)
     rn_texture_release(egl->runara, &egl_buf->rn_img);
   if (egl_buf->tex.id)
@@ -586,8 +597,7 @@ bool _egl_pick_config_from_format(struct vt_compositor_t     *c,
   }
 
   EGLConfig *configs = VT_ALLOC(c, sizeof(EGLConfig) * num);
-  if (!configs ||
-      !eglGetConfigs(egl->egl_dsp, configs, num, &num)) {
+  if (!configs || !eglGetConfigs(egl->egl_dsp, configs, num, &num)) {
     VT_ERROR(c->log, "failed to retrieve DRM EGL configs");
     return false;
   }
@@ -605,9 +615,7 @@ bool _egl_pick_config_from_format(struct vt_compositor_t     *c,
   }
 
   if (!match) {
-    VT_ERROR(c->log,
-             "could not find config for GBM format 0x%x",
-             format);
+    VT_ERROR(c->log, "could not find config for GBM format 0x%x", format);
     return false;
   }
 
@@ -631,7 +639,9 @@ bool _egl_pick_config(struct vt_compositor_t     *comp,
   case VT_BACKEND_X11:
   case VT_BACKEND_WAYLAND: {
     // Nested backend: use standard window attributes
-    EGLint attrs[] = {EGL_SURFACE_TYPE,
+    EGLint attrs[] = {EGL_STENCIL_SIZE,
+                      8,
+                      EGL_SURFACE_TYPE,
                       EGL_WINDOW_BIT,
                       EGL_RED_SIZE,
                       8,
@@ -647,8 +657,13 @@ bool _egl_pick_config(struct vt_compositor_t     *comp,
     EGLint n = 0;
     if (!eglChooseConfig(egl->egl_dsp, attrs, &egl->egl_conf, 1, &n) ||
         n == 0) {
-      VT_ERROR(comp->log, "no valid configs for nested backend");
-      return false;
+      /* Retain the offscreen path on surfaces without stencil storage. */
+      attrs[1] = 0;
+      if (!eglChooseConfig(egl->egl_dsp, attrs, &egl->egl_conf, 1, &n) ||
+          n == 0) {
+        VT_ERROR(comp->log, "no valid configs for nested backend");
+        return false;
+      }
     }
     eglGetConfigAttrib(egl->egl_dsp, egl->egl_conf, EGL_NATIVE_VISUAL_ID,
                        &egl->egl_native_vis);
@@ -762,7 +777,7 @@ bool _egl_record_surface_release_fences(struct vt_renderer_t *renderer,
       BACKEND_DATA(output->backend->comp->renderer, struct egl_backend_state_t);
 
   struct egl_output_state_t *egl_output = output->user_data_render;
-  int fence_fd = -1;
+  int                        fence_fd = -1;
   if (end_sync != EGL_NO_SYNC_KHR) {
     /* A successful window swap already flushed this context. */
     if (!flushed) {
@@ -929,6 +944,7 @@ bool _egl_create_renderer(struct vt_renderer_t      *renderer,
   struct egl_backend_state_t *egl =
       BACKEND_DATA(renderer, struct egl_backend_state_t);
 
+  egl->clear_color_valid = false;
   egl->native_display = native_handle;
   wl_array_init(&egl->formats);
   wl_list_init(&egl->surface_textures);
@@ -1046,7 +1062,7 @@ static bool _egl_track_rendered_buffer_use(struct vt_output_t     *output,
 static bool _egl_gl_has_extension(const char *name) {
   GLint count = 0;
   glGetIntegerv(GL_NUM_EXTENSIONS, &count);
-  for (GLint i = 0; i < count; ++i) {
+  for (GLint i = 0; i < count; i++) {
     const char *ext = (const char *)glGetStringi(GL_EXTENSIONS, (GLuint)i);
     if (ext && strcmp(ext, name) == 0)
       return true;
@@ -1153,7 +1169,7 @@ bool renderer_init_egl(struct vt_backend_t *backend, struct vt_renderer_t *r,
   if (!egl->has_swap_buffers_with_damage_khr &&
       !egl->has_swap_buffers_with_damage_ext)
     VT_WARN(r->comp->log, "EGL damage-aware buffer swapping unavailable; "
-                         "using eglSwapBuffers.");
+                          "using eglSwapBuffers.");
 
   egl->has_dmabuf_support =
       _egl_has_extension(exts, "EGL_EXT_image_dma_buf_import");
@@ -1228,8 +1244,9 @@ bool renderer_is_handle_renderable_egl(struct vt_renderer_t *renderer,
     if (egl->native_display == native_handle)
       return egl->egl_dsp != EGL_NO_DISPLAY;
 
-    EGLDisplay display = _egl_create_display(
-        renderer->comp, renderer->comp->backend->platform, native_handle, false);
+    EGLDisplay display =
+        _egl_create_display(renderer->comp, renderer->comp->backend->platform,
+                            native_handle, false);
     if (display == EGL_NO_DISPLAY)
       return false;
     if (display != egl->egl_dsp)
@@ -1462,9 +1479,15 @@ bool renderer_setup_renderable_output_egl(struct vt_renderer_t *r,
       (struct egl_output_state_t *)output->user_data_render;
 
   egl_output->damage_count = egl_output->damage_next = 0;
+  egl_output->direct_output = false;
+  pixman_region32_init(&egl_output->frame_damage);
   egl_output->damage_width = egl_output->damage_height = 0;
   for (unsigned i = 0; i < EGL_DAMAGE_HISTORY; i++)
     pixman_region32_init(&egl_output->damage_history[i]);
+  egl_output->gpu_timing = false;
+  egl_output->gpu_query_active = false;
+  egl_output->gpu_next = egl_output->gpu_pending = 0;
+  egl_output->gpu_ns = egl_output->gpu_samples = 0;
   wl_list_init(&egl_output->rendered_buffer_uses);
 
   // If we're running the wayland sink backend, we create the egl_window
@@ -1514,6 +1537,11 @@ bool renderer_setup_renderable_output_egl(struct vt_renderer_t *r,
       VT_ERROR(r->comp->log, "Failed to initialize Runara rendering engine.");
       return false;
     } else {
+      /* Vortex changes only framebuffer/texture and clipping states outside
+       * Runara; its program, VAO, viewport and blend/depth/cull state persist.
+       */
+      if (rn_gl_set_state_preserved(egl->runara, true) != RN_OK)
+        return false;
       VT_TRACE(r->comp->log, "Initialized Runara rendering engine.");
     }
   }
@@ -1540,12 +1568,28 @@ bool renderer_setup_renderable_output_egl(struct vt_renderer_t *r,
   }
 
   output->render_surface = (void *)egl_surf;
+  EGLint stencil_bits = 0;
+  eglGetConfigAttrib(egl->egl_dsp, egl->egl_conf, EGL_STENCIL_SIZE,
+                     &stencil_bits);
+  egl_output->direct_output = egl->has_buffer_age && stencil_bits >= 8 &&
+                              !getenv("VT_GL_OFFSCREEN") &&
+                              (r->backend->platform == VT_BACKEND_X11 ||
+                               r->backend->platform == VT_BACKEND_WAYLAND);
+  VT_INFO(r->comp->log, "GL output path: %s",
+          egl_output->direct_output ? "direct EGL buffer-age rendering"
+                                    : "offscreen damage blit");
+
+  if (getenv("VT_GL_GPU_TIMING")) {
+    glGenQueries(16, egl_output->gpu_queries);
+    egl_output->gpu_timing = true;
+  }
 
   pixman_region32_union_rect(&output->damage, &output->damage, 0, 0,
                              output->width, output->height);
 
   // Create EGL FBOs for output
-  if (!_egl_gl_create_output_fbo(output, output->width, output->height))
+  if (!egl_output->direct_output &&
+      !_egl_gl_create_output_fbo(output, output->width, output->height))
     return false;
 
   vt_comp_schedule_repaint(r->comp, output);
@@ -1569,7 +1613,8 @@ bool renderer_resize_renderable_output_egl(struct vt_renderer_t *r,
     wl_egl_window_resize(output->native_window, w, h, 0, 0);
 
   ((struct egl_output_state_t *)output->user_data_render)->damage_count = 0;
-  if (!_egl_gl_create_output_fbo(output, w, h))
+  if (!((struct egl_output_state_t *)output->user_data_render)->direct_output &&
+      !_egl_gl_create_output_fbo(output, w, h))
     return false;
 
   pixman_region32_union_rect(&output->damage, &output->damage, 0, 0, w, h);
@@ -1601,8 +1646,21 @@ bool renderer_destroy_renderable_output_egl(struct vt_renderer_t *r,
       wl_list_remove(&entry->link);
       free(entry);
     }
+    pixman_region32_fini(&egl_output->frame_damage);
     for (unsigned i = 0; i < EGL_DAMAGE_HISTORY; i++)
       pixman_region32_fini(&egl_output->damage_history[i]);
+    if (egl_output->gpu_timing) {
+      if (egl_output->gpu_query_active)
+        glEndQuery(GL_TIME_ELAPSED);
+      VT_INFO(
+          r->comp->log,
+          "GL GPU timing: samples=%" PRIu64 " mean_ns=%" PRIu64 " pending=%u",
+          egl_output->gpu_samples,
+          egl_output->gpu_samples ? egl_output->gpu_ns / egl_output->gpu_samples
+                                  : 0,
+          egl_output->gpu_pending);
+      glDeleteQueries(16, egl_output->gpu_queries);
+    }
     glDeleteTextures(1, &egl_output->fbo_tex_id);
     glDeleteFramebuffers(1, &egl_output->fbo_id);
     glDeleteRenderbuffers(1, &egl_output->rbo_tex_depth);
@@ -1757,11 +1815,64 @@ void renderer_set_clear_color_egl(struct vt_renderer_t *r,
   (void)output;
 
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
-  rn_clear_color(egl->runara, _hex_to_rn_color(col));
+  if (egl->clear_color_valid && egl->clear_color == col)
+    return;
+  egl->clear_color = col;
+  egl->clear_color_valid = true;
+  rn_color_t color = _hex_to_rn_color(col);
+  /* Setting the clear color must not clear pixels outside the repair region. */
+  glClearColor(color.r, color.g, color.b, color.a);
 }
+/* Existing opaque imports overwrite every repaired pixel independently of the
+ * old color. Do not speculate about new imports, alpha formats or hardware
+ * planes: failed imports must retain the normal background clear. */
+static bool _egl_repair_is_covered(struct vt_renderer_t *r,
+                                   struct vt_output_t   *output) {
+  struct vt_scene_t *scene = r->comp->scene;
+  if (!scene)
+    return false;
+  for (size_t i = scene->n_layers; i > 0; i--) {
+    struct vt_output_layer_state_t *layer = &scene->layers[i - 1];
+    if (layer->accepted || layer->dst.width <= 0 || layer->dst.height <= 0)
+      continue;
+    struct vt_buffer_use_t *use =
+        layer->type == VT_OUTPUT_LAYER_SURFACE && layer->surface
+            ? layer->surface->current_buf_use
+            : layer->use;
+    if (!use || !use->buf || use->acquire_source || use->acquire_fence_fd >= 0)
+      continue;
+    struct vt_dmabuf_attr_t attributes;
+    if (!vt_buffer_get_dmabuf(use->buf, &attributes) ||
+        attributes.format != _VT_GBM_FORMAT_XRGB8888)
+      continue;
+    struct vt_buffer_attachment_t *attachment =
+        vt_buffer_find_attachment(use->buf, r, &egl_buffer_attachment_impl);
+    struct vt_egl_buffer_t *buffer = attachment ? attachment->data : NULL;
+    if (!buffer || !buffer->rn_img_registered || !buffer->tex.id ||
+        buffer->egl_img == EGL_NO_IMAGE_KHR)
+      continue;
+    int64_t right = (int64_t)layer->dst.x + layer->dst.width;
+    int64_t bottom = (int64_t)layer->dst.y + layer->dst.height;
+    bool    covered = true;
+    for (int j = 0; j < output->n_damage_boxes; j++) {
+      const pixman_box32_t *box = &output->cached_damage[j];
+      if (box->x1 < layer->dst.x || box->y1 < layer->dst.y || box->x2 > right ||
+          box->y2 > bottom) {
+        covered = false;
+        break;
+      }
+    }
+    if (covered)
+      return true;
+  }
+  return false;
+}
+
 void renderer_clear_color_buffer_egl(struct vt_renderer_t *r,
                                      struct vt_output_t   *output) {
   VT_PROFILE_SCOPE();
+  if (_egl_repair_is_covered(r, output))
+    return;
   struct egl_backend_state_t *egl = BACKEND_DATA(r, struct egl_backend_state_t);
   glEnable(GL_SCISSOR_TEST);
   for (int i = 0; i < output->n_damage_boxes; i++) {
@@ -1770,7 +1881,8 @@ void renderer_clear_color_buffer_egl(struct vt_renderer_t *r,
               box->y2 - box->y1);
     rn_clear_color_buffer(egl->runara);
   }
-  glDisable(GL_SCISSOR_TEST);
+  if (output->n_damage_boxes > 1)
+    glDisable(GL_SCISSOR_TEST);
 }
 
 void renderer_stencil_damage_pass_egl(struct vt_renderer_t *r,
@@ -1778,6 +1890,21 @@ void renderer_stencil_damage_pass_egl(struct vt_renderer_t *r,
   VT_PROFILE_SCOPE();
   if (!r || !output || !output->user_data_render)
     return;
+
+  /* One rectangle needs no stencil mask. The clear and scene draws retain
+   * this scissor until end_frame; disjoint damage keeps the stencil path. */
+  if (output->n_damage_boxes <= 1) {
+    glDisable(GL_STENCIL_TEST);
+    glEnable(GL_SCISSOR_TEST);
+    if (output->n_damage_boxes == 1) {
+      const pixman_box32_t *box = &output->cached_damage[0];
+      glScissor(box->x1, output->height - box->y2, box->x2 - box->x1,
+                box->y2 - box->y1);
+    } else {
+      glScissor(0, 0, 0, 0);
+    }
+    return;
+  }
 
   glEnable(GL_STENCIL_TEST);
   glDisable(GL_SCISSOR_TEST);
@@ -1803,6 +1930,8 @@ void renderer_composite_pass_egl(struct vt_renderer_t *r,
 
   // ========== PASS 2: SCENE ==========
   glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+  if (output->n_damage_boxes <= 1)
+    return;
   glStencilMask(0x00);
   glStencilFunc(GL_EQUAL, 1, 0xFF);
   glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
@@ -1863,17 +1992,92 @@ void renderer_begin_frame_egl(struct vt_renderer_t *r,
     }
   }
 
+  if (egl_output->gpu_timing) {
+    while (egl_output->gpu_pending) {
+      unsigned oldest =
+          (egl_output->gpu_next + 16 - egl_output->gpu_pending) % 16;
+      GLint ready = GL_FALSE;
+      glGetQueryObjectiv(egl_output->gpu_queries[oldest],
+                         GL_QUERY_RESULT_AVAILABLE, &ready);
+      if (!ready)
+        break;
+      GLuint64 ns = 0;
+      glGetQueryObjectui64v(egl_output->gpu_queries[oldest], GL_QUERY_RESULT,
+                            &ns);
+      egl_output->gpu_ns += ns;
+      egl_output->gpu_samples++;
+      if (egl_output->gpu_samples % 600 == 0)
+        VT_INFO(r->comp->log,
+                "GL GPU timing: samples=%" PRIu64 " mean_ns=%" PRIu64,
+                egl_output->gpu_samples,
+                egl_output->gpu_ns / egl_output->gpu_samples);
+      egl_output->gpu_pending--;
+    }
+    if (egl_output->gpu_pending < 16) {
+      glBeginQuery(GL_TIME_ELAPSED,
+                   egl_output->gpu_queries[egl_output->gpu_next]);
+      egl_output->gpu_query_active = true;
+    }
+  }
+
+  if (egl_output->direct_output) {
+    VT_PROFILE_SCOPE_NAMED("EGL damage: prepare direct rendering");
+    if (egl_output->damage_width != output->width ||
+        egl_output->damage_height != output->height) {
+      egl_output->damage_count = 0;
+      egl_output->damage_width = output->width;
+      egl_output->damage_height = output->height;
+    }
+    pixman_region32_fini(&egl_output->frame_damage);
+    pixman_region32_init_rects(&egl_output->frame_damage, output->cached_damage,
+                               output->n_damage_boxes);
+    pixman_region32_intersect_rect(&egl_output->frame_damage,
+                                   &egl_output->frame_damage, 0, 0,
+                                   output->width, output->height);
+    pixman_region32_t repair;
+    pixman_region32_init(&repair);
+    pixman_region32_copy(&repair, &egl_output->frame_damage);
+    EGLint               age = 0;
+    const pixman_box32_t full = {0, 0, output->width, output->height};
+    if (pixman_region32_contains_rectangle(&repair, &full) == PIXMAN_REGION_IN)
+      age = 1;
+    else if (!eglQuerySurface(egl->egl_dsp, surface, EGL_BUFFER_AGE_EXT, &age))
+      age = 0;
+    if (age <= 0 || (unsigned)(age - 1) > egl_output->damage_count) {
+      pixman_region32_union_rect(&repair, &repair, 0, 0, output->width,
+                                 output->height);
+    } else {
+      for (int i = 1; i < age; i++) {
+        unsigned index = (egl_output->damage_next + EGL_DAMAGE_HISTORY - i) %
+                         EGL_DAMAGE_HISTORY;
+        pixman_region32_union(&repair, &repair,
+                              &egl_output->damage_history[index]);
+      }
+    }
+    int             count = 0;
+    pixman_box32_t *boxes = pixman_region32_rectangles(&repair, &count);
+    if (count > VT_OUTPUT_MAX_DAMAGE_RECTS) {
+      output->cached_damage[0] = *pixman_region32_extents(&repair);
+      output->n_damage_boxes = 1;
+    } else {
+      memcpy(output->cached_damage, boxes, count * sizeof(*boxes));
+      output->n_damage_boxes = count;
+    }
+    pixman_region32_fini(&repair);
+  }
+
   const struct rn_box_u32_t canvas = {
       .x = 0, .y = 0, .width = output->width, .height = output->height};
   rn_canvas_set_bounds(egl->runara, &canvas);
 
-  glBindFramebuffer(GL_FRAMEBUFFER, egl_output->fbo_id);
+  glBindFramebuffer(GL_FRAMEBUFFER,
+                    egl_output->direct_output ? 0 : egl_output->fbo_id);
 
   /* Buffer layers are imported once, with a current context, before drawing.
    * Replacing or resizing a buffer re-imports it by giving it a new buffer
    * attachment. */
   struct vt_scene_t *scene = r->comp->scene;
-  for (size_t i = 0; i < scene->n_layers; ++i) {
+  for (size_t i = 0; i < scene->n_layers; i++) {
     struct vt_output_layer_state_t *layer = &scene->layers[i];
     if (layer->accepted || layer->type != VT_OUTPUT_LAYER_BUFFER || !layer->use)
       continue;
@@ -2096,7 +2300,6 @@ void renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,
                             const pixman_box32_t *damaged, int32_t n_damaged) {
   VT_PROFILE_SCOPE();
 
-
   if (!r || !output)
     return;
 
@@ -2114,7 +2317,8 @@ void renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,
   if (!egl || !egl_output || !output->render_surface)
     return;
 
-  glBindFramebuffer(GL_READ_FRAMEBUFFER, egl_output->fbo_id);
+  glBindFramebuffer(GL_READ_FRAMEBUFFER,
+                    egl_output->direct_output ? 0 : egl_output->fbo_id);
   glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
   glDisable(GL_STENCIL_TEST);
   glDisable(GL_SCISSOR_TEST);
@@ -2127,62 +2331,74 @@ void renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,
   }
 
   pixman_region32_t current, repair;
-  EGLint age = 0;
-  int n_rects;
-  pixman_box32_t *rects;
-  EGLint *swap_rects;
-  EGLBoolean swapped;
+  EGLint            age = 0;
+  int               n_rects;
+  pixman_box32_t   *rects;
+  EGLint           *swap_rects;
+  EGLBoolean        swapped;
   {
     VT_PROFILE_SCOPE_NAMED("EGL damage: build current region");
     pixman_region32_init(&current);
-    if (damaged && n_damaged > 0) {
+    if (egl_output->direct_output) {
+      pixman_region32_copy(&current, &egl_output->frame_damage);
+    } else if (damaged && n_damaged > 0) {
       pixman_region32_fini(&current);
       pixman_region32_init_rects(&current, damaged, n_damaged);
     }
-    pixman_region32_intersect_rect(&current, &current, 0, 0,
-                                   output->width, output->height);
+    pixman_region32_intersect_rect(&current, &current, 0, 0, output->width,
+                                   output->height);
     pixman_region32_init(&repair);
     pixman_region32_copy(&repair, &current);
   }
-  {
-    VT_PROFILE_SCOPE_NAMED("EGL damage: query buffer age");
-    const pixman_box32_t full = {0, 0, output->width, output->height};
-    if (pixman_region32_contains_rectangle(&current, &full) == PIXMAN_REGION_IN) {
-      /* Every pixel will be overwritten; querying an older buffer is wasted
-       * driver work. Age one selects just the current (full) damage below. */
-      age = 1;
-    } else if (egl->has_buffer_age &&
-               !eglQuerySurface(egl->egl_dsp, output->render_surface,
-                                EGL_BUFFER_AGE_EXT, &age)) {
-      age = 0;
+  if (!egl_output->direct_output) {
+    {
+      VT_PROFILE_SCOPE_NAMED("EGL damage: query buffer age");
+      const pixman_box32_t full = {0, 0, output->width, output->height};
+      if (pixman_region32_contains_rectangle(&current, &full) ==
+          PIXMAN_REGION_IN) {
+        /* Every pixel will be overwritten; querying an older buffer is wasted
+         * driver work. Age one selects just the current (full) damage below. */
+        age = 1;
+      } else if (egl->has_buffer_age &&
+                 !eglQuerySurface(egl->egl_dsp, output->render_surface,
+                                  EGL_BUFFER_AGE_EXT, &age)) {
+        age = 0;
+      }
     }
-  }
-  {
-    VT_PROFILE_SCOPE_NAMED("EGL damage: union repair history");
-    if (age <= 0 || (unsigned)(age - 1) > egl_output->damage_count) {
-      pixman_region32_union_rect(&repair, &repair, 0, 0,
-                                 output->width, output->height);
-    } else {
-      for (int i = 1; i < age; i++) {
-        unsigned index = (egl_output->damage_next + EGL_DAMAGE_HISTORY - i) %
-                         EGL_DAMAGE_HISTORY;
-        pixman_region32_union(&repair, &repair,
-                              &egl_output->damage_history[index]);
+    {
+      VT_PROFILE_SCOPE_NAMED("EGL damage: union repair history");
+      if (age <= 0 || (unsigned)(age - 1) > egl_output->damage_count) {
+        pixman_region32_union_rect(&repair, &repair, 0, 0, output->width,
+                                   output->height);
+      } else {
+        for (int i = 1; i < age; i++) {
+          unsigned index = (egl_output->damage_next + EGL_DAMAGE_HISTORY - i) %
+                           EGL_DAMAGE_HISTORY;
+          pixman_region32_union(&repair, &repair,
+                                &egl_output->damage_history[index]);
+        }
+      }
+    }
+    {
+      VT_PROFILE_SCOPE_NAMED("EGL damage: submit blits");
+      rects = pixman_region32_rectangles(&repair, &n_rects);
+      for (int i = 0; i < n_rects; i++) {
+        int x1 = rects[i].x1, x2 = rects[i].x2;
+        int y1 = output->height - rects[i].y2;
+        int y2 = output->height - rects[i].y1;
+        glBlitFramebuffer(x1, y1, x2, y2, x1, y1, x2, y2, GL_COLOR_BUFFER_BIT,
+                          GL_NEAREST);
       }
     }
   }
-  {
-    VT_PROFILE_SCOPE_NAMED("EGL damage: submit blits");
-    rects = pixman_region32_rectangles(&repair, &n_rects);
-    for (int i = 0; i < n_rects; i++) {
-      int x1 = rects[i].x1, x2 = rects[i].x2;
-      int y1 = output->height - rects[i].y2;
-      int y2 = output->height - rects[i].y1;
-      glBlitFramebuffer(x1, y1, x2, y2, x1, y1, x2, y2,
-                        GL_COLOR_BUFFER_BIT, GL_NEAREST);
-    }
-  }
   pixman_region32_fini(&repair);
+
+  if (egl_output->gpu_query_active) {
+    glEndQuery(GL_TIME_ELAPSED);
+    egl_output->gpu_query_active = false;
+    egl_output->gpu_next = (egl_output->gpu_next + 1) % 16;
+    egl_output->gpu_pending++;
+  }
 
   GLenum gl_err = glGetError();
   if (gl_err != GL_NO_ERROR) {
@@ -2198,9 +2414,10 @@ void renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,
   {
     VT_PROFILE_SCOPE_NAMED("EGL release fence: create");
     if (r->comp->have_proto_dmabuf_explicit_sync &&
-        egl->has_explicit_sync_support && _output_needs_release_fence(egl_output)) {
-      release_sync = eglCreateSyncKHR_ptr(egl->egl_dsp,
-          EGL_SYNC_NATIVE_FENCE_ANDROID, (EGLint[]){EGL_NONE});
+        egl->has_explicit_sync_support &&
+        _output_needs_release_fence(egl_output)) {
+      release_sync = eglCreateSyncKHR_ptr(
+          egl->egl_dsp, EGL_SYNC_NATIVE_FENCE_ANDROID, (EGLint[]){EGL_NONE});
       if (release_sync == EGL_NO_SYNC_KHR) {
         VT_ERROR(r->comp->log, "Failed to create output release fence.");
         egl_output->damage_count = 0;
@@ -2216,20 +2433,22 @@ void renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,
     rects = pixman_region32_rectangles(&current, &n_rects);
     swap_rects = n_rects ? calloc(n_rects, 4 * sizeof(EGLint)) : NULL;
     for (int i = 0; swap_rects && i < n_rects; i++) {
-      swap_rects[4*i] = rects[i].x1;
-      swap_rects[4*i+1] = output->height - rects[i].y2;
-      swap_rects[4*i+2] = rects[i].x2 - rects[i].x1;
-      swap_rects[4*i+3] = rects[i].y2 - rects[i].y1;
+      swap_rects[4 * i] = rects[i].x1;
+      swap_rects[4 * i + 1] = output->height - rects[i].y2;
+      swap_rects[4 * i + 2] = rects[i].x2 - rects[i].x1;
+      swap_rects[4 * i + 3] = rects[i].y2 - rects[i].y1;
     }
   }
   {
     VT_PROFILE_SCOPE_NAMED("EGL presentation: swap buffers");
     if (egl->has_swap_buffers_with_damage_khr)
-      swapped = eglSwapBuffersWithDamageKHR_ptr(egl->egl_dsp,
-          output->render_surface, swap_rects, swap_rects ? n_rects : 0);
+      swapped =
+          eglSwapBuffersWithDamageKHR_ptr(egl->egl_dsp, output->render_surface,
+                                          swap_rects, swap_rects ? n_rects : 0);
     else if (egl->has_swap_buffers_with_damage_ext)
-      swapped = eglSwapBuffersWithDamageEXT_ptr(egl->egl_dsp,
-          output->render_surface, swap_rects, swap_rects ? n_rects : 0);
+      swapped =
+          eglSwapBuffersWithDamageEXT_ptr(egl->egl_dsp, output->render_surface,
+                                          swap_rects, swap_rects ? n_rects : 0);
     else
       swapped = eglSwapBuffers(egl->egl_dsp, output->render_surface);
   }
@@ -2244,7 +2463,8 @@ void renderer_end_frame_egl(struct vt_renderer_t *r, struct vt_output_t *output,
     if (swapped) {
       pixman_region32_copy(&egl_output->damage_history[egl_output->damage_next],
                            &current);
-      egl_output->damage_next = (egl_output->damage_next + 1) % EGL_DAMAGE_HISTORY;
+      egl_output->damage_next =
+          (egl_output->damage_next + 1) % EGL_DAMAGE_HISTORY;
       if (egl_output->damage_count < EGL_DAMAGE_HISTORY)
         egl_output->damage_count++;
     } else {

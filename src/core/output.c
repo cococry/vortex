@@ -20,9 +20,9 @@
  * SOFTWARE.
  */
 
+#include "output.h"
 #include "core/util.h"
 #include "src/core/profiling.h"
-#include "output.h"
 
 #include "core/compositor.h"
 #include "core/scene.h"
@@ -34,9 +34,11 @@ static int32_t output_x_ptr = 0;
 
 #define _SUBSYS_NAME "OUTPUT"
 
-static struct vt_buffer_t *_allocate_background_buffer(struct vt_output_t *output);
+static struct vt_buffer_t *
+_allocate_background_buffer(struct vt_output_t *output);
 
-static struct vt_buffer_t *_allocate_background_buffer(struct vt_output_t *output) {
+static struct vt_buffer_t *
+_allocate_background_buffer(struct vt_output_t *output) {
   struct vt_backend_t *backend = output->backend;
   uint32_t             format = DRM_FORMAT_XRGB8888;
   uint64_t             modifier = DRM_FORMAT_MOD_LINEAR;
@@ -46,7 +48,7 @@ static struct vt_buffer_t *_allocate_background_buffer(struct vt_output_t *outpu
    */
   if (backend->impl.get_ideal_format_for_output &&
       !backend->impl.get_ideal_format_for_output(backend, output, &format,
-                                                &modifier))
+                                                 &modifier))
     return NULL;
 
   return backend->impl.allocate_buffer(backend, output->width, output->height,

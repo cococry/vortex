@@ -20,8 +20,8 @@
  * SOFTWARE.
  */
 
-#include "src/core/profiling.h"
 #include "prime.h"
+#include "src/core/profiling.h"
 
 #include <string.h>
 #include <unistd.h>

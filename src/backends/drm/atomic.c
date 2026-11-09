@@ -20,12 +20,12 @@
  * SOFTWARE.
  */
 
-#include "src/core/profiling.h"
 #include "cursor.h"
 #include "drm_types.h"
 #include "fb.h"
 #include "kms.h"
 #include "libliftoff.h"
+#include "src/core/profiling.h"
 
 #include <errno.h>
 #include <inttypes.h>
@@ -39,12 +39,12 @@
 #define _SUBSYS_NAME "DRM"
 
 static bool _atomic_add_cached_planes(struct vt_drm_backend_state_t *drm,
-                                      struct vt_drm_kms_commit_t *commit,
-                                      drmModeAtomicReq *req);
+                                      struct vt_drm_kms_commit_t    *commit,
+                                      drmModeAtomicReq              *req);
 
 static bool _atomic_add_cached_planes(struct vt_drm_backend_state_t *drm,
-                                      struct vt_drm_kms_commit_t *commit,
-                                      drmModeAtomicReq *req) {
+                                      struct vt_drm_kms_commit_t    *commit,
+                                      drmModeAtomicReq              *req) {
   struct vt_drm_output_state_t *output = commit->output;
 
   if (drmModeAtomicMerge(req, output->layer_plan_req) < 0)
@@ -57,14 +57,15 @@ static bool _atomic_add_cached_planes(struct vt_drm_backend_state_t *drm,
 
     struct liftoff_layer *liftoff_layer =
         layer->role == VT_DRM_LAYER_COMPOSITED_SCENE
-            ? output->liftoff_composition_layer : layer->liftoff_layer;
+            ? output->liftoff_composition_layer
+            : layer->liftoff_layer;
     struct liftoff_plane *allocation = liftoff_layer_get_plane(liftoff_layer);
     if (!allocation)
       return false;
 
-    uint32_t plane_id = liftoff_plane_get_id(allocation);
+    uint32_t               plane_id = liftoff_plane_get_id(allocation);
     struct vt_drm_plane_t *plane;
-    bool found = false;
+    bool                   found = false;
     wl_array_for_each(plane, &drm->planes) {
       if (plane->id != plane_id)
         continue;
@@ -76,9 +77,9 @@ static bool _atomic_add_cached_planes(struct vt_drm_backend_state_t *drm,
         return false;
 
       if (plane->props[VT_DRM_PLANE_IN_FENCE_FD] &&
-          drmModeAtomicAddProperty(req, plane_id,
-                                   plane->props[VT_DRM_PLANE_IN_FENCE_FD],
-                                   (uint64_t)(int64_t)layer->acquire_fence_fd) < 0)
+          drmModeAtomicAddProperty(
+              req, plane_id, plane->props[VT_DRM_PLANE_IN_FENCE_FD],
+              (uint64_t)(int64_t)layer->acquire_fence_fd) < 0)
         return false;
 
       found = true;
@@ -182,10 +183,11 @@ static uint32_t _atomic_commit_flags(const struct vt_drm_kms_commit_t *commit,
   return flags;
 }
 
-static bool _liftoff_set_drm_layer_props(
-    struct vt_drm_backend_state_t *drm, struct liftoff_layer *liftoff_layer,
-    const struct vt_drm_layer_state_t *layer, bool composited,
-    bool keep_fence) {
+static bool
+_liftoff_set_drm_layer_props(struct vt_drm_backend_state_t     *drm,
+                             struct liftoff_layer              *liftoff_layer,
+                             const struct vt_drm_layer_state_t *layer,
+                             bool composited, bool keep_fence) {
   VT_PROFILE_SCOPE();
   if (!drm || !liftoff_layer || !layer)
     return false;
@@ -281,10 +283,10 @@ static bool _atomic_prepare_liftoff(struct vt_drm_backend_state_t *drm,
       return false;
     }
 
-    if (!_liftoff_set_drm_layer_props(drm, liftoff_layer, layer,
-                                      layer->role == VT_DRM_LAYER_COMPOSITED,
-                                      output->crtc->plane_primary->props[
-                                          VT_DRM_PLANE_IN_FENCE_FD] != 0)) {
+    if (!_liftoff_set_drm_layer_props(
+            drm, liftoff_layer, layer, layer->role == VT_DRM_LAYER_COMPOSITED,
+            output->crtc->plane_primary->props[VT_DRM_PLANE_IN_FENCE_FD] !=
+                0)) {
       VT_ERROR(drm->comp->log,
                "failed to configure Liftoff layer "
                "role=%d fb=%" PRIu32 ".",
@@ -534,7 +536,8 @@ static drmModeAtomicReq *_atomic_build_req(struct vt_drm_backend_state_t *drm,
     if (!_atomic_add_cached_planes(drm, commit, req))
       goto fail;
   } else {
-    /* keep only plane properties; mode blobs and out fences belong to this commit. */
+    /* keep only plane properties; mode blobs and out fences belong to this
+     * commit. */
     drmModeAtomicReq *planes = drmModeAtomicAlloc();
     if (!planes)
       goto fail;
@@ -547,7 +550,8 @@ static drmModeAtomicReq *_atomic_build_req(struct vt_drm_backend_state_t *drm,
     output->layer_plan_req = NULL;
 
     if (ret == 0 && output->layer_plan_valid &&
-        output->tested_layer_plan_generation == output->base->layer_plan_generation) {
+        output->tested_layer_plan_generation ==
+            output->base->layer_plan_generation) {
       output->layer_plan_req = planes;
       output->layer_plan_req_generation = output->base->layer_plan_generation;
       output->layer_plan_req_flags = flags;
@@ -556,8 +560,7 @@ static drmModeAtomicReq *_atomic_build_req(struct vt_drm_backend_state_t *drm,
     }
 
     if (ret < 0) {
-      VT_TRACE(drm->comp->log,
-               "final Liftoff request failed for output=%p: %s",
+      VT_TRACE(drm->comp->log, "final Liftoff request failed for output=%p: %s",
                (void *)output->base, strerror(-ret));
       goto fail;
     }
@@ -752,8 +755,8 @@ fail:
 
 bool drm_liftoff_set_layer_props(struct liftoff_layer *liftoff_layer,
                                  const struct vt_output_layer_state_t *layer,
-                                 uint32_t fb_id, int in_fence_fd,
-                                 uint64_t zpos, bool keep_fence) {
+                                 uint32_t fb_id, int in_fence_fd, uint64_t zpos,
+                                 bool keep_fence) {
   VT_PROFILE_SCOPE();
   assert(liftoff_layer && layer);
 

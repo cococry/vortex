@@ -20,12 +20,12 @@
  * SOFTWARE.
  */
 
-#include "src/core/profiling.h"
 #include "scene.h"
 #include "core/buffer.h"
 #include "pixman.h"
 #include "src/core/compositor.h"
 #include "src/core/core_types.h"
+#include "src/core/profiling.h"
 #include "src/core/surface.h"
 #include "src/core/util.h"
 #include "src/protocols/wl_subcompositor.h"
@@ -283,6 +283,33 @@ static void _scene_accumulate_layers(struct vt_scene_t  *scene,
   _scene_node_accumulate_layers(scene, output, scene->root, 0, 0);
 }
 
+/* Damage has already been expanded by the renderer for buffer age, or to the
+ * whole target when preservation is unavailable. Boxes are output-local. */
+static bool _scene_damage_intersects(const struct vt_output_t *output,
+                                     const struct vt_box_t    *box) {
+  VT_PROFILE_SCOPE();
+  int64_t right = (int64_t)box->x + box->width;
+  int64_t bottom = (int64_t)box->y + box->height;
+  if (box->width <= 0 || box->height <= 0)
+    return false;
+  for (int i = 0; i < output->n_damage_boxes; i++) {
+    const pixman_box32_t *damage = &output->cached_damage[i];
+    if (box->x < damage->x2 && right > damage->x1 && box->y < damage->y2 &&
+        bottom > damage->y1)
+      return true;
+  }
+  return false;
+}
+
+static bool _scene_clear_is_fallback(struct vt_scene_t  *scene,
+                                     struct vt_output_t *output) {
+  return scene->renderer->impl.set_clear_color && scene->n_layers &&
+         !output->background.owner && output->background.use_fallback &&
+         scene->layers[0].use == output->background.use_fallback &&
+         scene->layers[0].type == VT_OUTPUT_LAYER_BUFFER &&
+         !scene->layers[0].accepted;
+}
+
 static void _scene_render_layers(struct vt_scene_t  *scene,
                                  struct vt_output_t *output) {
   VT_PROFILE_SCOPE();
@@ -299,6 +326,16 @@ static void _scene_render_layers(struct vt_scene_t  *scene,
           renderer->comp->log,
           "Surface=%p accepted as direct-scanout layer; Will not be rendered.",
           (void *)layer->surface);
+      continue;
+    }
+
+    /* The compositor's solid fallback is already painted by the clear. */
+    if (i == 0 && _scene_clear_is_fallback(scene, output))
+      continue;
+
+    if (!_scene_damage_intersects(output, &layer->dst)) {
+      if (layer->surface && !wl_list_empty(&layer->surface->frame_callbacks))
+        vt_output_track_presented_surface(output, layer->surface);
       continue;
     }
 
@@ -339,8 +376,13 @@ static void _scene_render_cursor(struct vt_scene_t  *scene,
     if (cursor && cursor->mapped && cursor_right > output->x &&
         cursor_x < output_right && cursor_bottom > output->y &&
         cursor_y < output_bottom) {
-      r->impl.draw_surface_simple(r, output, cursor, cursor_x - output->x,
-                                  cursor_y - output->y);
+      const struct vt_box_t box = {cursor_x - output->x, cursor_y - output->y,
+                                   cursor->applied.width,
+                                   cursor->applied.height};
+      if (_scene_damage_intersects(output, &box))
+        r->impl.draw_surface_simple(r, output, cursor, box.x, box.y);
+      else if (!wl_list_empty(&cursor->frame_callbacks))
+        vt_output_track_presented_surface(output, cursor);
     }
   }
 }
@@ -356,12 +398,20 @@ static void _composite_pass(struct vt_scene_t  *scene,
 
   r->impl.begin_scene(r, output);
 
+  if (r->impl.set_clear_color)
+    r->impl.set_clear_color(
+        r, output,
+        _scene_clear_is_fallback(scene, output) ? 0x181818ff : 0x00000000);
   r->impl.clear_color_buffer(r, output);
 
   _scene_render_layers(scene, output);
 
   if (output->cursor_mode != VT_CURSOR_MODE_HARDWARE) {
     _scene_render_cursor(scene, output);
+  } else {
+    struct vt_surface_t *cursor = vt_seat_get_cursor_image(r->comp->seat).surf;
+    if (cursor && cursor->mapped && !wl_list_empty(&cursor->frame_callbacks))
+      vt_output_track_presented_surface(output, cursor);
   }
 
   r->impl.end_scene(r, output);
@@ -890,7 +940,8 @@ struct vt_output_t *vt_scene_node_primary_output(struct vt_compositor_t *comp,
 }
 
 void vt_scene_invalidate_layer_plans(struct vt_compositor_t *comp) {
-  /* we cover both old and new subtree visibility, including unmapped children. */
+  /* we cover both old and new subtree visibility, including unmapped children.
+   */
   struct vt_output_t *output;
   wl_list_for_each(output, &comp->outputs, link_global) {
     vt_output_invalidate_layer_plan(output);

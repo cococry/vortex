@@ -32,7 +32,7 @@ struct vt_dmabuf_attr_t;
 
 enum vt_rendering_backend_t {
   VT_RENDERING_BACKEND_INVALID = 0,
-  VT_RENDERING_BACKEND_EGL_OPENGL, 
+  VT_RENDERING_BACKEND_EGL_OPENGL,
   VT_RENDERING_BACKEND_VULKAN,
 };
 
@@ -109,4 +109,5 @@ struct vt_renderer_t {
 void vt_renderer_implement(struct vt_renderer_t       *renderer,
                            enum vt_rendering_backend_t backend);
 
-bool vt_renderer_try_fallback(struct vt_renderer_t       *renderer, void* backend_handle); 
+bool vt_renderer_try_fallback(struct vt_renderer_t *renderer,
+                              void                 *backend_handle);

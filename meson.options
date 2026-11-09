@@ -16,3 +16,5 @@ option(
   value: 'opengl',
   description: 'Rendering backends to build'
 )
+
+option('profiling_comparison', type: 'boolean', value: false, description: 'Only shared comparison-stage CPU scopes; implies profiling')

@@ -21,10 +21,10 @@
  */
 
 #define _GNU_SOURCE
-#include "src/core/profiling.h"
 #include "linux_dmabuf.h"
 #include "../render/dmabuf.h"
 #include "../render/dmabuf_attr.h"
+#include "src/core/profiling.h"
 #include "src/render/drm_format.h"
 
 #include "src/core/buffer.h"

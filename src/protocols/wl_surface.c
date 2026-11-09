@@ -20,13 +20,13 @@
  * SOFTWARE.
  */
 
-#include "src/core/profiling.h"
 #include "wl_surface.h"
 #include "pixman.h"
 #include "src/core/buffer.h"
 #include "src/core/buffer_orchestrator.h"
 #include "src/core/content_update.h"
 #include "src/core/output.h"
+#include "src/core/profiling.h"
 #include "src/core/scene.h"
 #include "src/core/surface.h"
 #include "src/core/util.h"
@@ -191,6 +191,7 @@ void _wl_surface_attach(struct wl_client *client, struct wl_resource *resource,
 void _wl_surface_commit(struct wl_client   *client,
                         struct wl_resource *resource) {
   VT_PROFILE_SCOPE();
+  VT_PROFILE_COMPARE("compare.client_commit");
   (void)client;
   struct vt_surface_t *surf = wl_resource_get_user_data(resource);
   if (!surf) {

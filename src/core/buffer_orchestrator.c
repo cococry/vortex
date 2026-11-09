@@ -20,8 +20,8 @@
  * SOFTWARE.
  */
 
-#include "src/core/profiling.h"
 #include "buffer_orchestrator.h"
+#include "src/core/profiling.h"
 #include "src/protocols/linux_dmabuf.h"
 #include "src/protocols/wl_shm.h"
 

@@ -20,9 +20,9 @@
  * SOFTWARE.
  */
 
-#include "src/core/profiling.h"
 #include "drm_types.h"
 #include "kms.h"
+#include "src/core/profiling.h"
 
 #include <errno.h>
 #include <string.h>

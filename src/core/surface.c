@@ -20,13 +20,13 @@
  * SOFTWARE.
  */
 
-#include "src/core/profiling.h"
 #include "surface.h"
 #include "../input/wl_seat.h"
 #include "src/core/buffer.h"
 #include "src/core/content_update.h"
 #include "src/core/core_types.h"
 #include "src/core/focus_policy.h"
+#include "src/core/profiling.h"
 #include "src/core/scene.h"
 #include "src/core/surface_addon.h"
 #include "src/core/util.h"
@@ -123,7 +123,7 @@ bool vt_surface_apply_buffer_use(struct vt_surface_t    *surf,
 
   struct vt_buffer_use_t *old = surf->current_buf_use;
   if (!vt_buffer_scanout_layout_equal(old ? old->buf : NULL,
-                                       new_use ? new_use->buf : NULL) ||
+                                      new_use ? new_use->buf : NULL) ||
       (old && old->release && vt_buffer_release_needs_fence(old->release)) !=
           (new_use && new_use->release &&
            vt_buffer_release_needs_fence(new_use->release)))

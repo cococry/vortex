@@ -20,10 +20,10 @@
  * SOFTWARE.
  */
 
-#include "src/core/profiling.h"
 #include "fb.h"
 #include "gbm_allocator.h"
 #include "prime.h"
+#include "src/core/profiling.h"
 #include <drm/drm_fourcc.h>
 #include <errno.h>
 #include <inttypes.h>
@@ -104,8 +104,8 @@ static bool _drm_fb_add(struct vt_drm_backend_state_t *drm,
 }
 
 static bool _drm_fb_import_buffer(struct vt_drm_backend_state_t *drm,
-                             struct vt_drm_framebuffer_t   *fb,
-                             struct vt_buffer_t            *buf) {
+                                  struct vt_drm_framebuffer_t   *fb,
+                                  struct vt_buffer_t            *buf) {
   VT_PROFILE_SCOPE();
   if (!drm || !fb || !buf)
     return false;
@@ -154,8 +154,8 @@ static bool _drm_fb_import_buffer(struct vt_drm_backend_state_t *drm,
 }
 
 bool drm_fb_init_from_buffer(struct vt_drm_backend_state_t *drm,
-                             struct vt_drm_framebuffer_t *fb,
-                             struct vt_buffer_t *buf) {
+                             struct vt_drm_framebuffer_t   *fb,
+                             struct vt_buffer_t            *buf) {
   VT_PROFILE_SCOPE();
 
   if (!drm || !fb || !buf)
@@ -179,8 +179,8 @@ bool drm_fb_init_from_buffer(struct vt_drm_backend_state_t *drm,
       return false;
     }
 
-    attachment = vt_buffer_add_attachment(buf, drm, imported,
-                                          &fb_attachment_impl);
+    attachment =
+        vt_buffer_add_attachment(buf, drm, imported, &fb_attachment_impl);
 
     if (!attachment) {
 

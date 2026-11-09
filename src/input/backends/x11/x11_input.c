@@ -20,9 +20,9 @@
  * SOFTWARE.
  */
 
-#include "src/core/profiling.h"
 #include "x11_input.h"
 #include "src/core/compositor.h"
+#include "src/core/profiling.h"
 #include "src/input/wl_seat.h"
 #include <X11/XKBlib.h>
 #include <X11/Xlib-xcb.h>

@@ -1,0 +1,266 @@
+--- a/server/TracyWorker.cpp
++++ b/server/TracyWorker.cpp
+@@ -21,7 +21,7 @@
+ #include <inttypes.h>
+ #include <sys/stat.h>
+ 
+-#include <capstone.h>
++
+ 
+ #define ZDICT_STATIC_LINKING_ONLY
+ #include <zdict.h>
+@@ -41,6 +41,10 @@
+ 
+ namespace tracy
+ {
++struct InlineThread {
++ template<class F> InlineThread(F f) { f(); }
++ void join() {}
++};
+ 
+ static bool SourceFileValid( const char* fn, uint64_t olderThan )
+ {
+@@ -1337,9 +1341,9 @@
+ #else
+             // Leave one thread for file reader, second thread for dispatch (this thread)
+             // Minimum 2 threads to have at least two buffers (one in use, second one filling up)
+-            const auto jobs = std::max<int>( std::thread::hardware_concurrency() - 2, 2 );
++            const auto jobs = std::max<int>( 1 - 2, 2 );
+ #endif
+-            auto td = std::make_unique<TaskDispatch>( jobs, "FrImg Zstd" );
++            auto td = std::make_unique<TaskDispatch>( 0, "FrImg Zstd" );
+             auto data = std::make_unique<JobData[]>( jobs );
+ 
+             for( uint64_t i=0; i<sz; i++ )
+@@ -1599,8 +1603,8 @@
+     pdqsort_branchless( m_data.symbolLoc.begin(), m_data.symbolLoc.end(), [] ( const auto& l, const auto& r ) { return l.addr < r.addr; } );
+     pdqsort_branchless( m_data.symbolLocInline.begin(), m_data.symbolLocInline.end() );
+ #else
+-    ppqsort::sort( ppqsort::execution::par, m_data.symbolLoc.begin(), m_data.symbolLoc.end(), [] ( const auto& l, const auto& r ) { return l.addr < r.addr; } );
+-    ppqsort::sort( ppqsort::execution::par, m_data.symbolLocInline.begin(), m_data.symbolLocInline.end() );
++    std::sort( m_data.symbolLoc.begin(), m_data.symbolLoc.end(), [] ( const auto& l, const auto& r ) { return l.addr < r.addr; } );
++    std::sort( m_data.symbolLocInline.begin(), m_data.symbolLocInline.end() );
+ #endif
+ 
+     f.Read( sz );
+@@ -1695,17 +1699,17 @@
+     {
+         m_backgroundDone.store( false, std::memory_order_relaxed );
+ #ifndef TRACY_NO_STATISTICS
+-        m_threadBackground = std::thread( [this, eventMask] {
+-            std::vector<std::thread> jobs;
++        InlineThread background( [this, eventMask] {
++            std::vector<InlineThread> jobs;
+ 
+             if( !m_data.ctxSwitch.empty() && m_data.cpuDataCount != 0 )
+             {
+-                jobs.emplace_back( std::thread( [this] { ReconstructContextSwitchUsage(); } ) );
++                jobs.emplace_back( InlineThread( [this] { ReconstructContextSwitchUsage(); } ) );
+             }
+ 
+             for( auto& mem : m_data.memNameMap )
+             {
+-                if( mem.second->reconstruct ) jobs.emplace_back( std::thread( [this, mem = mem.second] { ReconstructMemAllocPlot( *mem ); } ) );
++                if( mem.second->reconstruct ) jobs.emplace_back( InlineThread( [this, mem = mem.second] { ReconstructMemAllocPlot( *mem ); } ) );
+             }
+ 
+             std::function<void(uint8_t*, Vector<short_ptr<ZoneEvent>>&, uint16_t)> ProcessTimeline;
+@@ -1726,7 +1730,7 @@
+                 }
+             };
+ 
+-            jobs.emplace_back( std::thread( [this, ProcessTimeline] {
++            jobs.emplace_back( InlineThread( [this, ProcessTimeline] {
+                 for( auto& t : m_data.threads )
+                 {
+                     if( m_shutdown.load( std::memory_order_relaxed ) ) return;
+@@ -1757,7 +1761,7 @@
+                 }
+             };
+ 
+-            jobs.emplace_back( std::thread( [this, ProcessTimelineGpu] {
++            jobs.emplace_back( InlineThread( [this, ProcessTimelineGpu] {
+                 for( auto& t : m_data.gpuData )
+                 {
+                     for( auto& td : t->threadData )
+@@ -1775,7 +1779,7 @@
+ 
+             if( eventMask & EventType::Samples )
+             {
+-                jobs.emplace_back( std::thread( [this] {
++                jobs.emplace_back( InlineThread( [this] {
+                     unordered_flat_map<uint32_t, uint32_t> counts;
+                     uint32_t total = 0;
+                     for( auto& t : m_data.threads ) total += t->samples.size();
+@@ -1840,7 +1844,7 @@
+                     m_data.callstackSamplesReady = true;
+                 } ) );
+ 
+-                jobs.emplace_back( std::thread( [this] {
++                jobs.emplace_back( InlineThread( [this] {
+                     uint32_t gcnt = 0;
+                     for( auto& t : m_data.threads )
+                     {
+@@ -1869,7 +1873,7 @@
+                     m_data.ghostCnt = gcnt;
+                 } ) );
+ 
+-                jobs.emplace_back( std::thread( [this] {
++                jobs.emplace_back( InlineThread( [this] {
+                     for( auto& t : m_data.threads )
+                     {
+                         uint16_t tid = CompressThread( t->id );
+@@ -3897,78 +3901,7 @@
+     m_data.symbolCode.emplace( ptr, MemoryBlock{ code, uint32_t( sz ) } );
+     m_data.symbolCodeSize += sz;
+ 
+-    if( m_data.cpuArch == CpuArchUnknown ) return;
+-    csh handle;
+-    cs_err rval = CS_ERR_ARCH;
+-    switch( m_data.cpuArch )
+-    {
+-    case CpuArchX86:
+-        rval = cs_open( CS_ARCH_X86, CS_MODE_32, &handle );
+-        break;
+-    case CpuArchX64:
+-        rval = cs_open( CS_ARCH_X86, CS_MODE_64, &handle );
+-        break;
+-    case CpuArchArm32:
+-        rval = cs_open( CS_ARCH_ARM, CS_MODE_ARM, &handle );
+-        break;
+-    case CpuArchArm64:
+-        rval = cs_open( CS_ARCH_AARCH64, CS_MODE_ARM, &handle );
+-        break;
+-    default:
+-        assert( false );
+-        break;
+-    }
+-    if( rval != CS_ERR_OK ) return;
+-    cs_option( handle, CS_OPT_DETAIL, CS_OPT_ON );
+-    cs_insn* insn;
+-    size_t cnt = cs_disasm( handle, (const uint8_t*)code, sz, ptr, 0, &insn );
+-    if( cnt > 0 )
+-    {
+-        for( size_t i=0; i<cnt; i++ )
+-        {
+-            const auto& op = insn[i];
+-            const auto addr = op.address;
+-            QueryCallstackFrame( addr );
+-
+-            uint64_t callAddr = 0;
+-            const auto& detail = *op.detail;
+-            for( auto j=0; j<detail.groups_count; j++ )
+-            {
+-                if( detail.groups[j] == CS_GRP_JUMP || detail.groups[j] == CS_GRP_CALL )
+-                {
+-                    switch( GetCpuArch() )
+-                    {
+-                    case CpuArchX86:
+-                    case CpuArchX64:
+-                        if( detail.x86.op_count == 1 && detail.x86.operands[0].type == X86_OP_IMM )
+-                        {
+-                            callAddr = (uint64_t)detail.x86.operands[0].imm;
+-                        }
+-                        break;
+-                    case CpuArchArm32:
+-                        if( detail.arm.op_count == 1 && detail.arm.operands[0].type == ARM_OP_IMM )
+-                        {
+-                            callAddr = (uint64_t)detail.arm.operands[0].imm;
+-                        }
+-                        break;
+-                    case CpuArchArm64:
+-                        if( detail.aarch64.op_count == 1 && detail.aarch64.operands[0].type == AARCH64_OP_IMM )
+-                        {
+-                            callAddr = (uint64_t)detail.aarch64.operands[0].imm;
+-                        }
+-                        break;
+-                    default:
+-                        assert( false );
+-                        break;
+-                    }
+-                    if( callAddr != 0 ) break;
+-                }
+-            }
+-            if( callAddr != 0 ) QueryCallstackFrame( callAddr );
+-        }
+-        cs_free( insn, cnt );
+-    }
+-    cs_close( &handle );
++
+ }
+ 
+ 
+@@ -4208,7 +4141,7 @@
+ #ifdef __EMSCRIPTEN__
+         pdqsort_branchless( m_data.symbolLoc.begin() + m_data.newSymbolsIndex, m_data.symbolLoc.end(), [] ( const auto& l, const auto& r ) { return l.addr < r.addr; } );
+ #else
+-        ppqsort::sort( ppqsort::execution::par, m_data.symbolLoc.begin() + m_data.newSymbolsIndex, m_data.symbolLoc.end(), [] ( const auto& l, const auto& r ) { return l.addr < r.addr; } );
++        std::sort( m_data.symbolLoc.begin() + m_data.newSymbolsIndex, m_data.symbolLoc.end(), [] ( const auto& l, const auto& r ) { return l.addr < r.addr; } );
+ #endif
+         const auto ms = std::lower_bound( m_data.symbolLoc.begin(), m_data.symbolLoc.begin() + m_data.newSymbolsIndex, m_data.symbolLoc[m_data.newSymbolsIndex], [] ( const auto& l, const auto& r ) { return l.addr < r.addr; } );
+         std::inplace_merge( ms, m_data.symbolLoc.begin() + m_data.newSymbolsIndex, m_data.symbolLoc.end(), [] ( const auto& l, const auto& r ) { return l.addr < r.addr; } );
+@@ -4223,7 +4156,7 @@
+ #ifdef __EMSCRIPTEN__
+         pdqsort_branchless( m_data.symbolLocInline.begin() + m_data.newInlineSymbolsIndex, m_data.symbolLocInline.end() );
+ #else
+-        ppqsort::sort( ppqsort::execution::par, m_data.symbolLocInline.begin() + m_data.newInlineSymbolsIndex, m_data.symbolLocInline.end() );
++        std::sort( m_data.symbolLocInline.begin() + m_data.newInlineSymbolsIndex, m_data.symbolLocInline.end() );
+ #endif
+         const auto ms = std::lower_bound( m_data.symbolLocInline.begin(), m_data.symbolLocInline.begin() + m_data.newInlineSymbolsIndex, m_data.symbolLocInline[m_data.newInlineSymbolsIndex] );
+         std::inplace_merge( ms, m_data.symbolLocInline.begin() + m_data.newInlineSymbolsIndex, m_data.symbolLocInline.end() );
+@@ -7207,7 +7140,7 @@
+ #ifdef __EMSCRIPTEN__
+     pdqsort_branchless( mem.frees.begin(), mem.frees.end(), [&mem] ( const auto& lhs, const auto& rhs ) { return mem.data[lhs].TimeFree() < mem.data[rhs].TimeFree(); } );
+ #else
+-    ppqsort::sort( ppqsort::execution::par, mem.frees.begin(), mem.frees.end(), [&mem] ( const auto& lhs, const auto& rhs ) { return mem.data[lhs].TimeFree() < mem.data[rhs].TimeFree(); } );
++    std::sort( mem.frees.begin(), mem.frees.end(), [&mem] ( const auto& lhs, const auto& rhs ) { return mem.data[lhs].TimeFree() < mem.data[rhs].TimeFree(); } );
+ #endif
+ 
+     const auto psz = mem.data.size() + mem.frees.size() + 1;
+@@ -8152,7 +8085,7 @@
+ #ifdef __EMSCRIPTEN__
+             pdqsort_branchless( thread->samples.begin(), thread->samples.end(), [] ( const auto& lhs, const auto& rhs ) { return lhs.time.Val() < rhs.time.Val(); } );
+ #else
+-            ppqsort::sort( ppqsort::execution::par, thread->samples.begin(), thread->samples.end(), [] ( const auto& lhs, const auto& rhs ) { return lhs.time.Val() < rhs.time.Val(); } );
++            std::sort( thread->samples.begin(), thread->samples.end(), [] ( const auto& lhs, const auto& rhs ) { return lhs.time.Val() < rhs.time.Val(); } );
+ #endif
+         }
+         sz = thread->samples.size();
+@@ -8349,7 +8282,7 @@
+             params.d = 6;
+             params.k = 50;
+             params.f = 30;
+-            params.nbThreads = std::thread::hardware_concurrency();
++            params.nbThreads = 1;
+             params.zParams.compressionLevel = 3;
+ 
+             auto dict = new char[DictSize];
+--- a/server/TracyFileRead.hpp
++++ b/server/TracyFileRead.hpp
+@@ -131,7 +131,7 @@
+             v->exit = true;
+             v->signal.notify_one();
+         }
+-        for( auto& v : m_streams ) v->thread.join();
++
+         m_streams.clear();
+         if( m_data ) munmap( m_data, m_dataSize );
+     }
+@@ -485,7 +485,7 @@
+             uptr->src = m_data + m_dataOffset;
+             uptr->size = sz;
+             uptr->inputReady = true;
+-            uptr->thread = std::thread( [ptr = uptr.get()] { Worker( ptr ); } );
++
+             m_streams.emplace_back( std::move( uptr ) );
+             m_dataOffset += sz;
+         }
+@@ -563,7 +563,7 @@
+     void GetNextDataBlock()
+     {
+         auto& hnd = *m_streams[m_streamId];
+-        while( hnd.outputReady.load( std::memory_order_acquire ) == false ) { YieldThread(); }
++        hnd.stream.Decompress( hnd.src, hnd.size );
+         hnd.outputReady.store( false, std::memory_order_relaxed );
+         m_buf = hnd.stream.GetBuffer();
+         m_offset = 0;

@@ -3,6 +3,7 @@ shared_module(
   'x11.c',
   dependencies: [
     dependency('x11'),
+    dependency('xcursor'),
     dependency('x11-xcb'),
     dependency('xcb-present'),
     dependency('egl'),

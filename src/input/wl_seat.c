@@ -438,7 +438,10 @@ static bool _surface_role_cursor_apply(struct vt_surface_t        *surf,
              cu->state.offset_x, cu->state.offset_y);
   }
 
-  if (cu->state.offset_set || cu->state.buffer_attached)
+  if (cu->state.offset_set || cu->state.buffer_attached ||
+      cu->state.buffer_scale_changed || cu->state.buffer_transform_changed ||
+      pixman_region32_not_empty(&surf->applied.damage) ||
+      !wl_list_empty(&surf->frame_callbacks))
     _seat_refresh_cursor(seat);
 
   return true;

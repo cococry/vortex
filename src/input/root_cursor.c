@@ -20,8 +20,8 @@
  * SOFTWARE.
  */
 
-#include "src/core/profiling.h"
 #include "root_cursor.h"
+#include "src/core/profiling.h"
 #include "wl_seat.h"
 
 #include "src/core/buffer.h"

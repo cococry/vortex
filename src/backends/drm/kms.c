@@ -1,6 +1,6 @@
-#include "src/core/profiling.h"
 #include "kms.h"
 #include "cursor.h"
+#include "src/core/profiling.h"
 
 void drm_kms_commit_snapshot_cursor(struct vt_drm_kms_commit_t *commit) {
   VT_PROFILE_SCOPE();
