@@ -452,6 +452,50 @@ def audit_release():
             raise RuntimeError(f'{kind} release build links Tracy')
 
 
+def run_logged(command, log, label):
+    """Show subprocess progress immediately while retaining the result log."""
+    print(f'[{label}]', flush=True)
+    started = time.monotonic()
+    env = os.environ.copy()
+    env['PYTHONUNBUFFERED'] = '1'
+    with subprocess.Popen(command, cwd=ROOT, env=env, stdout=subprocess.PIPE,
+                          stderr=subprocess.STDOUT, text=True, bufsize=1) as process:
+        for line in process.stdout:
+            sys.stdout.write(line)
+            sys.stdout.flush()
+            log.write(line)
+            log.flush()
+        status = process.wait()
+    if status:
+        raise subprocess.CalledProcessError(status, command)
+    print(f'[{label}: {time.monotonic() - started:.2f}s]', flush=True)
+
+
+def check_modes_cached(log):
+    # These are compiler regression tests, not measurement work. Repeat them
+    # after relevant code or any measured executable changes, never every run.
+    inputs = [ROOT / path for path in [
+        'profiling/check_modes.py', 'src/core/profiling.h',
+        'profiling/dwl/include/util/profiling.h', 'profiling/dwl/dwl/profiling.h',
+        'subprojects/runara/src/profiling.h', 'subprojects/runara/src/vulkan/backend.c',
+    ]]
+    inputs += [binary(kind, mode) for kind in ['vortex', 'dwl'] for mode in ['profiled', 'release']]
+    inputs += sorted((ROOT/'subprojects/runara/include').rglob('*.h'))
+    inputs += sorted((ROOT/'subprojects/tracy/public').rglob('*.h'))
+    digest = hashlib.sha256()
+    for path in inputs:
+        digest.update(str(path).encode())
+        digest.update(path.read_bytes())
+    fingerprint = digest.hexdigest()
+    stamp = ROOT / 'profiling/.cache/mode-checks.sha256'
+    if stamp.is_file() and stamp.read_text() == fingerprint:
+        print('[Profiling compiler checks: unchanged, using successful cached result]', flush=True)
+        return
+    run_logged([sys.executable, str(ROOT/'profiling/check_modes.py')], log, 'Profiling compiler checks')
+    stamp.parent.mkdir(parents=True, exist_ok=True)
+    stamp.write_text(fingerprint)
+
+
 def main(argv=None):
     args = arguments(argv)
     if not os.environ.get('XDG_RUNTIME_DIR'):
@@ -471,14 +515,13 @@ def main(argv=None):
             if not args.no_build:
                 print('Building coarse-profiled/release compositors and minimal tools...', flush=True)
                 for mode in ['comparison', 'off']:
-                    subprocess.run([sys.executable, str(ROOT / 'profiling/build.py'), '--mode', mode, '--jobs', str(args.jobs)],
-                                   cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)
-                subprocess.run([sys.executable, str(ROOT / 'profiling/tools/build.py'), '--jobs', str(args.jobs)],
-                               cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, check=True)
-            subprocess.run([sys.executable, str(ROOT / 'profiling/check_builds.py')],
-                           stdout=log, stderr=subprocess.STDOUT, check=True)
-            subprocess.run([sys.executable, str(ROOT / 'profiling/check_modes.py')],
-                           stdout=log, stderr=subprocess.STDOUT, check=True)
+                    run_logged([sys.executable, str(ROOT / 'profiling/build.py'), '--mode', mode, '--jobs', str(args.jobs)],
+                               log, f'Compositor builds: {mode}')
+                run_logged([sys.executable, str(ROOT / 'profiling/tools/build.py'), '--jobs', str(args.jobs)],
+                           log, 'Capture/export tools')
+            run_logged([sys.executable, str(ROOT / 'profiling/check_builds.py')], log, 'Comparison build audit')
+            check_modes_cached(log)
+            print('[Checking release libraries and tool availability]', flush=True)
             audit_release()
             for tool in ['tracy-capture', 'tracy-csvexport', 'output-info']:
                 if not (TOOLS / tool).is_file():
