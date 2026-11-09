@@ -5,7 +5,7 @@ import subprocess
 import tempfile
 import unittest
 
-SPEC = importlib.util.spec_from_file_location('wlroots_prepare', Path(__file__).parents[2] / 'profiling/apply_wlroots_patch.py')
+SPEC = importlib.util.spec_from_file_location('wlroots_prepare', Path(__file__).parents[2] / 'profiling/prepare_wlroots.py')
 prepare = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(prepare)
 
@@ -27,29 +27,19 @@ class PrepareTests(unittest.TestCase):
         git(self.source, 'add', 'test.txt')
         git(self.source, 'commit', '--quiet', '-m', 'base')
         self.revision = git(self.source, 'rev-parse', 'HEAD')
-        (self.source / 'test.txt').write_text('after\n')
-        self.patch = self.root / 'changes.patch'
-        self.patch.write_text(git(self.source, 'diff', 'HEAD') + '\n')
-        git(self.source, 'restore', 'test.txt')
         self.checkout = self.root / 'checkout'
 
     def run_prepare(self, download=True):
-        prepare.prepare_checkout(self.checkout, self.patch, repository=str(self.source),
+        prepare.prepare_checkout(self.checkout, repository=str(self.source),
                                  revision=self.revision, download=download)
 
-    def test_clone_exact_commit_apply_once_and_preserve_edits(self):
+    def test_clone_exact_commit_and_preserve_edits(self):
         self.run_prepare()
         self.assertEqual(git(self.checkout, 'rev-parse', 'HEAD'), self.revision)
-        self.assertEqual((self.checkout / 'test.txt').read_text(), 'after\n')
+        self.assertEqual((self.checkout / 'test.txt').read_text(), 'before\n')
         (self.checkout / 'test.txt').write_text('after\nlocal experiment\n')
         self.run_prepare(download=False)
         self.assertEqual((self.checkout / 'test.txt').read_text(), 'after\nlocal experiment\n')
-
-    def test_hard_reset_reapplies_even_with_existing_marker(self):
-        self.run_prepare()
-        git(self.checkout, 'reset', '--hard', self.revision)
-        self.run_prepare(download=False)
-        self.assertEqual((self.checkout / 'test.txt').read_text(), 'after\n')
 
     def test_download_disabled_does_not_create_checkout(self):
         with self.assertRaisesRegex(RuntimeError, 'not downloaded'):
@@ -58,6 +48,7 @@ class PrepareTests(unittest.TestCase):
 
     def test_wrong_commit_is_rejected_without_reset(self):
         self.run_prepare()
+        (self.checkout / 'test.txt').write_text('local commit\n')
         git(self.checkout, 'add', 'test.txt')
         git(self.checkout, 'commit', '--quiet', '-m', 'local commit')
         changed = git(self.checkout, 'rev-parse', 'HEAD')

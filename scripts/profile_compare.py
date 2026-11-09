@@ -52,8 +52,8 @@ profiled runs. CPU includes all compositor threads and excludes client processes
 Frame-stage rates describe instrumented work, not display presentation FPS.
 OpenGL selects desktop GL in Vortex and GLES2 in wlroots.
 Builds use one job and the capture/export tools have no GUI.
-Profiling configuration fetches the pinned wlroots/dwl checkout over SSH and
-applies its saved comparison patch. Release-only Meson setup does not fetch it.
+Profiling configuration fetches the pinned, already-profiled wlroots/dwl checkout
+over SSH. Release-only Meson setup does not fetch it.
 ''')
     parser.add_argument('--renderer', choices=['opengl', 'vulkan'], default='opengl')
     parser.add_argument('--seconds', type=float, default=30, help='Workload measurement window per run (default: 30)')

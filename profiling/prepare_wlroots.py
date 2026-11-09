@@ -1,9 +1,7 @@
 #!/usr/bin/env python3
-"""Fetch the pinned profiling checkout and apply its comparison changes once."""
+"""Fetch the pinned, already-profiled wlroots/dwl reference checkout."""
 import argparse
 import fcntl
-import hashlib
-import json
 import os
 from pathlib import Path
 import subprocess
@@ -11,9 +9,8 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = 'git@github.com:cococry/dwl-profiled'
-REVISION = '0818d073a7c55cb11c1c2d70d3ecd18b8f6bf4cb'
+REVISION = 'ffc51f8c0e019f9974476ad356b3b667a1af8fc1'
 CHECKOUT = ROOT / 'profiling/dwl'
-PATCH = ROOT / 'profiling/tools/wlroots-comparison.patch'
 
 
 def git(checkout, *arguments, check=True):
@@ -25,9 +22,9 @@ def git(checkout, *arguments, check=True):
                           text=True, capture_output=True, check=check)
 
 
-def prepare_checkout(checkout=CHECKOUT, patch=PATCH, *, download=True,
+def prepare_checkout(checkout=CHECKOUT, *, download=True,
                      repository=REPOSITORY, revision=REVISION):
-    checkout, patch = Path(checkout), Path(patch).resolve()
+    checkout = Path(checkout)
     if not checkout.exists():
         if not download:
             raise RuntimeError('wlroots is not downloaded; configure once without --wrap-mode=nodownload')
@@ -47,35 +44,18 @@ def prepare_checkout(checkout=CHECKOUT, patch=PATCH, *, download=True,
     head = git(checkout, 'rev-parse', 'HEAD').stdout.strip()
     if head != revision:
         raise RuntimeError(f'wlroots HEAD is {head}, expected {revision}; existing checkout was left unchanged')
-    state = dict(revision=revision, patch_sha256=hashlib.sha256(patch.read_bytes()).hexdigest())
-    gitdir = Path(git(checkout, 'rev-parse', '--absolute-git-dir').stdout.strip())
-    marker = gitdir / 'vortex-profiling-patch.json'
-    if marker.is_file() and json.loads(marker.read_text()) == state:
-        # Preserve subsequent local experiments rather than reapplying/resetting.
-        # A hard reset can leave the marker behind, so detect an unpatched tree.
-        if git(checkout, 'apply', '--check', str(patch), check=False).returncode != 0:
-            print('Pinned wlroots/dwl is already prepared')
-            return
-    reverse = git(checkout, 'apply', '--reverse', '--check', str(patch), check=False)
-    if reverse.returncode != 0:
-        forward = git(checkout, 'apply', '--check', str(patch), check=False)
-        if forward.returncode:
-            raise RuntimeError('wlroots patch conflicts with this checkout; local changes were preserved:\n' + forward.stderr)
-        git(checkout, 'apply', str(patch))
-    marker.write_text(json.dumps(state, indent=2) + '\n')
-    print('Pinned wlroots/dwl comparison patch is applied')
+    print(f'Pinned wlroots/dwl is ready at {revision}')
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--no-download', action='store_true')
-    parser.add_argument('--patch', type=Path, default=PATCH)
     args = parser.parse_args()
     cache = ROOT / 'profiling/.cache'
     cache.mkdir(parents=True, exist_ok=True)
     with (cache / 'wlroots-prepare.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        prepare_checkout(patch=args.patch, download=not args.no_download)
+        prepare_checkout(download=not args.no_download)
 
 
 if __name__ == '__main__':

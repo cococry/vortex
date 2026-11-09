@@ -116,8 +116,7 @@ if get_option('profiling') or get_option('profiling_comparison')
   # Profiling configuration prepares its pinned sources; the comparison script
   # builds them serially when requested. Release-only setup does not fetch it.
   wlroots_prepare_args = [
-    files('profiling/apply_wlroots_patch.py'),
-    '--patch', files('profiling/tools/wlroots-comparison.patch'),
+    files('profiling/prepare_wlroots.py'),
   ]
   if get_option('wrap_mode') == 'nodownload'
     wlroots_prepare_args += ['--no-download']
