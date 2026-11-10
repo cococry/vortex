@@ -33,6 +33,7 @@ struct vk_texture_t {
   struct vt_renderer_t *renderer;
   struct rn_image_t     rn;
   bool                  registered, dmabuf, needs_upload;
+  bool                  shm_opaque;
 };
 
 struct vk_surface_texture_t {
@@ -79,8 +80,6 @@ struct vt_vk_backend_state_t {
   struct vk_pending_frame_t     pending[RN_VK_FRAMES_IN_FLIGHT];
   struct wl_event_source       *completion_timer;
   uint64_t                      submission;
-  uint8_t                      *pixels;
-  size_t                        pixel_capacity;
 };
 
 static bool _vk_runara_check(struct vt_renderer_t *r, rn_result_t result,
@@ -221,71 +220,68 @@ static bool _vk_import_shm(struct vt_renderer_t       *r,
        shm->format != WL_SHM_FORMAT_XRGB8888))
     return false;
 
+  bool opaque = shm->format == WL_SHM_FORMAT_XRGB8888;
   bool recreate = !texture->registered || texture->dmabuf ||
                   texture->rn.width != (uint32_t)shm->width ||
-                  texture->rn.height != (uint32_t)shm->height;
-  pixman_box32_t box = {0, 0, shm->width, shm->height};
-
-  if (!recreate && damage) {
-    if (!pixman_region32_not_empty(damage))
-      return true;
-
-    box = *pixman_region32_extents(damage);
-    box.x1 = VT_MAX(0, box.x1);
-    box.y1 = VT_MAX(0, box.y1);
-    box.x2 = VT_MIN(shm->width, box.x2);
-    box.y2 = VT_MIN(shm->height, box.y2);
-  }
-
-  if (box.x2 <= box.x1 || box.y2 <= box.y1)
-    return true;
-
-  size_t stride = (size_t)(box.x2 - box.x1) * 4;
-  size_t size = stride * (box.y2 - box.y1);
-
-  if (size > vk->pixel_capacity) {
-    uint8_t *pixels = realloc(vk->pixels, size);
-
-    if (!pixels)
-      return false;
-
-    vk->pixels = pixels;
-    vk->pixel_capacity = size;
-  }
-
-  /* convert native argb/xrgb rows into runara's packed rgba8 upload format */
-  for (int y = box.y1; y < box.y2; ++y) {
-    const uint8_t *src = (const uint8_t *)shm->data + (size_t)y * shm->stride +
-                         (size_t)box.x1 * 4;
-    uint8_t *dst = vk->pixels + (size_t)(y - box.y1) * stride;
-
-    for (int x = box.x1; x < box.x2; ++x) {
-      uint32_t pixel;
-      memcpy(&pixel, src, sizeof(pixel));
-      dst[0] = pixel >> 16;
-      dst[1] = pixel >> 8;
-      dst[2] = pixel;
-      dst[3] = shm->format == WL_SHM_FORMAT_XRGB8888 ? 255 : pixel >> 24;
-      src += 4;
-      dst += 4;
-    }
-  }
-
+                  texture->rn.height != (uint32_t)shm->height ||
+                  texture->shm_opaque != opaque;
+  const struct rn_vk_shm_desc_t desc = {
+      .width = shm->width,
+      .height = shm->height,
+      .stride = shm->stride,
+      .data = shm->data,
+      .size = shm->size,
+      .opaque = opaque,
+  };
   rn_result_t result;
 
   if (recreate) {
     _vk_texture_finish(texture);
-    result = rn_image_dedicated(vk->runara, shm->width, shm->height, vk->pixels,
-                                size, &texture->rn);
+    result = rn_vk_image_upload_shm(vk->runara, &desc, NULL, 0, &texture->rn);
+
+    /* we need to keep ownership if the texture got created, even when the upload
+     * failed (to get correct lifetime for the image)  */
+    texture->registered = texture->rn.width != 0;
+    texture->shm_opaque = opaque;
+  } else if (damage) {
+    int count;
+    const pixman_box32_t *boxes = pixman_region32_rectangles(damage, &count);
+    struct rn_box_u32_t regions[64];
+    size_t used = 0;
+    result = RN_OK;
+
+    for (int i = 0; i < count; i++) {
+      int x1 = VT_MAX(0, boxes[i].x1);
+      int y1 = VT_MAX(0, boxes[i].y1);
+      int x2 = VT_MIN(shm->width, boxes[i].x2);
+      int y2 = VT_MIN(shm->height, boxes[i].y2);
+
+      if (x2 <= x1 || y2 <= y1)
+        continue;
+
+      regions[used++] = (struct rn_box_u32_t){x1, y1, x2 - x1, y2 - y1};
+
+      /* only upload after all regions were populated */
+      if (used == (sizeof(regions) / sizeof(regions[0])) || i == count - 1) {
+        result = rn_vk_image_upload_shm(vk->runara, &desc, regions, used,
+                                        &texture->rn);
+        used = 0;
+
+        if (result != RN_OK)
+          break;
+      }
+    }
+
+    /* if we did not upload yet but there are still populated regions, we need
+     * to upload now */
+    if (result == RN_OK && used)
+      result = rn_vk_image_upload_shm(vk->runara, &desc, regions, used,
+                                      &texture->rn);
   } else {
-    const struct rn_box_u32_t region = {box.x1, box.y1, box.x2 - box.x1,
-                                        box.y2 - box.y1};
-    result =
-        rn_image_update(vk->runara, &texture->rn, &region, vk->pixels, size);
+    result = rn_vk_image_upload_shm(vk->runara, &desc, NULL, 0, &texture->rn);
   }
 
-  if (!_vk_runara_check(r, result,
-                        recreate ? "rn_image_dedicated" : "rn_image_update"))
+  if (!_vk_runara_check(r, result, "rn_vk_image_upload_shm"))
     return false;
 
   texture->registered = true;
@@ -1285,6 +1281,7 @@ void renderer_begin_frame_vk(struct vt_renderer_t *r,
   vk->output = NULL;
 
   if (vk->external) {
+    VT_PROFILE_SCOPE_NAMED("Acquire external render buffer");
     /* acquire the new render buffer from DRM in external mode */
     output->render_buffer = output->impl->acquire_render_buffer(output);
 
@@ -1565,7 +1562,6 @@ bool renderer_destroy_vk(struct vt_renderer_t *r) {
 
   rn_state_fini(vk->runara);
   vt_drm_format_array_free(&vk->formats);
-  free(vk->pixels);
   free(vk->uses);
   free(vk);
   r->user_data = NULL;

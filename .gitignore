@@ -9,3 +9,4 @@ subprojects/tracy/
 *.tracy
 **/**.log
 workload.sh
+drm-quickstart.sh
