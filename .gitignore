@@ -8,3 +8,4 @@ subprojects/runara/
 subprojects/tracy/
 *.tracy
 **/**.log
+workload.sh

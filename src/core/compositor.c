@@ -132,12 +132,13 @@ void _vt_comp_commit_handler(void *data) {
   }
 
   if (output->needs_repaint) {
-    VT_PROFILE_COMPARE("compare.frame");
     if (c->backend->impl.prepare_output_frame &&
         !c->backend->impl.prepare_output_frame(c->backend, output)) {
       return;
     }
 
+    /* Count only rendered frames, excluding attempts deferred by backend pacing. */
+    VT_PROFILE_COMPARE("compare.frame");
     if (!_vt_comp_render_output(c, output)) {
       return;
     }
