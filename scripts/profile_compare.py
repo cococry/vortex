@@ -274,6 +274,7 @@ def acquire(args, kind, mode, repeat, output, reference):
     previous = sockets(runtime)
     processes, files = [], []
     host = None
+    last_output_probe = 'not queried yet'
     try:
         if backend == 'x11':
             host = HostDisplay()
@@ -288,10 +289,16 @@ def acquire(args, kind, mode, repeat, output, reference):
         xid = wait_until(lambda: x11_geometry(kind, args.width, args.height), compositor,
                          'X11 window') if backend == 'x11' else None
         def query_outputs():
+            nonlocal last_output_probe
             try:
-                data = json.loads(subprocess.check_output([str(TOOLS / 'output-info')], env=client_env,
-                                                           text=True, stderr=subprocess.DEVNULL, timeout=3))
-            except (subprocess.SubprocessError, ValueError):
+                probe = subprocess.run([str(TOOLS / 'output-info')], env=client_env,
+                                       text=True, capture_output=True, timeout=3)
+                last_output_probe = f'exit={probe.returncode}, stdout={probe.stdout.strip()!r}, stderr={probe.stderr.strip()!r}'
+                if probe.returncode:
+                    return None
+                data = json.loads(probe.stdout)
+            except (subprocess.SubprocessError, ValueError) as error:
+                last_output_probe = str(error)
                 return None
             if not data:
                 return None
@@ -377,6 +384,14 @@ def acquire(args, kind, mode, repeat, output, reference):
         (directory / 'run.json').write_text(json.dumps(metadata, indent=2) + '\n')
         print(f"  {kind:6} {mode:8}: CPU {metadata['cpu_percent']:.2f}%", flush=True)
         return directory, metadata
+    except (RuntimeError, subprocess.SubprocessError) as error:
+        path = directory / 'compositor.log'
+        tail = '\n'.join(path.read_text(errors='replace').splitlines()[-40:]) if path.exists() else '(no compositor log)'
+        details = (f'{kind} {mode}, renderer={args.renderer}, backend={backend}: {error}\n'
+                   f'Last output probe: {last_output_probe}\n'
+                   f'Compositor log: {path}\n{tail}')
+        (directory / 'startup-or-run-error.txt').write_text(details + '\n')
+        raise RuntimeError(details) from error
     finally:
         cleanup(processes)
         for stream in files:

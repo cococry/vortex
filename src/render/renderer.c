@@ -110,9 +110,9 @@ bool vt_renderer_try_fallback(struct vt_renderer_t *renderer,
                               void                 *backend_handle) {
   assert(renderer);
 
+#if VT_HAS_VULKAN && VT_HAS_OPENGL
   struct vt_compositor_t *c = renderer->comp;
   struct vt_backend_t    *backend = renderer->comp->backend;
-#if VT_HAS_VULKAN && VT_HAS_OPENGL
   VT_INFO(c->log,
           "Primary renderer failed to initialize, trying secondary options.");
   // Try all other built renderers
@@ -131,6 +131,8 @@ bool vt_renderer_try_fallback(struct vt_renderer_t *renderer,
     return true;
   }
 #else
+  (void)renderer;
+  (void)backend_handle;
   return false;
 #endif
   return false;
