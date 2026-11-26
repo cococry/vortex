@@ -23,6 +23,7 @@
 #include "output.h"
 #include "core/util.h"
 #include "src/core/profiling.h"
+#include "src/protocols/xdg_shell.h"
 
 #include "core/compositor.h"
 #include "core/scene.h"
@@ -103,6 +104,7 @@ void vt_output_fini(struct vt_output_t *output) {
 
   wl_list_remove(&output->link_global);
   wl_list_remove(&output->link_local);
+  vt_proto_xdg_shell_output_changed(output->backend->comp, output, true);
 }
 
 bool _init_output_bg(struct vt_output_t *output) {

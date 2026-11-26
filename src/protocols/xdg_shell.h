@@ -37,6 +37,21 @@ struct vt_xdg_window_geom_t {
   uint32_t w, h;
 };
 
+struct vt_xdg_positioner_t;
+
+struct vt_xdg_configure_state_t {
+  struct vt_xdg_window_geom_t geom;
+  struct vt_xdg_window_geom_t output_geom;
+  bool                        positioned, fullscreen, maximized;
+};
+
+struct vt_xdg_commit_t {
+  uint64_t                        generation;
+  struct vt_xdg_configure_state_t configure;
+  struct vt_xdg_window_geom_t     geom;
+  bool                            have_configure, have_geom, unmap;
+};
+
 struct vt_xdg_toplevel_t {
   struct wl_resource *xdg_toplevel_res;
   char               *app_id, *title;
@@ -50,7 +65,15 @@ struct vt_xdg_toplevel_t {
   bool maximized;
   bool resizing;
 
-  struct vt_output_t *fullscreen_output;
+  struct vt_output_t         *fullscreen_output;
+  struct vt_output_t         *maximized_output;
+  struct vt_xdg_window_geom_t restore_geom;
+  bool                        have_restore_geom;
+  bool                        applied_fullscreen, applied_maximized;
+  struct vt_xdg_window_geom_t applied_output_geom;
+  int32_t                     min_width, min_height, max_width, max_height;
+  int32_t                     pending_min_width, pending_min_height;
+  int32_t                     pending_max_width, pending_max_height;
 
   struct vt_xdg_surface_t *xdg_surf;
 };
@@ -63,25 +86,32 @@ struct vt_xdg_popup_t {
 
   struct vt_xdg_window_geom_t configured_geom;
 
-  struct vt_xdg_window_geom_t acked_geom;
-  bool                        have_acked_geom;
-
   struct vt_xdg_window_geom_t pending_ack_geom;
-  uint32_t                    pending_ack_serial;
-  bool                        have_pending_ack_geom;
 
   bool                mapped, reactive;
   bool                has_grab;
   struct wl_resource *grab_seat;
   uint32_t            grab_serial;
 
+  struct vt_xdg_positioner_t *positioner;
+  struct wl_list              parent_link;
+
   struct vt_xdg_popup_t *child_popup;
   struct vt_xdg_popup_t *parent_popup;
 };
 
 struct vt_xdg_surface_t {
-  struct wl_resource *xdg_surf_res;
-  uint32_t            last_configure_serial;
+  uint64_t                        generation;
+  bool                            unmap_applied;
+  struct wl_resource             *xdg_surf_res;
+  uint32_t                        last_configure_serial;
+  uint32_t                        last_acked_serial;
+  struct wl_resource             *wm_base_res;
+  struct wl_list                  link, configures, popups;
+  struct wl_listener              surface_destroy;
+  bool                            initial_configure_sent, configured;
+  bool                            have_acked_configure;
+  struct vt_xdg_configure_state_t acked_configure;
 
   struct vt_surface_t *surf;
 
@@ -94,8 +124,12 @@ struct vt_xdg_surface_t {
   struct vt_scene_node_t *popup_layer;
   struct vt_scene_node_t *subsurface_layer;
 
+  bool                        have_window_geom;
   bool                        have_pending_geom;
   struct vt_xdg_window_geom_t pending_geom;
+
+  uint32_t                ping_serial;
+  struct wl_event_source *ping_timer;
 };
 
 bool vt_proto_xdg_shell_init(struct vt_compositor_t *c, uint32_t version);
@@ -111,3 +145,9 @@ bool vt_proto_xdg_toplevel_set_state_resizing(struct vt_xdg_toplevel_t *top,
 
 bool vt_proto_xdg_toplevel_set_state_activated(struct vt_xdg_toplevel_t *top,
                                                bool activated);
+
+void vt_proto_xdg_shell_output_changed(struct vt_compositor_t *comp,
+                                       struct vt_output_t     *output,
+                                       bool                    removed);
+
+void vt_proto_xdg_surface_position_changed(struct vt_surface_t *surf);

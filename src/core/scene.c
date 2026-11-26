@@ -26,6 +26,7 @@
 #include "src/core/compositor.h"
 #include "src/core/core_types.h"
 #include "src/core/profiling.h"
+#include "src/protocols/xdg_shell.h"
 #include "src/core/surface.h"
 #include "src/core/util.h"
 #include "src/protocols/wl_subcompositor.h"
@@ -223,6 +224,30 @@ static void _scene_node_accumulate_layers(struct vt_scene_t      *scene,
 
   int32_t x = parent_x + node->x;
   int32_t y = parent_y + node->y;
+
+  if (node->type == VT_SCENE_NODE_SURFACE && node->surf && node->surf->mapped &&
+      vt_surface_has_role(node->surf, VT_SURFACE_ROLE_XDG_TOPLEVEL)) {
+    struct vt_xdg_surface_t *xdg = node->surf->role.data;
+    if (xdg && xdg->toplevel && xdg->toplevel->applied_fullscreen) {
+      struct vt_xdg_window_geom_t *area = &xdg->toplevel->applied_output_geom;
+      if (area->x == output->x && area->y == output->y &&
+          output->background.use_fallback) {
+        /* we hide unrelated windows and wallpaper below a fullscreen tree */
+        scene->n_layers = 0;
+        struct vt_output_layer_state_t *fill = _scene_push_layer(scene);
+        if (fill) {
+          fill->type = VT_OUTPUT_LAYER_BUFFER;
+          fill->use = output->background.use_fallback;
+          fill->src = (struct vt_box_t){.width = fill->use->buf->width,
+                                       .height = fill->use->buf->height};
+          fill->dst = (struct vt_box_t){.width = output->width, .height = output->height};
+        }
+
+      }
+
+    }
+
+  }
 
   struct vt_subsurface_t *sub;
   if (node->type == VT_SCENE_NODE_SURFACE && node->surf) {
@@ -835,6 +860,8 @@ void vt_scene_node_set_position(struct vt_scene_node_t *node, int32_t x,
   vt_scene_node_mark_geometry_dirty(node);
   vt_scene_node_damage_whole(node->comp, node);
   _scene_node_update_surface_feedback(node);
+  if (node->type == VT_SCENE_NODE_SURFACE)
+    vt_proto_xdg_surface_position_changed(node->surf);
 }
 
 void vt_scene_node_mark_geometry_dirty(struct vt_scene_node_t *node) {

@@ -843,6 +843,8 @@ static void _handle_output_changed_backend(struct vt_backend_t *backend,
   if (!backend || !backend->comp || !backend->comp->scene)
     return;
 
+  vt_proto_xdg_shell_output_changed(backend->comp, output, false);
+
   if (!vt_output_resize_background(output))
     VT_ERROR(backend->comp->log, "Failed to resize output background buffer.");
   if (output->background.owner)

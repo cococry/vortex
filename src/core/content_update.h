@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "../protocols/xdg_shell.h"
 #include "surface.h"
 
 enum vt_content_update_type_t {
@@ -30,7 +31,8 @@ enum vt_content_update_type_t {
 };
 
 struct vt_content_update_t {
-  struct vt_surface_t *surf;
+  struct vt_surface_t   *surf;
+  struct vt_xdg_commit_t xdg;
 
   struct vt_subsurface_stack_entry_t *subsurface_stack;
   size_t                              subsurface_stack_count;
